@@ -4,11 +4,13 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+#include "wolfssl.h"
 
 struct tls_server_config
 {
 	char const* ip_address;
 	uint16_t listening_port;
+	struct wolfssl_endpoint_configuration tls_config;
 };
 
 

@@ -8,9 +8,6 @@
 #include <zephyr/posix/fcntl.h>
 #include <zephyr/net/net_l2.h>
 
-#include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(networking);
-
 #else
 
 #include <stdio.h>
@@ -23,13 +20,15 @@ LOG_MODULE_REGISTER(networking);
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include <poll.h>
-
-#include "logging.h"
 
 #endif
 
+
+
 #include "networking.h"
+#include "logging.h"
+
+LOG_MODULE_REGISTER(networking);
 
 
 static struct network_interfaces ifaces =

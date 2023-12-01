@@ -2,6 +2,7 @@
 #define WOLFSSL_H
 
 #include <stdint.h>
+#include <stdbool.h>
 
 #include "wolfssl/wolfcrypt/settings.h"
 #include "wolfssl/ssl.h"  
@@ -28,21 +29,21 @@ struct wolfssl_endpoint_configuration
 {
         struct 
         {
-                uint8_t const* buffer;
+                uint8_t* buffer;
                 size_t size;
         } 
         device_certificate_chain;
 
         struct 
         {
-                uint8_t const* buffer;
+                uint8_t* buffer;
                 size_t size;
         } 
         private_key;
 
         struct 
         {
-                uint8_t const* buffer;
+                uint8_t* buffer;
                 size_t size;
         } 
         root_certificate;
@@ -65,7 +66,7 @@ int wolfssl_init(struct wolfssl_library_configuration* config);
  * Return value is a pointer to the newly created context or NULl in case of an error
  * (error message is logged to the console).
  */
-WOLFSSL_CTX* wolfssl_setup_server_context(struct wolfssl_endpoint_configuration* config);
+WOLFSSL_CTX* wolfssl_setup_server_context(struct wolfssl_endpoint_configuration const* config);
 
 
 /* Setup a TLS client context.
@@ -75,7 +76,7 @@ WOLFSSL_CTX* wolfssl_setup_server_context(struct wolfssl_endpoint_configuration*
  * Return value is a pointer to the newly created context or NULl in case of an error
  * (error message is logged to the console).
  */
-WOLFSSL_CTX* wolfssl_setup_client_context(struct wolfssl_endpoint_configuration* config);
+WOLFSSL_CTX* wolfssl_setup_client_context(struct wolfssl_endpoint_configuration const* config);
 
 
 /* Perform the TLS handshake for a newly created session.

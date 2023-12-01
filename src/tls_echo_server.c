@@ -7,10 +7,6 @@
 
 #if defined(__ZEPHYR__)
 
-
-#include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(tls_echo_server);
-
 #else
 
 #include <stdio.h>
@@ -19,17 +15,17 @@ LOG_MODULE_REGISTER(tls_echo_server);
 #include <netdb.h>
 #include <string.h>
 
-// ToDo: Logging implementation must be included here...
-
 #endif
 
 #include "tls_echo_server.h"
 
+#include "logging.h"
 #include "poll_set.h"
 #include "networking.h"
 #include "wolfssl.h"
 
-#include "certificates.h"
+
+LOG_MODULE_REGISTER(tls_echo_server);
 
 
 #define RECV_BUFFER_SIZE 1024
@@ -232,22 +228,7 @@ static int add_new_server(struct tls_server_config const* server_config)
 		server->listening_port, freeSlot+1, MAX_SERVERS);
 
 	/* Create the wolfssl context */
-	struct wolfssl_endpoint_configuration wolfssl_endpoint_config = {
-		.device_certificate_chain = {
-			.buffer = dilithium5_entitiy_certificate,
-			.size = sizeof(dilithium5_entitiy_certificate),
-		},
-		.private_key = {
-			.buffer = dilithium5_entity_private_key,
-			.size = sizeof(dilithium5_entity_private_key),
-		},
-		.root_certificate = {
-			.buffer = dilithium5_root_certificate,
-			.size = sizeof(dilithium5_root_certificate),
-		},
-	};
-
-	server->wolfssl_contex = wolfssl_setup_server_context(&wolfssl_endpoint_config); 
+	server->wolfssl_contex = wolfssl_setup_server_context(&server_config->tls_config); 
 	if (server->wolfssl_contex == NULL)
 	{
 		LOG_ERR("Error creating WolfSSL context");
@@ -269,14 +250,7 @@ static int add_new_server(struct tls_server_config const* server_config)
 			.sin_family = AF_INET,
 			.sin_port = htons(server->listening_port)
 	};
-
-	int ret = net_addr_pton(bind_addr.sin_family, server_config->ip_address, &bind_addr.sin_addr);
-	if (ret != 0) 
-	{
-		LOG_ERR("Invalid IP address %s: error %d", server_config->ip_address, ret);
-		kill_server(server);
-		return -1;
-	}
+	net_addr_pton(bind_addr.sin_family, server_config->ip_address, &bind_addr.sin_addr);
 
 	/* Bind server socket to its destined IPv4 address */
 	if (bind(server->tcp_sock, (struct sockaddr*) &bind_addr, sizeof(bind_addr)) == -1) 
@@ -293,7 +267,7 @@ static int add_new_server(struct tls_server_config const* server_config)
 	setblocking(server->tcp_sock, false);
 
 	/* Add new server to the poll_set */
-	ret = poll_set_add_fd(&echo_server.poll_set, server->tcp_sock, POLLIN);
+	int ret = poll_set_add_fd(&echo_server.poll_set, server->tcp_sock, POLLIN);
 	if (ret != 0)
 	{
 		LOG_ERR("Error adding new server to poll_set");
@@ -696,15 +670,13 @@ static void* tls_client_handler_thread(void *ptr)
 				}
 			}
 		}
-
-		
 	}
 
 	wolfSSL_shutdown(client->wolfssl_session);
 
-	tls_client_cleanup(client);
-
 	LOG_INF("client handler thread for %s:%d stopped", client->peer_ip, client->peer_port);
+
+	tls_client_cleanup(client);
 
 	return NULL;
 }

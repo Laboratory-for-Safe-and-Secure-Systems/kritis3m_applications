@@ -7,7 +7,11 @@
 
 #else
 
+#include <stdbool.h>
 #include <netinet/in.h>
+
+#define net_addr_ntop inet_ntop
+#define net_addr_pton inet_pton
 
 #endif
 

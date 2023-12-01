@@ -3,17 +3,7 @@
 #include <errno.h>
 #include <sys/socket.h>
 
-#if defined(__ZEPHYR__)
-
-#include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(wolfssl);
-
-#else
-
-// ToDo: Logging implementation must be included here...
-
-#endif 
-
+#include "logging.h"
 #include "networking.h"
 
 #include "wolfssl.h"
@@ -22,6 +12,8 @@ LOG_MODULE_REGISTER(wolfssl);
 #include "wolfssl/wolfcrypt/memory.h"
 #include "wolfssl/error-ssl.h"
 
+
+LOG_MODULE_REGISTER(wolfssl);
 
 
 #ifdef WOLFSSL_STATIC_MEMORY
@@ -139,7 +131,7 @@ int wolfssl_init(struct wolfssl_library_configuration* config)
  * 
  * Returns 0 on success, -1 on failure (error message is logged to the console).
  */
-static int wolfssl_configure_context(WOLFSSL_CTX* context, struct wolfssl_endpoint_configuration* config)
+static int wolfssl_configure_context(WOLFSSL_CTX* context, struct wolfssl_endpoint_configuration const* config)
 {
         /* Only allow TLS version 1.3 */
 	int ret = wolfSSL_CTX_SetMinVersion(context, WOLFSSL_TLSV1_3);
@@ -200,7 +192,7 @@ static int wolfssl_configure_context(WOLFSSL_CTX* context, struct wolfssl_endpoi
  * Return value is a pointer to the newly created context or NULl in case of an error
  * (error message is logged to the console).
  */
-WOLFSSL_CTX* wolfssl_setup_server_context(struct wolfssl_endpoint_configuration* config)
+WOLFSSL_CTX* wolfssl_setup_server_context(struct wolfssl_endpoint_configuration const* config)
 {
         /* Create the TLS server context */
 	WOLFSSL_CTX* new_context = wolfSSL_CTX_new_ex(wolfTLS_server_method_ex(wolfssl_heap), wolfssl_heap);
@@ -230,7 +222,7 @@ WOLFSSL_CTX* wolfssl_setup_server_context(struct wolfssl_endpoint_configuration*
  * Return value is a pointer to the newly created context or NULl in case of an error
  * (error message is logged to the console).
  */
-WOLFSSL_CTX* wolfssl_setup_client_context(struct wolfssl_endpoint_configuration* config)
+WOLFSSL_CTX* wolfssl_setup_client_context(struct wolfssl_endpoint_configuration const* config)
 {
         /* Create the TLS client context */
 	WOLFSSL_CTX* new_context = wolfSSL_CTX_new_ex(wolfTLS_client_method_ex(wolfssl_heap), wolfssl_heap);
