@@ -29,21 +29,21 @@ struct wolfssl_endpoint_configuration
 {
         struct 
         {
-                uint8_t* buffer;
+                uint8_t const* buffer;
                 size_t size;
         } 
         device_certificate_chain;
 
         struct 
         {
-                uint8_t* buffer;
+                uint8_t const* buffer;
                 size_t size;
         } 
         private_key;
 
         struct 
         {
-                uint8_t* buffer;
+                uint8_t const* buffer;
                 size_t size;
         } 
         root_certificate;

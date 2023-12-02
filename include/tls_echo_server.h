@@ -33,7 +33,7 @@ int tls_echo_server_run(void);
  * Returns the id of the new server on success (positive integer) or -1 on failure
  * (error message is printed to console).
  */
-int tls_echo_server_start(struct tls_server_config* server);
+int tls_echo_server_start(struct tls_server_config const* server);
 
 
 /* Stop the running echo server with given id (returned von tls_echo_server_start).
