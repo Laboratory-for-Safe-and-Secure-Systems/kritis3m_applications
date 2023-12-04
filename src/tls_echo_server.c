@@ -843,3 +843,37 @@ int tls_echo_server_stop(int id)
 	
 	return 0;
 }
+
+
+/* Terminate the application backend.
+ *
+ * Returns 0 on success, -1 on failure (error message is printed to console).
+ */
+int tls_echo_server_terminate(void)
+{
+	/* Close the management socket pair */
+	if (echo_server.management_socket_pair[0] >= 0)
+	{
+		close(echo_server.management_socket_pair[0]);
+		echo_server.management_socket_pair[0] = -1;
+	}
+	if (echo_server.management_socket_pair[1] >= 0)
+	{
+		close(echo_server.management_socket_pair[1]);
+		echo_server.management_socket_pair[1] = -1;
+	}
+
+	/* Stop all running servers */
+	for (int i = 0; i < MAX_SERVERS; i++)
+	{
+		if (server_pool[i].in_use == true)
+		{
+			kill_server(&server_pool[i]);
+		}
+	}
+
+	/* Stop the main thread */
+	pthread_cancel(echo_server.thread);
+
+	return 0;
+}

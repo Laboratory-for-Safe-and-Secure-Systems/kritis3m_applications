@@ -43,4 +43,11 @@ int tls_echo_server_start(struct tls_server_config const* server);
 int tls_echo_server_stop(int id);
 
 
+/* Terminate the application backend.
+ *
+ * Returns 0 on success, -1 on failure (error message is printed to console).
+ */
+int tls_echo_server_terminate(void);
+
+
 #endif
