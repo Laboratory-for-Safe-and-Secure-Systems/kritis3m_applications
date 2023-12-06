@@ -5,6 +5,7 @@ target_sources(${TARGET} PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src/poll_set.c
         ${CMAKE_CURRENT_SOURCE_DIR}/src/wolfssl.c
         ${CMAKE_CURRENT_SOURCE_DIR}/src/tls_echo_server.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/secure_element.c
 )
 
 target_include_directories(${TARGET} PUBLIC

@@ -6,10 +6,13 @@
 #include "logging.h"
 #include "networking.h"
 
+#include "secure_element/secure_element.h"
+
 #include "wolfssl.h"
 
 #include "wolfssl/wolfcrypt/cryptocb.h"
 #include "wolfssl/wolfcrypt/memory.h"
+#include "wolfssl/wolfcrypt/asn.h"
 #include "wolfssl/error-ssl.h"
 
 
@@ -25,6 +28,12 @@ extern size_t wolfsslMemoryBufferSize;
 #endif
 
 
+static char secure_element_private_key_id[16] = "SERVER_KEY";
+static size_t secure_element_private_key_id_size = sizeof("SERVER_KEY") - 1;
+
+#define DEVICE_ID_SECURE_ELEMENT 1
+
+
 /* Check return value for an error. Print error message in case. */
 static int errorOccured(int32_t ret)
 {
@@ -32,7 +41,7 @@ static int errorOccured(int32_t ret)
 	{
 		char errMsg[WOLFSSL_MAX_ERROR_SZ];
 		wolfSSL_ERR_error_string_n(ret, errMsg, sizeof(errMsg));
-		LOG_ERR("WolfSSL error: %s", errMsg);
+		LOG_ERR("error: %s", errMsg);
 
 		return -1;
 	}
@@ -90,7 +99,274 @@ static void wolfssl_logging_callback(int level, const char* str)
 {
 	(void) level;
 
-	LOG_INF("%s\r\n", str);
+	LOG_INF("%s", str);
+}
+
+static int wolfssl_crypto_callback_secure_element(int devId, wc_CryptoInfo* info, void* ctx)
+{
+	if (devId != DEVICE_ID_SECURE_ELEMENT)
+		return CRYPTOCB_UNAVAILABLE;
+	
+	int ret = CRYPTOCB_UNAVAILABLE;
+
+	if (info->algo_type == WC_ALGO_TYPE_PK)
+	{
+		switch (info->pk.type)
+		{
+		case WC_PK_TYPE_DILITHIUM_KEYGEN:
+			/* ToDo */
+			break;
+		case WC_PK_TYPE_DILITHIUM_SIGN:
+			/* Create the signature */
+			ret = pkcs11_sign_dilithium2(secure_element_private_key_id,
+					       	     secure_element_private_key_id_size,
+					       	     (CK_BYTE*) info->pk.dilithium_sign.in, info->pk.dilithium_sign.inlen,
+					       	     info->pk.dilithium_sign.out, (CK_ULONG*) info->pk.dilithium_sign.outlen);
+			if (ret != CKR_OK) 
+			{
+				ret = WC_HW_E;
+			}
+			break;
+		case WC_PK_TYPE_DILITHIUM_VERIFY:
+			/* ToDo */
+			break;
+		case WC_PK_TYPE_DILITHIUM_CHECK_PRIV_KEY:
+			ret = 0; /* Temporary success */
+			break;
+		case WC_PK_TYPE_FALCON_KEYGEN:
+			/* ToDo */
+			break;
+		case WC_PK_TYPE_FALCON_SIGN:
+			/* ToDo */
+			break;
+		case WC_PK_TYPE_FALCON_VERIFY:
+			/* ToDo */
+			break;
+		case WC_PK_TYPE_FALCON_CHECK_PRIV_KEY:
+			ret = 0; /* Temporary success */
+			break;
+		default:
+			break;
+		}
+	}
+
+	return ret;
+}
+
+static int wolfssl_extract_dilithium_keys(int key_format, uint8_t const* der_buffer, uint32_t der_size,
+					  uint8_t** private_key_buffer, uint32_t* private_key_size,
+					  uint8_t** public_key_buffer, uint32_t* public_key_size)
+{
+	/* Allocate new key */
+	dilithium_key* key = (dilithium_key* ) malloc(sizeof(dilithium_key));
+	if (key == NULL) 
+	{
+		LOG_ERR("Error allocating temporary private key");
+		return -1;
+	}
+
+	wc_dilithium_init(key);
+
+	/* Set level and allocate memory for raw key */
+	if (key_format == DILITHIUM_LEVEL2k) 
+	{
+		wc_dilithium_set_level(key, 2);
+
+		*private_key_buffer = (uint8_t* ) malloc(DILITHIUM_LEVEL2_KEY_SIZE);
+		*private_key_size = DILITHIUM_LEVEL2_KEY_SIZE;
+
+		*public_key_buffer = (uint8_t* ) malloc(DILITHIUM_LEVEL2_PUB_KEY_SIZE);
+		*public_key_size = DILITHIUM_LEVEL2_PUB_KEY_SIZE;
+	}
+	else if (key_format == DILITHIUM_LEVEL3k) 
+	{
+		wc_dilithium_set_level(key, 3);
+
+		*private_key_buffer = (uint8_t* ) malloc(DILITHIUM_LEVEL3_KEY_SIZE);
+		*private_key_size = DILITHIUM_LEVEL3_KEY_SIZE;
+
+		*public_key_buffer = (uint8_t* ) malloc(DILITHIUM_LEVEL3_PUB_KEY_SIZE);
+		*public_key_size = DILITHIUM_LEVEL3_PUB_KEY_SIZE;
+	}
+	else if (key_format == DILITHIUM_LEVEL5k)
+	{
+		wc_dilithium_set_level(key, 5);
+
+		*private_key_buffer = (uint8_t* ) malloc(DILITHIUM_LEVEL5_KEY_SIZE);
+		*private_key_size = DILITHIUM_LEVEL5_KEY_SIZE;
+
+		*public_key_buffer = (uint8_t* ) malloc(DILITHIUM_LEVEL5_PUB_KEY_SIZE);
+		*public_key_size = DILITHIUM_LEVEL5_PUB_KEY_SIZE;
+	}
+
+	if ((*private_key_buffer == NULL) || (*public_key_buffer == NULL))
+	{
+		LOG_ERR("Error allocating temporary key buffers");
+		wc_dilithium_free(key);
+		free(key);
+		return -1;
+	}
+	
+	/* Import the actual private key from the DER buffer */
+	int ret = wc_dilithium_import_private_key(der_buffer, der_size, NULL, 0, key);
+	if (ret != 0) 
+	{
+		LOG_ERR("Error parsing the DER key: %d", ret);
+		wc_dilithium_free(key);
+		free(key);
+		return -1;
+	}
+
+	/* Write the raw keys to the buffers */
+	memcpy(*private_key_buffer, key->k, *private_key_size);
+	memcpy(*public_key_buffer, key->p, *public_key_size);
+
+	wc_dilithium_free(key);
+	free(key);
+
+	return 0;
+}
+
+static int wolfssl_extract_falcon_keys(int key_format, uint8_t const* der_buffer, uint32_t der_size,
+				       uint8_t** private_key_buffer, uint32_t* private_key_size,
+				       uint8_t** public_key_buffer, uint32_t* public_key_size)
+{
+	/* Allocate new key */
+	falcon_key* key = (falcon_key* ) malloc(sizeof(falcon_key));
+	if (key == NULL) 
+	{
+		LOG_ERR("Error allocating temporary private key");
+		return -1;
+	}
+
+	wc_falcon_init(key);
+
+	/* Set level and allocate memory for raw key */
+	if (key_format == FALCON_LEVEL1k) 
+	{
+		wc_falcon_set_level(key, 1);
+
+		*private_key_buffer = (uint8_t* ) malloc(FALCON_LEVEL1_KEY_SIZE);
+		*private_key_size = FALCON_LEVEL1_KEY_SIZE;
+
+		*public_key_buffer = (uint8_t* ) malloc(FALCON_LEVEL1_PUB_KEY_SIZE);
+		*public_key_size = FALCON_LEVEL1_PUB_KEY_SIZE;
+	}
+	else if (key_format == FALCON_LEVEL5k) 
+	{
+		wc_falcon_set_level(key, 5);
+
+		*private_key_buffer = (uint8_t* ) malloc(FALCON_LEVEL5_KEY_SIZE);
+		*private_key_size = FALCON_LEVEL5_KEY_SIZE;
+
+		*public_key_buffer = (uint8_t* ) malloc(FALCON_LEVEL5_PUB_KEY_SIZE);
+		*public_key_size = FALCON_LEVEL5_PUB_KEY_SIZE;
+	}
+	
+	if ((*private_key_buffer == NULL) || (*public_key_buffer == NULL))
+	{
+		LOG_ERR("Error allocating temporary key buffers");
+		wc_falcon_free(key);
+		free(key);
+		return -1;
+	}
+	
+	/* Import the actual private key from the DER buffer */
+	int ret = wc_falcon_import_private_key(der_buffer, der_size, NULL, 0, key);
+	if (ret != 0) 
+	{
+		LOG_ERR("Error parsing the DER key: %d", ret);
+		wc_falcon_free(key);
+		free(key);
+		return -1;
+	}
+
+	/* Write the raw keys to the buffers */
+	memcpy(*private_key_buffer, key->k, *private_key_size);
+	memcpy(*public_key_buffer, key->p, *public_key_size);
+
+	wc_falcon_free(key);
+	free(key);
+
+	return 0;
+}
+
+static int wolfssl_import_private_key_into_secure_element(uint8_t const* buffer, uint32_t size)
+{
+	DerBuffer* der = NULL;
+	EncryptedInfo info;
+	int  keyFormat = 0;
+
+	/* Delete all currently stored objects on the card */
+	int ret = pkcs11_destroy_objects(secure_element_private_key_id, secure_element_private_key_id_size);			
+
+	/* Convert key to DER (binary) */
+	ret = PemToDer(buffer, size, PRIVATEKEY_TYPE, &der, wolfssl_heap,
+			   &info, &keyFormat);
+	if (ret < 0)
+	{
+		FreeDer(&der);
+		LOG_ERR("Error converting private key to DER");
+		return -1;
+	}
+
+	uint8_t* raw_private_key_buffer = NULL;
+	uint32_t raw_private_key_size = 0;
+	uint8_t* raw_public_key_buffer = NULL;
+	uint32_t raw_public_key_size = 0;
+
+	/* Check which key type we have */
+	if ((keyFormat == FALCON_LEVEL1k) || (keyFormat == FALCON_LEVEL5k)) 
+	{
+		/* Extract the raw public and private keys */
+		ret = wolfssl_extract_falcon_keys(keyFormat, der->buffer, der->length,
+						  &raw_private_key_buffer, &raw_private_key_size,
+						  &raw_public_key_buffer, &raw_public_key_size);
+	}
+    	else if ((keyFormat == DILITHIUM_LEVEL2k) || (keyFormat == DILITHIUM_LEVEL3k) ||
+        	 (keyFormat == DILITHIUM_LEVEL5k)) 
+	{
+		/* Extract the raw public and private keys */
+		ret = wolfssl_extract_dilithium_keys(keyFormat, der->buffer, der->length,
+						     &raw_private_key_buffer, &raw_private_key_size,
+						     &raw_public_key_buffer, &raw_public_key_size);
+        }
+
+	if (ret == 0)
+	{
+		/* Import private key into secure element */
+		ret = pkcs11_create_object_private_key_dilithium2(secure_element_private_key_id,
+								  secure_element_private_key_id_size,
+								  raw_private_key_buffer,
+								  raw_private_key_size);
+		if (ret != CKR_OK)
+		{
+			LOG_ERR("Error importing private key into secure element: %d", ret);
+		}
+		else
+		{
+			/* Import public key into secure element */
+			ret = pkcs11_create_object_public_key_dilithium2(secure_element_private_key_id,
+										secure_element_private_key_id_size,
+										raw_public_key_buffer,
+										raw_public_key_size);
+			if (ret != CKR_OK)
+			{
+				LOG_ERR("Error importing private key into secure element: %d", ret);
+			}
+		}
+	}
+
+	if (raw_private_key_buffer != NULL)
+	{
+		free(raw_private_key_buffer);
+	}
+	if (raw_public_key_buffer != NULL)
+	{
+		free(raw_public_key_buffer);
+	}
+
+	return ret;
 }
 
 
@@ -100,7 +376,7 @@ static void wolfssl_logging_callback(int level, const char* str)
  *
  * Returns 0 on success, -1 in case of an error (error message is logged to the console).
  */
-int wolfssl_init(struct wolfssl_library_configuration* config)
+int wolfssl_init(struct wolfssl_library_configuration const* config)
 {
         /* Initialize WolfSSL */
 	int ret = wolfSSL_Init();
@@ -123,6 +399,12 @@ int wolfssl_init(struct wolfssl_library_configuration* config)
     		wolfSSL_Debugging_ON();
 	}
 
+	/* Load the secure element middleware */
+	if (config->secure_element_middleware_path != NULL)
+	{
+		pkcs11_setLibraryPath(config->secure_element_middleware_path);
+	}
+
         return 0;
 }
 
@@ -137,6 +419,15 @@ static int wolfssl_configure_context(WOLFSSL_CTX* context, struct wolfssl_endpoi
 	int ret = wolfSSL_CTX_SetMinVersion(context, WOLFSSL_TLSV1_3);
 	if (errorOccured(ret))
 		return -1;
+
+	/* Install the crypto callback to forward calls to the external secure element */
+	// wolfSSL_CTX_SetDevId(context, DEVICE_ID_SECURE_ELEMENT);
+	ret = wc_CryptoCb_RegisterDevice(DEVICE_ID_SECURE_ELEMENT, wolfssl_crypto_callback_secure_element, NULL);
+	if (ret != 0)
+	{
+		LOG_ERR("error: unable to register crypto callback");
+		return -1;
+	}
 
 	/* Load root certificate */
 	ret = wolfSSL_CTX_load_verify_buffer(context,
@@ -155,10 +446,30 @@ static int wolfssl_configure_context(WOLFSSL_CTX* context, struct wolfssl_endpoi
 		return -1;
 
 	/* Load the private key */
-	ret = wolfSSL_CTX_use_PrivateKey_buffer(context,
-						config->private_key.buffer,
-						config->private_key.size,
-                                        	WOLFSSL_FILETYPE_PEM);
+	if (config->use_secure_element)
+	{
+		/* Import private key into secure element if present */
+		if (config->private_key.buffer != NULL)
+		{
+			wolfssl_import_private_key_into_secure_element(config->private_key.buffer,
+								       config->private_key.size);
+		}
+
+		/* Load the private key from the secure element */
+		ret = wolfSSL_CTX_use_PrivateKey_Id(context,
+						    secure_element_private_key_id,
+						    secure_element_private_key_id_size,
+						    DEVICE_ID_SECURE_ELEMENT);
+	}
+	else
+	{
+		/* Load the private key from the buffer */
+		ret = wolfSSL_CTX_use_PrivateKey_buffer(context,
+							config->private_key.buffer,
+							config->private_key.size,
+							WOLFSSL_FILETYPE_PEM);
+	}
+
 	if (errorOccured(ret))
 		return -1; 
 

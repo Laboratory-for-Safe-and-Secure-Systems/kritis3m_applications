@@ -5,13 +5,15 @@
 #include <stdbool.h>
 
 #include "wolfssl/wolfcrypt/settings.h"
-#include "wolfssl/ssl.h"  
+#include "wolfssl/ssl.h"
 
 
 /* Data structure for the library configuration */
 struct wolfssl_library_configuration
 {
         bool loggingEnabled;
+
+        char const* secure_element_middleware_path;
 
 #ifdef WOLFSSL_STATIC_MEMORY
         struct 
@@ -47,6 +49,8 @@ struct wolfssl_endpoint_configuration
                 size_t size;
         } 
         root_certificate;
+
+        bool use_secure_element;
 };
 
 
@@ -56,7 +60,7 @@ struct wolfssl_endpoint_configuration
  *
  * Returns 0 on success, -1 in case of an error (error message is logged to the console).
  */
-int wolfssl_init(struct wolfssl_library_configuration* config);
+int wolfssl_init(struct wolfssl_library_configuration const* config);
 
 
 /* Setup a TLS server context.

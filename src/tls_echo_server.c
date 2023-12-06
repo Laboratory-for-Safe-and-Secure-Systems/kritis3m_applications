@@ -555,6 +555,7 @@ void* tls_echo_server_main_thread(void* ptr)
 					if (ret < 0)
 					{
 						LOG_ERR("Error performing TLS handshake");
+						poll_set_remove_fd(&config->poll_set, fd);
 						tls_client_cleanup(client);
 						continue;
 					}
