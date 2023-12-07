@@ -17,7 +17,7 @@ void log_message(char const* module, char const* level, char const* fmt, ...)
 
     va_end(args);
 
-    printf("<%s> %s: %s\r\n", level, module, message);
+    printf("<%s>\t%s: %s\r\n", level, module, message);
 }
 
 #endif
