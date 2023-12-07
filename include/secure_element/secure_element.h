@@ -83,6 +83,15 @@ CK_RV pkcs11_create_object_public_key_kyber768(CK_BYTE *pId, CK_ULONG ulIdLen, C
 */
 CK_RV pkcs11_create_object_private_key_kyber768(CK_BYTE *pId, CK_ULONG ulIdLen, CK_BYTE *pPrivateValue, CK_ULONG ulPrivateValueLen);
 
+/*! \fn CK_RV pkcs11_read_public_key(CK_BYTE *pId, CK_ULONG ulIdLen, CK_BYTE *pOutput, CK_ULONG *pulOutputLen)
+    \brief Read public key object with id.
+    \param pId object id
+    \param ulIdLen object id length
+    \param pOutput publicKey
+    \param pulOutputLen publicKey length
+*/
+CK_RV pkcs11_read_public_key(CK_BYTE *pId, CK_ULONG ulIdLen, CK_BYTE *pOutput, CK_ULONG *pulOutputLen);
+
 /*! \fn CK_RV pkcs11_destroy_objects(CK_BYTE *pId, CK_ULONG ulIdLen)
     \brief Destroy all objects with id.
     \param pId object id

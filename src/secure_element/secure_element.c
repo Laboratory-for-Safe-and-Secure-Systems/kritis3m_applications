@@ -200,6 +200,67 @@ CK_RV pkcs11_create_object(CK_ATTRIBUTE_PTR pTemplate, CK_ULONG ulTemplateLen)
   return rv;
 }
 
+CK_RV pkcs11_read_public_key(CK_BYTE *pId, CK_ULONG ulIdLen, CK_BYTE *pOutput, CK_ULONG *pulOutputLen)
+{
+  /* Declaration of variables */
+  CK_RV rv = CKR_GENERAL_ERROR;
+
+  CK_SESSION_HANDLE hSession = CK_INVALID_HANDLE;
+
+  CK_OBJECT_HANDLE hObjects[MAX_OBJECTS] = {0};
+  CK_ULONG hObjectsCount = sizeof(hObjects) / sizeof(CK_OBJECT_HANDLE);
+
+  CK_OBJECT_CLASS cko_public_key = CKO_PUBLIC_KEY;
+  CK_BBOOL ck_token = TRUE;
+
+  CK_ATTRIBUTE searchTemplate[] = {
+      {CKA_CLASS, &cko_public_key, sizeof(CK_OBJECT_CLASS)},
+      {CKA_TOKEN, &ck_token, sizeof(CK_BBOOL)},
+      {CKA_ID, pId, ulIdLen}
+  };
+
+  CK_ATTRIBUTE readTemplate[] = {
+      {CKA_VALUE, NULL, 0}
+  };
+
+  /* Initialization of PKCS#11 session */
+  rv = pkcs11_get_session(&hSession);
+  if (rv != CKR_OK)
+    return rv;
+
+  /* find object with given template */
+  /* find all objects with given template */
+  rv = pCkf->C_FindObjectsInit(hSession, searchTemplate, TEMPLATE_COUNT(searchTemplate));
+  if (rv != CKR_OK)
+    return rv;
+
+  rv = pCkf->C_FindObjects(hSession, hObjects, MAX_OBJECTS, &hObjectsCount);
+  if (rv != CKR_OK)
+    return rv;
+
+  rv = pCkf->C_FindObjectsFinal(hSession);
+  if (rv != CKR_OK)
+    return rv;
+
+  if (hObjectsCount == 0)
+    return CKR_ARGUMENTS_BAD;
+
+  /* We just read the first found object for now */
+  /* Read the size of the key first */
+  rv = pCkf->C_GetAttributeValue(hSession, hObjects[0], readTemplate, TEMPLATE_COUNT(readTemplate));
+
+  if ((rv == CKR_OK) && (readTemplate[0].ulValueLen != CK_UNAVAILABLE_INFORMATION) && (readTemplate[0].ulValueLen <= *pulOutputLen))
+  {
+        /* Read the key */
+        readTemplate[0].pValue = pOutput;
+        rv = pCkf->C_GetAttributeValue(hSession, hObjects[0], readTemplate, TEMPLATE_COUNT(readTemplate));
+        if (rv == CKR_OK)
+          *pulOutputLen = readTemplate[0].ulValueLen;
+  }
+
+  return rv;
+}
+
 CK_RV pkcs11_destroy_objects(CK_BYTE *pId, CK_ULONG ulIdLen)
 {
   /* Declaration of variables */
