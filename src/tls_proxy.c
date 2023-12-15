@@ -30,30 +30,37 @@ LOG_MODULE_REGISTER(tls_proxy);
 
 #define RECV_BUFFER_SIZE 1024
 
-#define MAX_REVERSE_PROXYS 3
-#define MAX_CONNECTIONS_PER_REVERSE_PROXY 5
+#define MAX_PROXYS 3
+#define MAX_CONNECTIONS_PER_PROXY 5
 
 
-struct reverse_proxy_connection
+enum tls_proxy_direction
+{
+	REVERSE_PROXY,
+	FORWARD_PROXY,
+};
+
+struct proxy_connection
 {
 	bool in_use;
-
-	int tcp_sock;
-	char peer_ip[20];
-	uint16_t peer_port;
+	enum tls_proxy_direction direction;
+	int listening_peer_sock;
+	int target_peer_sock;
 	WOLFSSL* wolfssl_session;
 	pthread_t thread;
 	pthread_attr_t thread_attr;
+	size_t num_of_bytes_in_recv_buffer;
 	uint8_t recv_buffer[RECV_BUFFER_SIZE];
 };
 
-struct reverse_proxy
+struct proxy
 {
 	bool in_use;
-	uint16_t listening_port;
+	enum tls_proxy_direction direction;
 	int listening_tcp_sock;
+	struct sockaddr_in target_addr;
 	WOLFSSL_CTX* wolfssl_contex;
-	struct reverse_proxy_connection* connections[MAX_CONNECTIONS_PER_REVERSE_PROXY];
+	struct proxy_connection* connections[MAX_CONNECTIONS_PER_PROXY];
 };
 
 struct tls_proxy_backend_config
@@ -67,9 +74,8 @@ struct tls_proxy_backend_config
 enum tls_proxy_management_message_type
 {
 	REVERSE_PROXY_START_REQUEST,
-	REVERSE_PROXY_STOP_REQUEST,
 	FORWARD_PROXY_START_REQUEST,
-	FORWARD_PROXY_STOP_REQUEST,
+	PROXY_STOP_REQUEST,
 	PROXY_RESPONSE,
 };
 
@@ -79,11 +85,10 @@ struct tls_proxy_management_message
 	
 	union tls_proxy_management_message_payload
 	{
-		struct reverse_proxy_config reverse_proxy_config;	/* REVERSE_PROXY_START_REQUEST */
-		int reverse_proxy_id;					/* REVERSE_PROXY_STOP_REQUEST */
-		struct forward_proxy_config forward_proxy_config; 	/* FORWARD_PROXY_START_REQUEST */
-		int forward_proxy_id;					/* FORWARD_PROXY_STOP_REQUEST */
-		int response_code; 					/* RESPONSE */
+		struct proxy_config reverse_proxy_config;	/* REVERSE_PROXY_START_REQUEST */
+		struct proxy_config forward_proxy_config; 	/* FORWARD_PROXY_START_REQUEST */
+		int proxy_id;					/* PROXY_STOP_REQUEST */
+		int response_code; 				/* RESPONSE */
 	} 
 	payload;
 };
@@ -91,8 +96,8 @@ struct tls_proxy_management_message
 
 /* File global variables */
 static struct tls_proxy_backend_config proxy_backend;
-static struct reverse_proxy_connection reverse_proxy_connection_pool[MAX_CONNECTIONS_PER_REVERSE_PROXY];
-static struct reverse_proxy reverse_proxy_pool[MAX_REVERSE_PROXYS];
+static struct proxy_connection proxy_connection_pool[MAX_CONNECTIONS_PER_PROXY];
+static struct proxy proxy_pool[MAX_PROXYS];
 
 
 #if defined(__ZEPHYR__)
@@ -102,7 +107,7 @@ static struct reverse_proxy reverse_proxy_pool[MAX_REVERSE_PROXYS];
 // K_THREAD_STACK_ARRAY_DEFINE(client_stack_pool, MAX_CLIENTS, CLIENT_HANDLER_STACK_SIZE);
 // K_THREAD_STACK_DEFINE(server_stack, BACKEND_STACK_SIZE);
 
-Z_KERNEL_STACK_ARRAY_DEFINE_IN(connection_handler_stack_pool, MAX_CONNECTIONS_PER_REVERSE_PROXY, CONNECTION_HANDLER_STACK_SIZE, __attribute__((section("SRAM3"))));
+Z_KERNEL_STACK_ARRAY_DEFINE_IN(connection_handler_stack_pool, MAX_CONNECTIONS_PER_PROXY, CONNECTION_HANDLER_STACK_SIZE, __attribute__((section("SRAM3"))));
 Z_KERNEL_STACK_DEFINE_IN(backend_stack, BACKEND_STACK_SIZE, __attribute__((section("SRAM3"))));
 #endif
 
@@ -115,19 +120,19 @@ static int send_management_message(int socket, struct tls_proxy_management_messa
 static int read_management_message(int socket, struct tls_proxy_management_message* msg);
 static int handle_management_message(int socket, struct tls_proxy_management_message const* msg);
 
-static int add_new_reverse_proxy(struct reverse_proxy_config const* config);
-static void kill_reverse_proxy(struct reverse_proxy* proxy);
+static int add_new_proxy(enum tls_proxy_direction direction, struct proxy_config const* config);
+static void kill_proxy(struct proxy* proxy);
 
-static struct reverse_proxy_connection* add_new_connection_to_reverse_proxy(struct reverse_proxy* proxy,
-									    int client_socket,
-									    struct sockaddr* client_addr,
-									    socklen_t client_addr_len);
-static int perform_handshake(struct reverse_proxy_connection* connection);
+static struct proxy_connection* add_new_connection_to_proxy(struct proxy* proxy,
+							    int client_socket,
+							    struct sockaddr* client_addr,
+							    socklen_t client_addr_len);
+static int perform_handshake(struct proxy_connection* connection);
 
-static struct reverse_proxy* find_reverse_proxy_by_fd(int fd);
-static struct reverse_proxy_connection* find_reverse_proxy_connection_by_fd(int fd);
+static struct proxy* find_proxy_by_fd(int fd);
+static struct proxy_connection* find_proxy_connection_by_fd(int fd);
 
-static void reverse_proxy_connection_cleanup(struct reverse_proxy_connection* connection);
+static void proxy_connection_cleanup(struct proxy_connection* connection);
 
 
 
@@ -166,8 +171,8 @@ static int handle_management_message(int socket, struct tls_proxy_management_mes
 	{
 		case REVERSE_PROXY_START_REQUEST:
 		{
-			/* Add a new server */
-			int proxy_id = add_new_reverse_proxy(&msg->payload.reverse_proxy_config);
+			/* Add a new reverse proxy */
+			int proxy_id = add_new_proxy(REVERSE_PROXY, &msg->payload.reverse_proxy_config);
 
 			/* Send response */
 			struct tls_proxy_management_message response = {
@@ -177,12 +182,25 @@ static int handle_management_message(int socket, struct tls_proxy_management_mes
 			send_management_message(socket, &response);
 			break;
 		}
-		case REVERSE_PROXY_STOP_REQUEST:
+		case FORWARD_PROXY_START_REQUEST:
+		{
+			/* Add a new forward proxy */
+			int proxy_id = add_new_proxy(FORWARD_PROXY, &msg->payload.forward_proxy_config);
+
+			/* Send response */
+			struct tls_proxy_management_message response = {
+				.type = PROXY_RESPONSE,
+				.payload.response_code = proxy_id,
+			};
+			send_management_message(socket, &response);
+			break;
+		}
+		case PROXY_STOP_REQUEST:
 		{
 			/* Kill the proxy */
-			if (reverse_proxy_pool[msg->payload.reverse_proxy_id-1].in_use == true)
+			if (proxy_pool[msg->payload.proxy_id-1].in_use == true)
 			{
-				kill_reverse_proxy(&reverse_proxy_pool[msg->payload.reverse_proxy_id-1]);
+				kill_proxy(&proxy_pool[msg->payload.proxy_id-1]);
 
 			}
 			/* Send response */
@@ -202,14 +220,14 @@ static int handle_management_message(int socket, struct tls_proxy_management_mes
 }
 
 
-/* Create a new reverse proxy and add it to the main event loop */
-static int add_new_reverse_proxy(struct reverse_proxy_config const* config)
+/* Create a new proxy and add it to the main event loop */
+static int add_new_proxy(enum tls_proxy_direction direction, struct proxy_config const* config)
 {
 	/* Search for a free server slot */
 	int freeSlot = -1;
-	for (int i = 0; i < MAX_REVERSE_PROXYS; i++)
+	for (int i = 0; i < MAX_PROXYS; i++)
 	{
-		if (reverse_proxy_pool[i].in_use == false)
+		if (proxy_pool[i].in_use == false)
 		{
 			freeSlot = i;
 			break;
@@ -218,40 +236,52 @@ static int add_new_reverse_proxy(struct reverse_proxy_config const* config)
 
 	if (freeSlot == -1)
 	{
-		LOG_ERR("Cannot create more TLS echo servers (no free slot)");
+		LOG_ERR("Cannot create more TLS proxies (no free slot)");
 		return -1;
 	}
 
-	struct reverse_proxy* proxy = &reverse_proxy_pool[freeSlot];
+	struct proxy* proxy = &proxy_pool[freeSlot];
 
 	proxy->in_use = true;
-	proxy->listening_port = config->listening_port;
+	proxy->direction = direction;
 
-	LOG_INF("Starting new reverse proxy on port %d using slot %d/%d", 
-		proxy->listening_port, freeSlot+1, MAX_REVERSE_PROXYS);
+	if (direction == REVERSE_PROXY)
+	{
+		LOG_INF("Starting new reverse proxy on port %d using slot %d/%d", 
+			config->listening_port, freeSlot+1, MAX_PROXYS);
 
-	/* Create the wolfssl context */
-	proxy->wolfssl_contex = wolfssl_setup_server_context(&config->tls_config); 
+		/* Create the wolfssl context */
+		proxy->wolfssl_contex = wolfssl_setup_server_context(&config->tls_config);
+	}
+	else if (direction == FORWARD_PROXY)
+	{
+		LOG_INF("Starting new forward proxy to %s:%d using slot %d/%d", 
+		config->target_ip_address, config->target_port, freeSlot+1, MAX_PROXYS);
+
+		/* Create the wolfssl context */
+		proxy->wolfssl_contex = wolfssl_setup_client_context(&config->tls_config);
+	}
+
 	if (proxy->wolfssl_contex == NULL)
 	{
 		LOG_ERR("Error creating WolfSSL context");
-		kill_reverse_proxy(proxy);
+		kill_proxy(proxy);
 		return -1;
 	}
 	
-	/* Create the TCP socket for incoming connections */
+	/* Create the TCP socket for the incoming connection */
 	proxy->listening_tcp_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 	if (proxy->listening_tcp_sock == -1)
 	{
-		LOG_ERR("Error creating TCP socket");
-		kill_reverse_proxy(proxy);
+		LOG_ERR("Error creating incoming TCP socket");
+		kill_proxy(proxy);
 		return -1;
 	}
 
 	/* Configure TCP server */
 	struct sockaddr_in bind_addr = {
 			.sin_family = AF_INET,
-			.sin_port = htons(proxy->listening_port)
+			.sin_port = htons(config->listening_port)
 	};
 	net_addr_pton(bind_addr.sin_family, config->own_ip_address, &bind_addr.sin_addr);
 
@@ -259,12 +289,12 @@ static int add_new_reverse_proxy(struct reverse_proxy_config const* config)
 	if (bind(proxy->listening_tcp_sock, (struct sockaddr*) &bind_addr, sizeof(bind_addr)) == -1) 
 	{
 		LOG_ERR("Cannot bind socket %d to %s: errer %d\n", proxy->listening_tcp_sock, config->own_ip_address, errno);
-		kill_reverse_proxy(proxy);
+		kill_proxy(proxy);
 		return -1;
 	}
 
 	/* Start listening for incoming connections */
-	listen(proxy->listening_tcp_sock, MAX_CONNECTIONS_PER_REVERSE_PROXY);
+	listen(proxy->listening_tcp_sock, MAX_CONNECTIONS_PER_PROXY);
 
 	/* Set the new socket to non-blocking */
 	setblocking(proxy->listening_tcp_sock, false);
@@ -274,19 +304,23 @@ static int add_new_reverse_proxy(struct reverse_proxy_config const* config)
 	if (ret != 0)
 	{
 		LOG_ERR("Error adding new proxy to poll_set");
-		kill_reverse_proxy(proxy);
+		kill_proxy(proxy);
 		return -1;
 	}
 
+	/* Configure TCP client */
+	proxy->target_addr.sin_family = AF_INET;
+	proxy->target_addr.sin_port = htons(config->target_port);
+	net_addr_pton(proxy->target_addr.sin_family, config->target_ip_address, &proxy->target_addr.sin_addr);
 
-	LOG_INF("Waiting for TLS connections on port %d", proxy->listening_port);
+	LOG_INF("Waiting for TLS connections on port %d", config->listening_port);
 
 	return freeSlot+1;
 }
 
 
-/* Stop a running reverse proxy and cleanup afterwards */
-static void kill_reverse_proxy(struct reverse_proxy* proxy)
+/* Stop a running proxy and cleanup afterwards */
+static void kill_proxy(struct proxy* proxy)
 {
 	/* Stop the listening socket and clear it from the poll_set */
 	if (proxy->listening_tcp_sock >= 0) 
@@ -297,7 +331,7 @@ static void kill_reverse_proxy(struct reverse_proxy* proxy)
 	}
 
 	/* Kill all connections */
-	for (int i = 0; i < MAX_CONNECTIONS_PER_REVERSE_PROXY; i++) 
+	for (int i = 0; i < MAX_CONNECTIONS_PER_PROXY; i++) 
 	{
 		if (proxy->connections[i] != NULL)
 		{
@@ -310,7 +344,7 @@ static void kill_reverse_proxy(struct reverse_proxy* proxy)
 			}
 
 			/* Cleanup the client */
-			reverse_proxy_connection_cleanup(proxy->connections[i]);
+			proxy_connection_cleanup(proxy->connections[i]);
 
 			proxy->connections[i] = NULL;
 		}
@@ -323,47 +357,47 @@ static void kill_reverse_proxy(struct reverse_proxy* proxy)
 		proxy->wolfssl_contex = NULL;
 	}
 
-	proxy->listening_port = 0;
 	proxy->in_use = false;
 }
 
 
-static struct reverse_proxy* find_reverse_proxy_by_fd(int fd)
+static struct proxy* find_proxy_by_fd(int fd)
 {
-	for (int i = 0; i < MAX_REVERSE_PROXYS; i++)
+	for (int i = 0; i < MAX_PROXYS; i++)
 	{
-		if (reverse_proxy_pool[i].listening_tcp_sock == fd)
+		if (proxy_pool[i].listening_tcp_sock == fd)
 		{
-			return &reverse_proxy_pool[i];
+			return &proxy_pool[i];
 		}
 	}
 
 	return NULL;
 }
 
-static struct reverse_proxy_connection* find_reverse_proxy_connection_by_fd(int fd)
+static struct proxy_connection* find_proxy_connection_by_fd(int fd)
 {
-	for (int i = 0; i < MAX_CONNECTIONS_PER_REVERSE_PROXY; i++)
+	for (int i = 0; i < MAX_CONNECTIONS_PER_PROXY; i++)
 	{
-		if (reverse_proxy_connection_pool[i].tcp_sock == fd)
+		if ((proxy_connection_pool[i].listening_peer_sock == fd) ||
+		    (proxy_connection_pool[i].target_peer_sock == fd))
 		{
-			return &reverse_proxy_connection_pool[i];
+			return &proxy_connection_pool[i];
 		}
 	}
 
 	return NULL;
 }
 
-static struct reverse_proxy_connection* add_new_connection_to_reverse_proxy(struct reverse_proxy* proxy,
-									    int client_socket,
-									    struct sockaddr* client_addr,
-									    socklen_t client_addr_len)
+static struct proxy_connection* add_new_connection_to_proxy(struct proxy* proxy,
+							    int client_socket,
+							    struct sockaddr* client_addr,
+							    socklen_t client_addr_len)
 {
 	/* Search for a free connection slot in the pool */
 	int freeSlotConnectionPool = -1;
-	for (int i = 0; i < MAX_CONNECTIONS_PER_REVERSE_PROXY; i++)
+	for (int i = 0; i < MAX_CONNECTIONS_PER_PROXY; i++)
 	{
-		if (reverse_proxy_connection_pool[i].in_use == false)
+		if (proxy_connection_pool[i].in_use == false)
 		{
 			freeSlotConnectionPool = i;
 			break;
@@ -371,7 +405,7 @@ static struct reverse_proxy_connection* add_new_connection_to_reverse_proxy(stru
 	}
 
 	int freeSlotProxyConnectionsArray = -1;
-	for (int i = 0; i < MAX_CONNECTIONS_PER_REVERSE_PROXY; i++)
+	for (int i = 0; i < MAX_CONNECTIONS_PER_PROXY; i++)
 	{
 		if((proxy->connections[i] == NULL) || (proxy->connections[i]->in_use == false))
 		{
@@ -382,7 +416,7 @@ static struct reverse_proxy_connection* add_new_connection_to_reverse_proxy(stru
 
 	if ((freeSlotConnectionPool == -1) || (freeSlotProxyConnectionsArray == -1))
 	{
-		LOG_ERR("Cannot accept more TLS connections (no free slot)");
+		LOG_ERR("Cannot accept more connections (no free slot)");
 		close(client_socket);
 		return NULL;
 	}
@@ -393,22 +427,54 @@ static struct reverse_proxy_connection* add_new_connection_to_reverse_proxy(stru
 
 	if (new_session == NULL)
 	{
-		LOG_ERR("Cannot accept more TLS connections (error creating session)");
+		LOG_ERR("Cannot accept more connections (error creating TLS session)");
 		close(client_socket);
 		return NULL;
 	}
 
-	struct reverse_proxy_connection* connection = &reverse_proxy_connection_pool[freeSlotConnectionPool];
+	struct proxy_connection* connection = &proxy_connection_pool[freeSlotConnectionPool];
 
 	/* Store new client data */
-	proxy->connections[freeSlotProxyConnectionsArray] = connection;
 	connection->in_use = true;
+	connection->direction = proxy->direction;
+	connection->listening_peer_sock = client_socket;
 	connection->wolfssl_session = new_session;
-	connection->tcp_sock = client_socket;
 
-	struct sockaddr_in* client_data = (struct sockaddr_in*) client_addr;
-	net_addr_ntop(AF_INET, &client_data->sin_addr, connection->peer_ip, sizeof(connection->peer_ip));
-	connection->peer_port = ntohs(client_data->sin_port);
+	setblocking(connection->listening_peer_sock, false);
+
+	/* Create the TCP socket for the outgoing connection */
+	connection->target_peer_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+	if (connection->target_peer_sock == -1)
+	{
+		LOG_ERR("Error creating outgoing TCP socket, errno: %d", errno);
+		proxy_connection_cleanup(connection);
+		return NULL;
+	}
+
+	/* Set socket non-blocking */
+	setblocking(connection->target_peer_sock, false);
+
+	/* Connect to the peer */
+	int ret = connect(connection->target_peer_sock, (struct sockaddr*) &proxy->target_addr, sizeof(proxy->target_addr));
+	if ((ret != 0) && (errno != EINPROGRESS))
+	{
+		LOG_ERR("Unable to connect to target peer, errno: %d", errno);
+		proxy_connection_cleanup(connection);
+		return NULL;
+	}
+
+	/* Map the TLS session to the respective socket depending on the direction */
+	if (connection->direction == FORWARD_PROXY)
+	{	
+		wolfSSL_set_fd(connection->wolfssl_session, connection->target_peer_sock);
+	}
+	else if (connection->direction == REVERSE_PROXY)
+	{
+		wolfSSL_set_fd(connection->wolfssl_session, connection->listening_peer_sock);
+	}
+
+	/* Store the new connection within the proxy */
+	proxy->connections[freeSlotProxyConnectionsArray] = connection;
 
 #if defined(__ZEPHYR__)
 	/* Store the pointer to the related stack for the client handler thread
@@ -418,51 +484,54 @@ static struct reverse_proxy_connection* add_new_connection_to_reverse_proxy(stru
 			      K_THREAD_STACK_SIZEOF(connection_handler_stack_pool[freeSlotConnectionPool]));
 #endif
 
-	wolfSSL_set_fd(connection->wolfssl_session, client_socket);
-
-	setblocking(client_socket, false);
-
 	/* Print info */
-	LOG_INF("New client connection on port %d from %s:%d, using slot %d/%d", 
-		proxy->listening_port, connection->peer_ip, connection->peer_port,
-		freeSlotConnectionPool+1, MAX_CONNECTIONS_PER_REVERSE_PROXY);
+	struct sockaddr_in* client_data = (struct sockaddr_in*) client_addr;
+	char peer_ip[20];
+	net_addr_ntop(AF_INET, &client_data->sin_addr, peer_ip, sizeof(peer_ip));
+	LOG_INF("New client connection from %s:%d, using slot %d/%d", 
+		peer_ip, ntohs(client_data->sin_port),
+		freeSlotConnectionPool+1, MAX_CONNECTIONS_PER_PROXY);
 
 	return connection;
 }
 
 
-static int perform_handshake(struct reverse_proxy_connection* connection)
+static int perform_handshake(struct proxy_connection* connection)
 {
 	/* Perform TLS handshake */
 	int ret = wolfssl_handshake(connection->wolfssl_session);
 	if (ret == 0)
 	{
-		LOG_INF("Handshake with peer %s:%d done", connection->peer_ip, connection->peer_port);
+		LOG_INF("Handshake done");
 	}
 	
 	return ret;
 }
 
 
-static void reverse_proxy_connection_cleanup(struct reverse_proxy_connection* connection)
+static void proxy_connection_cleanup(struct proxy_connection* connection)
 {
-	/* Kill the network connection */
-	if (connection->tcp_sock >= 0) 
+	/* Kill the network connections */
+	if (connection->listening_peer_sock >= 0) 
 	{
-		close(connection->tcp_sock);
+		close(connection->listening_peer_sock);
+		connection->listening_peer_sock = -1;
 	}
-	connection->tcp_sock = -1;
-
-	connection->peer_ip[0] = '\0';
-	connection->peer_port = 0;
+	if (connection->target_peer_sock >= 0) 
+	{
+		close(connection->target_peer_sock);
+		connection->target_peer_sock = -1;
+	}
 
 	/* Cleanup the TLS session */
 	if (connection->wolfssl_session != NULL) 
 	{
 		wolfSSL_free(connection->wolfssl_session);
+		connection->wolfssl_session = NULL;
 	}
-	connection->wolfssl_session = NULL;
 
+	connection->num_of_bytes_in_recv_buffer = 0;
+	
 	connection->in_use = false;
 }
 
@@ -495,8 +564,8 @@ void* tls_proxy_main_thread(void* ptr)
 			int fd = config->poll_set.fds[i].fd;
 			short event = config->poll_set.fds[i].revents;
 
-			struct reverse_proxy* reverse_proxy = NULL;
-			struct reverse_proxy_connection* reverse_proxy_connection = NULL;
+			struct proxy* proxy = NULL;
+			struct proxy_connection* proxy_connection = NULL;
 
 			if (fd == config->management_socket_pair[1])
 			{
@@ -515,76 +584,82 @@ void* tls_proxy_main_thread(void* ptr)
 				}
 			}
 			/* Check all reverse proxies */
-			else if ((reverse_proxy = find_reverse_proxy_by_fd(fd)) != NULL)
+			else if ((proxy = find_proxy_by_fd(fd)) != NULL)
 			{
 				if (event & POLLIN)
 				{
 					/* New client connection, try to handle it */
-					int client_socket = accept(reverse_proxy->listening_tcp_sock, &client_addr, &client_addr_len);
+					int client_socket = accept(proxy->listening_tcp_sock, &client_addr, &client_addr_len);
 					if (client_socket < 0) 
 					{
 						int error = errno;
 						if (error != EAGAIN)
-							LOG_ERR("accept error: %d (fd=%d)", error, reverse_proxy->listening_tcp_sock);
+							LOG_ERR("accept error: %d (fd=%d)", error, proxy->listening_tcp_sock);
 						continue;
 					}
 
 					/* Handle new client */
-					reverse_proxy_connection = add_new_connection_to_reverse_proxy(reverse_proxy,
-												       client_socket,
-												       &client_addr,
-												       client_addr_len);
-					if (reverse_proxy_connection == NULL)
+					proxy_connection = add_new_connection_to_proxy(proxy,
+										       client_socket,
+										       &client_addr,
+										       client_addr_len);
+					if (proxy_connection == NULL)
 					{
 						LOG_ERR("Error adding new client");
 						continue;
 					}
 
 					/* As we perform the TLS handshake from within the main thread, we have to add the 
-	 				 * client_socket to the poll_set. */
-					ret = poll_set_add_fd(&config->poll_set, client_socket, POLLIN);
+	 				 * respective socket to the poll_set. */
+					if (proxy_connection->direction == REVERSE_PROXY)
+					{
+						ret = poll_set_add_fd(&config->poll_set, proxy_connection->listening_peer_sock, POLLIN);
+					}
+					else if (proxy_connection->direction == FORWARD_PROXY)
+					{
+						ret = poll_set_add_fd(&config->poll_set, proxy_connection->target_peer_sock, POLLOUT);
+					}
 					if (ret != 0)
 					{
 						LOG_ERR("Error adding new client to poll_set");
-						reverse_proxy_connection_cleanup(reverse_proxy_connection);
+						proxy_connection_cleanup(proxy_connection);
 						continue;
 					}
 				}
 			}
-			/* Check all reverse proxy connections (that are in the TLS handshake) */
-			else if ((reverse_proxy_connection = find_reverse_proxy_connection_by_fd(fd)) != NULL)
+			/* Check all proxy connections (that are in the TLS handshake) */
+			else if ((proxy_connection = find_proxy_connection_by_fd(fd)) != NULL)
 			{
 				if ((event & POLLIN) || (event & POLLOUT))
 				{	
 					/* Continue with the handshake */
-					ret = perform_handshake(reverse_proxy_connection);
+					ret = perform_handshake(proxy_connection);
 
 					if (ret < 0)
 					{
 						LOG_ERR("Error performing TLS handshake");
 						poll_set_remove_fd(&config->poll_set, fd);
-						reverse_proxy_connection_cleanup(reverse_proxy_connection);
+						proxy_connection_cleanup(proxy_connection);
 						continue;
 					}
 					else if (ret == 0)
 					{
-						/* Handshake done, start thread for client */
+						/* Handshake done, remove respective socket from the poll_set */
 						poll_set_remove_fd(&config->poll_set, fd);
 
-						ret = pthread_create(&reverse_proxy_connection->thread,
-								     &reverse_proxy_connection->thread_attr,
+						/* Start thread for connection handling */
+						ret = pthread_create(&proxy_connection->thread,
+								     &proxy_connection->thread_attr,
 								     connection_handler_thread,
-								     reverse_proxy_connection);
+								     proxy_connection);
 						if (ret == 0)
 						{
-							LOG_INF("client handler thread for %s:%d started",
-								reverse_proxy_connection->peer_ip,
-								reverse_proxy_connection->peer_port);
+							LOG_INF("connection handler thread started");
 						}
 						else
 						{
 							LOG_ERR("Error starting client handler thread: %s", strerror(ret));
-							reverse_proxy_connection_cleanup(reverse_proxy_connection);
+							proxy_connection_cleanup(proxy_connection);
 						}
 					}
 					else if (ret == WOLFSSL_ERROR_WANT_WRITE)
@@ -612,13 +687,14 @@ void* tls_proxy_main_thread(void* ptr)
 
 static void* connection_handler_thread(void *ptr)
 {
-	struct reverse_proxy_connection* connection = (struct reverse_proxy_connection* ) ptr;
+	struct proxy_connection* connection = (struct proxy_connection* ) ptr;
 	struct poll_set poll_set;
 	bool shutdown = false;
 
 	poll_set_init(&poll_set);
 
-	poll_set_add_fd(&poll_set, connection->tcp_sock, POLLIN);
+	poll_set_add_fd(&poll_set, connection->listening_peer_sock, POLLIN);
+	poll_set_add_fd(&poll_set, connection->target_peer_sock, POLLOUT);
 	
 	while (!shutdown)
 	{
@@ -636,7 +712,8 @@ static void* connection_handler_thread(void *ptr)
 			int fd = poll_set.fds[i].fd;
 			short event = poll_set.fds[i].revents;
 
-			if (fd == connection->tcp_sock)
+			if (((connection->direction == REVERSE_PROXY) && (fd == connection->listening_peer_sock)) ||
+			    ((connection->direction == FORWARD_PROXY) && (fd == connection->target_peer_sock)))
 			{
 				int ret = 0;
 
@@ -649,26 +726,99 @@ static void* connection_handler_thread(void *ptr)
 
 					if (ret > 0)
 					{
-						/* Echo received data */
-						ret = wolfssl_send(connection->wolfssl_session, 
-								   connection->recv_buffer, 
-								   ret);
+						connection->num_of_bytes_in_recv_buffer = ret;
 
-						if (ret == WOLFSSL_ERROR_WANT_WRITE)
+						/* Send received data to the other socket */
+						int destination_fd = -1;
+						if (connection->direction == REVERSE_PROXY)
 						{
+							destination_fd = connection->target_peer_sock;
+						}
+						else if (connection->direction == FORWARD_PROXY)
+						{
+							destination_fd = connection->listening_peer_sock;
+						}
+
+						ret = send(destination_fd,
+							   connection->recv_buffer,
+							   connection->num_of_bytes_in_recv_buffer,
+							   0);
+
+						if ((ret == -1) && ((errno == EAGAIN) || (errno == EWOULDBLOCK)))
+						{	
 							/* We have to wait for the socket to be writable */
 							poll_set_update_events(&poll_set, fd, POLLOUT);
+							ret = 0;
 						}
 					}
 				}
 				if (event & POLLOUT)
 				{
-					/* Echo queued data */
+					/* Send received data to the other socket */
+					int destination_fd = -1;
+					if (connection->direction == REVERSE_PROXY)
+					{
+						destination_fd = connection->target_peer_sock;
+					}
+					else if (connection->direction == FORWARD_PROXY)
+					{
+						destination_fd = connection->listening_peer_sock;
+					}
+
+					ret = send(destination_fd,
+						   connection->recv_buffer,
+						   connection->num_of_bytes_in_recv_buffer,
+						   0);
+
+					
+					if (ret >= 0)
+					{
+						/* Wait again for incoming data */
+						poll_set_update_events(&poll_set, fd, POLLIN);
+					}
+				}
+
+				if (ret < 0)
+				{
+					/* Error, close session */
+					shutdown = true;
+					break;
+				}
+			}
+			else if (((connection->direction == REVERSE_PROXY) && (fd == connection->target_peer_sock)) ||
+			    	 ((connection->direction == FORWARD_PROXY) && (fd == connection->listening_peer_sock)))
+			{
+				if (event & POLLIN)
+				{
+					/* Receive data from the peer */
+					ret = read(fd, connection->recv_buffer, sizeof(connection->recv_buffer));
+
+					if (ret > 0)
+					{
+						connection->num_of_bytes_in_recv_buffer = ret;
+
+						/* Send received data to the other socket */
+						ret = wolfssl_send(connection->wolfssl_session,
+								   connection->recv_buffer,
+								   connection->num_of_bytes_in_recv_buffer);
+
+						if (ret == WOLFSSL_ERROR_WANT_WRITE)
+						{
+							/* We have to wait for the socket to be writable */
+							poll_set_update_events(&poll_set, fd, POLLOUT);
+							ret = 0;
+						}
+
+					}
+				}
+				if (event & POLLOUT)
+				{
+					/* Send received data to the other socket */
 					ret = wolfssl_send(connection->wolfssl_session, 
 							   connection->recv_buffer, 
-							   ret);
+							   connection->num_of_bytes_in_recv_buffer);
 					
-					if (ret == 0)
+					if (ret >= 0)
 					{
 						/* Wait again for incoming data */
 						poll_set_update_events(&poll_set, fd, POLLIN);
@@ -687,9 +837,9 @@ static void* connection_handler_thread(void *ptr)
 
 	wolfSSL_shutdown(connection->wolfssl_session);
 
-	LOG_INF("connection handler thread for %s:%d stopped", connection->peer_ip, connection->peer_port);
+	LOG_INF("connection handler thread stopped");
 
-	reverse_proxy_connection_cleanup(connection);
+	proxy_connection_cleanup(connection);
 
 	return NULL;
 }
@@ -699,31 +849,32 @@ static void* connection_handler_thread(void *ptr)
  * 
  * Returns 0 on success, -1 on failure (error message is printed to console).
  */
-int tls_proxy_init(void)
+int tls_proxy_backend_init(void)
 {
 	/* Init connection pool */
-	for (int i = 0; i < MAX_CONNECTIONS_PER_REVERSE_PROXY; i++)
+	for (int i = 0; i < MAX_CONNECTIONS_PER_PROXY; i++)
 	{
-		reverse_proxy_connection_pool[i].in_use = false;
-		reverse_proxy_connection_pool[i].tcp_sock = -1;
-		reverse_proxy_connection_pool[i].peer_ip[0] = '\0';
-		reverse_proxy_connection_pool[i].peer_port = 0;
-		reverse_proxy_connection_pool[i].wolfssl_session = NULL;
-		pthread_attr_init(&reverse_proxy_connection_pool[i].thread_attr);
-		pthread_attr_setdetachstate(&reverse_proxy_connection_pool[i].thread_attr, PTHREAD_CREATE_DETACHED);
+		proxy_connection_pool[i].in_use = false;
+		proxy_connection_pool[i].direction = REVERSE_PROXY;
+		proxy_connection_pool[i].listening_peer_sock = -1;
+		proxy_connection_pool[i].target_peer_sock = -1;
+		proxy_connection_pool[i].wolfssl_session = NULL;
+		proxy_connection_pool[i].num_of_bytes_in_recv_buffer;
+		pthread_attr_init(&proxy_connection_pool[i].thread_attr);
+		pthread_attr_setdetachstate(&proxy_connection_pool[i].thread_attr, PTHREAD_CREATE_DETACHED);
 	}
 
 	/* Init server pool */
-	for (int i = 0; i < MAX_REVERSE_PROXYS; i++)
+	for (int i = 0; i < MAX_PROXYS; i++)
 	{
-		reverse_proxy_pool[i].in_use = false;
-		reverse_proxy_pool[i].listening_port = 0;
-		reverse_proxy_pool[i].listening_tcp_sock = -1;
-		reverse_proxy_pool[i].wolfssl_contex = NULL;
+		proxy_pool[i].in_use = false;
+		proxy_pool[i].direction = REVERSE_PROXY;
+		proxy_pool[i].listening_tcp_sock = -1;
+		proxy_pool[i].wolfssl_contex = NULL;
 
-		for (int j = 0; j < MAX_CONNECTIONS_PER_REVERSE_PROXY; j++)
+		for (int j = 0; j < MAX_CONNECTIONS_PER_PROXY; j++)
 		{
-			reverse_proxy_pool[i].connections[j] = NULL;
+			proxy_pool[i].connections[j] = NULL;
 		}
 	}
 
@@ -744,7 +895,7 @@ int tls_proxy_init(void)
  * 
  * Returns 0 on success, -1 on failure (error message is printed to console).
  */
-int tls_proxy_run(void)
+int tls_proxy_backend_run(void)
 {
 #if defined(__ZEPHYR__)
 	/* We have to properly set the attributes with the stack to use for Zephyr. */
@@ -774,22 +925,12 @@ int tls_proxy_run(void)
 }
 
 
-/* Start a new reverse proxy with given config.
- * 
- * Returns the id of the new proxy instance on success (positive integer) or -1
- * on failure (error message is printed to console).
- */
-int tls_reverse_proxy_start(struct reverse_proxy_config const* config)
+int tls_proxy_start_helper(struct tls_proxy_management_message const* request)
 {
-	/* Create a START_REQUEST message */
-	struct tls_proxy_management_message request = {
-		.type = REVERSE_PROXY_START_REQUEST,
-		.payload.reverse_proxy_config = *config,
-	};
 	struct tls_proxy_management_message response;
 
 	/* Send request */
-	int ret = send_management_message(proxy_backend.management_socket_pair[0], &request);
+	int ret = send_management_message(proxy_backend.management_socket_pair[0], request);
 	if (ret < 0)
 	{
 		return -1;
@@ -817,16 +958,51 @@ int tls_reverse_proxy_start(struct reverse_proxy_config const* config)
 }
 
 
-/* Stop the running reverse proxy with given id (returned von tls_reverse_proxy_start).
+/* Start a new reverse proxy with given config.
+ * 
+ * Returns the id of the new proxy instance on success (positive integer) or -1
+ * on failure (error message is printed to console).
+ */
+int tls_reverse_proxy_start(struct proxy_config const* config)
+{
+	/* Create a START_REQUEST message */
+	struct tls_proxy_management_message request = {
+		.type = REVERSE_PROXY_START_REQUEST,
+		.payload.reverse_proxy_config = *config,
+	};
+
+	return tls_proxy_start_helper(&request);
+}
+
+
+/* Start a new forward proxy with given config.
+ * 
+ * Returns the id of the new proxy instance on success (positive integer) or -1
+ * on failure (error message is printed to console).
+ */
+int tls_forward_proxy_start(struct proxy_config const* config)
+{
+	/* Create a START_REQUEST message */
+	struct tls_proxy_management_message request = {
+		.type = FORWARD_PROXY_START_REQUEST,
+		.payload.forward_proxy_config = *config,
+	};
+
+	return tls_proxy_start_helper(&request);
+}
+
+
+/* Stop the running proxy with given id (returned by tls_forward_proxy_start or
+ * tls_forward_proxy_start).
  *
  * Returns 0 on success, -1 on failure (error message is printed to console).
  */
-int tls_reverse_proxy_stop(int id)
+int tls_proxy_stop(int id)
 {
 	/* Create a STOP_REQUEST message */
 	struct tls_proxy_management_message request = {
-		.type = REVERSE_PROXY_STOP_REQUEST,
-		.payload.reverse_proxy_id = id,
+		.type = PROXY_STOP_REQUEST,
+		.payload.proxy_id = id,
 	};
 	struct tls_proxy_management_message response;
 
@@ -858,32 +1034,11 @@ int tls_reverse_proxy_stop(int id)
 }
 
 
-/* Start a new forward proxy with given config.
- * 
- * Returns the id of the new proxy instance on success (positive integer) or -1
- * on failure (error message is printed to console).
- */
-int tls_forward_proxy_start(struct forward_proxy_config const* config)
-{
-	return 0;
-}
-
-
-/* Stop the running forward proxy with given id (returned von tls_forward_proxy_start).
- *
- * Returns 0 on success, -1 on failure (error message is printed to console).
- */
-int tls_forward_proxy_stop(int id)
-{
-	return 0;
-}
-
-
 /* Terminate the application backend.
  *
  * Returns 0 on success, -1 on failure (error message is printed to console).
  */
-int tls_proxy_terminate(void)
+int tls_proxy_backend_terminate(void)
 {
 	/* Close the management socket pair */
 	if (proxy_backend.management_socket_pair[0] >= 0)
@@ -898,11 +1053,11 @@ int tls_proxy_terminate(void)
 	}
 
 	/* Stop all running reverse proxies */
-	for (int i = 0; i < MAX_REVERSE_PROXYS; i++)
+	for (int i = 0; i < MAX_PROXYS; i++)
 	{
-		if (reverse_proxy_pool[i].in_use == true)
+		if (proxy_pool[i].in_use == true)
 		{
-			kill_reverse_proxy(&reverse_proxy_pool[i]);
+			kill_proxy(&proxy_pool[i]);
 		}
 	}
 
