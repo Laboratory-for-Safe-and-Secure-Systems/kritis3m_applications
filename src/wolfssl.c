@@ -210,10 +210,24 @@ static int wolfssl_configure_context(WOLFSSL_CTX* context, struct wolfssl_endpoi
 		return -1;
 
 	/* Configure the available cipher suites for TLS 1.3;
-	* We only support AES GCM with 256 bit key length */
+	 * We only support AES GCM with 256 bit key length */
 	ret = wolfSSL_CTX_set_cipher_list(context, "TLS13-AES256-GCM-SHA384");
 	if (errorOccured(ret))
 		return -1;
+
+	/* Configure the available curves for Key Exchange */
+	// int wolfssl_key_exchange_curves[] = {
+	// 	WOLFSSL_KYBER_LEVEL1,
+        // 	WOLFSSL_KYBER_LEVEL3,
+        // 	WOLFSSL_KYBER_LEVEL5,
+        // 	WOLFSSL_P256_KYBER_LEVEL1,
+        // 	WOLFSSL_P384_KYBER_LEVEL3,
+        // 	WOLFSSL_P521_KYBER_LEVEL5,
+	// };
+	// ret = wolfSSL_CTX_set_groups(context, wolfssl_key_exchange_curves,
+	// 			     sizeof(wolfssl_key_exchange_curves) / sizeof(int));
+	// if (errorOccured(ret))
+	// 	return -1;
 
 	/* Set the IO callbacks for send and receive */
 	wolfSSL_CTX_SetIORecv(context, wolfssl_read_callback);
