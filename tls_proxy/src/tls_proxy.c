@@ -5,18 +5,6 @@
 #include <unistd.h>
 #include <stdint.h>
 
-#if defined(__ZEPHYR__)
-
-#else
-
-#include <stdio.h>
-#include <time.h>
-#include <arpa/inet.h>
-#include <netdb.h>
-#include <string.h>
-
-#endif
-
 #include "tls_proxy.h"
 
 #include "logging.h"
@@ -278,6 +266,13 @@ static int add_new_proxy(enum tls_proxy_direction direction, struct proxy_config
 		return -1;
 	}
 
+	if (setsockopt(proxy->listening_tcp_sock, SOL_SOCKET, SO_REUSEADDR, &(int){1}, sizeof(int)) < 0)
+        {
+                LOG_ERR("setsockopt(SO_REUSEADDR) failed: errer %d\n", errno);
+		close(proxy->listening_tcp_sock);
+		return -1;
+        }
+
 	/* Configure TCP server */
 	struct sockaddr_in bind_addr = {
 			.sin_family = AF_INET,
@@ -288,7 +283,8 @@ static int add_new_proxy(enum tls_proxy_direction direction, struct proxy_config
 	/* Bind server socket to its destined IPv4 address */
 	if (bind(proxy->listening_tcp_sock, (struct sockaddr*) &bind_addr, sizeof(bind_addr)) == -1) 
 	{
-		LOG_ERR("Cannot bind socket %d to %s: errer %d\n", proxy->listening_tcp_sock, config->own_ip_address, errno);
+		LOG_ERR("Cannot bind socket %d to %s:%d: errer %d\n",
+			proxy->listening_tcp_sock, config->own_ip_address, config->listening_port, errno);
 		kill_proxy(proxy);
 		return -1;
 	}
@@ -564,6 +560,9 @@ void* tls_proxy_main_thread(void* ptr)
 			int fd = config->poll_set.fds[i].fd;
 			short event = config->poll_set.fds[i].revents;
 
+			if(event == 0)
+                                continue;
+
 			struct proxy* proxy = NULL;
 			struct proxy_connection* proxy_connection = NULL;
 
@@ -625,6 +624,7 @@ void* tls_proxy_main_thread(void* ptr)
 						proxy_connection_cleanup(proxy_connection);
 						continue;
 					}
+					break;
 				}
 			}
 			/* Check all proxy connections (that are in the TLS handshake) */
@@ -712,11 +712,12 @@ static void* connection_handler_thread(void *ptr)
 			int fd = poll_set.fds[i].fd;
 			short event = poll_set.fds[i].revents;
 
+			if(event == 0)
+                                continue;
+
 			if (((connection->direction == REVERSE_PROXY) && (fd == connection->listening_peer_sock)) ||
 			    ((connection->direction == FORWARD_PROXY) && (fd == connection->target_peer_sock)))
 			{
-				int ret = 0;
-
 				if (event & POLLIN)
 				{
 					/* Receive data from the peer */
@@ -809,6 +810,12 @@ static void* connection_handler_thread(void *ptr)
 							ret = 0;
 						}
 
+					}
+					else if (ret == 0)
+					{
+						/* Connection closed */
+						LOG_INF("TCP connection closed by peer");
+						ret = -1;
 					}
 				}
 				if (event & POLLOUT)
@@ -914,11 +921,11 @@ int tls_proxy_backend_run(void)
 	ret = pthread_create(&proxy_backend.thread, &proxy_backend.thread_attr, tls_proxy_main_thread, &proxy_backend);
 	if (ret == 0)
 	{
-		LOG_INF("TLS echo server main thread started");
+		LOG_INF("TLS proxy main thread started");
 	}
 	else
 	{
-		LOG_ERR("Error starting TLS echo server thread: %s", strerror(ret));
+		LOG_ERR("Error starting TLS proxy thread: %s", strerror(ret));
 	}
 
 	return ret;
@@ -949,7 +956,7 @@ int tls_proxy_start_helper(struct tls_proxy_management_message const* request)
 	}
 	else if (response.payload.response_code < 0)
 	{
-		LOG_ERR("Error starting TLS reverse proxy (error %d)", response.payload.response_code);
+		LOG_ERR("Error starting new TLS proxy (error %d)", response.payload.response_code);
 		return -1;
 	}
 	
@@ -1026,7 +1033,7 @@ int tls_proxy_stop(int id)
 	}
 	else if (response.payload.response_code < 0)
 	{
-		LOG_ERR("Error stopping TLS reverse proxy (error %d)", response.payload.response_code);
+		LOG_ERR("Error stopping TLS proxy (error %d)", response.payload.response_code);
 		return -1;
 	}
 	

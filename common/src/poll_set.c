@@ -23,6 +23,7 @@ int poll_set_add_fd(struct poll_set* poll_set, int fd, short events)
 
 		poll_set->fds[i].fd = fd;
 		poll_set->fds[i].events = events;
+		poll_set->fds[i].revents = 0;
 
 		return 0;
 	} 

@@ -8,6 +8,7 @@
 #else
 
 #include <stdbool.h>
+#include <arpa/inet.h>
 #include <netinet/in.h>
 
 #define net_addr_ntop inet_ntop
