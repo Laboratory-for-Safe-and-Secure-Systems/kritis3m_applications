@@ -17,14 +17,6 @@ struct proxy_config
 };
 
 
-
-/* Initialize the application backend. Must be called once on startup.
- * 
- * Returns 0 on success, -1 on failure (error message is printed to console).
- */
-int tls_proxy_backend_init(void);
-
-
 /* Start a new thread and run the main TLS proxy backend.
  * 
  * Returns 0 on success, -1 on failure (error message is printed to console).

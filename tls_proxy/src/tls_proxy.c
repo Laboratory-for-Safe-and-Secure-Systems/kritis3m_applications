@@ -852,11 +852,11 @@ static void* connection_handler_thread(void *ptr)
 }
 
 
-/* Initialize the application backend. Must be called once on startup.
+/* Start a new thread and run the main TLS proxy backend.
  * 
  * Returns 0 on success, -1 on failure (error message is printed to console).
  */
-int tls_proxy_backend_init(void)
+int tls_proxy_backend_run(void)
 {
 	/* Init connection pool */
 	for (int i = 0; i < MAX_CONNECTIONS_PER_PROXY; i++)
@@ -894,16 +894,6 @@ int tls_proxy_backend_init(void)
 
 	poll_set_init(&proxy_backend.poll_set);
 
-	return 0;
-}
-
-
-/* Start a new thread and run the main TLS proxy backend.
- * 
- * Returns 0 on success, -1 on failure (error message is printed to console).
- */
-int tls_proxy_backend_run(void)
-{
 #if defined(__ZEPHYR__)
 	/* We have to properly set the attributes with the stack to use for Zephyr. */
 	pthread_attr_setstack(&proxy_backend.thread_attr, backend_stack, K_THREAD_STACK_SIZEOF(backend_stack));
