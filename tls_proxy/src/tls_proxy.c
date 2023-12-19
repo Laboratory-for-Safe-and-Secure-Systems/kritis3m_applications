@@ -309,7 +309,7 @@ static int add_new_proxy(enum tls_proxy_direction direction, struct proxy_config
 	proxy->target_addr.sin_port = htons(config->target_port);
 	net_addr_pton(proxy->target_addr.sin_family, config->target_ip_address, &proxy->target_addr.sin_addr);
 
-	LOG_INF("Waiting for TLS connections on port %d", config->listening_port);
+	LOG_INF("Waiting for incoming connections on port %d", config->listening_port);
 
 	return freeSlot+1;
 }
@@ -1037,18 +1037,6 @@ int tls_proxy_stop(int id)
  */
 int tls_proxy_backend_terminate(void)
 {
-	/* Close the management socket pair */
-	if (proxy_backend.management_socket_pair[0] >= 0)
-	{
-		close(proxy_backend.management_socket_pair[0]);
-		proxy_backend.management_socket_pair[0] = -1;
-	}
-	if (proxy_backend.management_socket_pair[1] >= 0)
-	{
-		close(proxy_backend.management_socket_pair[1]);
-		proxy_backend.management_socket_pair[1] = -1;
-	}
-
 	/* Stop all running reverse proxies */
 	for (int i = 0; i < MAX_PROXYS; i++)
 	{
@@ -1060,6 +1048,18 @@ int tls_proxy_backend_terminate(void)
 
 	/* Stop the main thread */
 	pthread_cancel(proxy_backend.thread);
+
+	/* Close the management socket pair */
+	if (proxy_backend.management_socket_pair[0] >= 0)
+	{
+		close(proxy_backend.management_socket_pair[0]);
+		proxy_backend.management_socket_pair[0] = -1;
+	}
+	if (proxy_backend.management_socket_pair[1] >= 0)
+	{
+		close(proxy_backend.management_socket_pair[1]);
+		proxy_backend.management_socket_pair[1] = -1;
+	}
 
 	return 0;
 }

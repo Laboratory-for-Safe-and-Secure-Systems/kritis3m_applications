@@ -168,6 +168,8 @@ int tcp_client_stdin_bridge_run(struct tcp_client_stdin_bridge_config const* con
 		return -1;
 	}
 
+	LOG_INF("Connecting to %s:%d", config->target_ip_address, config->target_port);
+
 	/* Configure TCP server */
 	struct sockaddr_in target_addr = {
 			.sin_family = AF_INET,
