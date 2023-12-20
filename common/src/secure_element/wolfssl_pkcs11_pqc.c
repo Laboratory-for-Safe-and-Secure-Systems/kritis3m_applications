@@ -9,11 +9,14 @@ LOG_MODULE_REGISTER(wolfssl_pkcs11);
 
 #define DEVICE_ID_SECURE_ELEMENT 1
 
-static char secure_element_private_key_id[16] = "SERVER_KEY";
+static char secure_element_private_key_id[] = "SERVER_KEY";
 static size_t secure_element_private_key_id_size = sizeof("SERVER_KEY") - 1;
 
-static char secure_element_temp_key_id[16] = "TEMP_KEY";
-static size_t secure_element_temp_key_id_size = sizeof("TEMP_KEY") - 1;
+static char secure_element_temp_key_kem_id[] = "TEMP_KEY_KEM";
+static size_t secure_element_temp_key_kem_id_size = sizeof("TEMP_KEY_KEM") - 1;
+
+static char secure_element_temp_key_sig_id[] = "TEMP_KEY_SIG";
+static size_t secure_element_temp_key_sig_id_size = sizeof("TEMP_KEY_SIG") - 1;
 
 
 /* Internal method declarations */
@@ -24,14 +27,23 @@ static int wolfssl_extract_dilithium_keys(int key_format, uint8_t const* der_buf
 static int wolfssl_extract_falcon_keys(int key_format, uint8_t const* der_buffer, uint32_t der_size,
 				       uint8_t** private_key_buffer, uint32_t* private_key_size,
 				       uint8_t** public_key_buffer, uint32_t* public_key_size);
+
+static int wolfssl_pkcs11_kyber_keygen(KyberKey* key, uint32_t keySize);
+static int wolfssl_pkcs11_kyber_encapsulate(KyberKey* key, uint8_t* ciphertext, uint32_t ciphertextLen,
+    					    uint8_t* sharedSecret, uint32_t sharedSecretLen);
+static int wolfssl_pkcs11_kyber_decapsulate(KyberKey* key, uint8_t const* ciphertext, uint32_t ciphertextLen,
+    					    uint8_t* sharedSecret, uint32_t sharedSecretLen);
+
 static int wolfssl_pkcs11_dilithium_sign(dilithium_key* key, uint8_t const* message, uint32_t message_size,
                                          uint8_t* signature, uint32_t* signature_size);
 static int wolfssl_pkcs11_falcon_sign(falcon_key* key, uint8_t const* message, uint32_t message_size,
                                       uint8_t* signature, uint32_t* signature_size);
+
 static int wolfssl_pkcs11_dilithium_verify(dilithium_key* key, uint8_t const* message, uint32_t message_size,
                                            uint8_t const* signature, uint32_t signature_size);
 static int wolfssl_pkcs11_falcon_verify(falcon_key* key, uint8_t const* message, uint32_t message_size,
                                         uint8_t const* signature, uint32_t signature_size);
+
 static int wolfssl_pkcs11_dilithium_check_key(dilithium_key* key, uint8_t const* public_key, uint32_t public_key_size);
 static int wolfssl_pkcs11_falcon_check_key(falcon_key* key, uint8_t const* public_key, uint32_t public_key_size);
 
@@ -69,7 +81,7 @@ int wolfssl_import_key_pair_into_secure_element(uint8_t const* pem_buffer, uint3
 	int  keyFormat = 0;
 
 	/* Delete all currently stored objects on the card */
-	int ret = pkcs11_destroy_objects(secure_element_private_key_id, secure_element_private_key_id_size);			
+	int ret = pkcs11_destroy_objects(secure_element_private_key_id, secure_element_private_key_id_size);
 
 	/* Convert key to DER (binary) */
 	ret = PemToDer(pem_buffer, pem_size, PRIVATEKEY_TYPE, &der, NULL,
@@ -325,6 +337,24 @@ static int wolfssl_crypto_callback_secure_element(int devId, wc_CryptoInfo* info
 	{
 		switch (info->pk.type)
 		{
+		case WC_PK_TYPE_KYBER_KEYGEN:
+			ret = wolfssl_pkcs11_kyber_keygen(info->pk.kyber_kg.key,
+							  info->pk.kyber_kg.size);
+			break;
+		case WC_PK_TYPE_KYBER_ENCAPS:
+			ret = wolfssl_pkcs11_kyber_encapsulate(info->pk.kyber_encaps.key,
+							       info->pk.kyber_encaps.ciphertext,
+							       info->pk.kyber_encaps.ciphertextLen,
+							       info->pk.kyber_encaps.sharedSecret,
+							       info->pk.kyber_encaps.sharedSecretLen);
+			break;
+		case WC_PK_TYPE_KYBER_DECAPS:
+			ret = wolfssl_pkcs11_kyber_decapsulate(info->pk.kyber_decaps.key,
+							       info->pk.kyber_decaps.ciphertext,
+							       info->pk.kyber_decaps.ciphertextLen,
+							       info->pk.kyber_decaps.sharedSecret,
+							       info->pk.kyber_decaps.sharedSecretLen);
+			break;
 		case WC_PK_TYPE_DILITHIUM_KEYGEN:
 			/* ToDo */
 			break;
@@ -375,6 +405,103 @@ static int wolfssl_crypto_callback_secure_element(int devId, wc_CryptoInfo* info
 			break;
 		default:
 			break;
+		}
+	}
+
+	return ret;
+}
+
+
+int wolfssl_pkcs11_kyber_keygen(KyberKey* key, uint32_t keySize)
+{
+	int ret = CRYPTOCB_UNAVAILABLE;
+
+	/* Check which key type we have to generate */
+	if (key->type == KYBER768)
+	{
+		/* Delete any exisiting (old) objects */
+		pkcs11_destroy_objects(secure_element_temp_key_sig_id, secure_element_temp_key_sig_id_size);
+
+		/* Generate the key */
+		ret = pkcs11_generate_key_pair_kyber768(secure_element_temp_key_sig_id,
+                                                        secure_element_temp_key_sig_id_size);
+
+		if (ret != CKR_OK) 
+		{
+			ret = WC_HW_E;
+		}
+		else
+		{
+			/* Read public key */
+			unsigned long external_public_key_size = EXT_KYBER_MAX_PUB_SZ;
+			ret = pkcs11_read_public_key(secure_element_temp_key_sig_id,
+						     secure_element_temp_key_sig_id_size,
+						     key->pub,
+						     &external_public_key_size);
+
+			if ((ret != CKR_OK) || (external_public_key_size != KYBER768_PUBLIC_KEY_SIZE))
+			{
+				ret = WC_HW_E;
+			}
+			else
+			{
+				/* We store the id of the generated key in the private key buffer */
+				memcpy(key->priv, secure_element_temp_key_sig_id, secure_element_temp_key_sig_id_size);
+			}
+		}
+	}
+
+	return ret;
+}
+
+int wolfssl_pkcs11_kyber_encapsulate(KyberKey* key, uint8_t* ciphertext, uint32_t ciphertextLen,
+				     uint8_t* sharedSecret, uint32_t sharedSecretLen)
+{
+	int ret = CRYPTOCB_UNAVAILABLE;
+
+	/* Helper variables as the pkcs11 lib wants 64 bit integers here */
+        unsigned long shared_secret_size_tmp = sharedSecretLen;
+	unsigned long ciphertext_size_tmp = ciphertextLen;
+
+	if (key->type == KYBER768)
+	{
+		ret = pkcs11_encapsulate_kyber768_with_external_public_key(key->pub,
+									   KYBER768_PUBLIC_KEY_SIZE,
+									   ciphertext,
+									   &ciphertext_size_tmp,
+									   sharedSecret,
+									   &shared_secret_size_tmp);
+
+		if ((ret != CKR_OK) || (shared_secret_size_tmp != sharedSecretLen) ||
+		    (ciphertext_size_tmp != ciphertextLen))
+		{
+			ret = WC_HW_E;
+		}
+	}
+
+	return ret;
+}
+
+int wolfssl_pkcs11_kyber_decapsulate(KyberKey* key, uint8_t const* ciphertext, uint32_t ciphertextLen,
+				     uint8_t* sharedSecret, uint32_t sharedSecretLen)
+{
+	int ret = CRYPTOCB_UNAVAILABLE;
+
+	/* Helper variable as the pkcs11 lib wants a 64 bit integer here */
+        unsigned long shared_secret_size_tmp = sharedSecretLen;
+
+	if (key->type == KYBER768)
+	{
+		ret = pkcs11_decapsulate_kyber768(key->priv,
+						  secure_element_temp_key_sig_id_size,
+						  (CK_BYTE*) ciphertext,
+						  ciphertextLen,
+						  sharedSecret,
+						  &shared_secret_size_tmp);
+
+		if ((ret != CKR_OK) || (shared_secret_size_tmp != sharedSecretLen))
+		{
+			ret = WC_HW_E;
 		}
 	}
 
@@ -449,8 +576,8 @@ int wolfssl_pkcs11_dilithium_verify(dilithium_key* key, uint8_t const* message, 
         }
                 
         /* Import the provided public key into the secure element */
-        ret = pkcs11_create_object_public_key_dilithium2(secure_element_temp_key_id,
-                                                         secure_element_temp_key_id_size,
+        ret = pkcs11_create_object_public_key_dilithium2(secure_element_temp_key_sig_id,
+                                                         secure_element_temp_key_sig_id_size,
                                                          key->p,
                                                          external_public_key_size);
         if (ret != CKR_OK) 
@@ -460,8 +587,8 @@ int wolfssl_pkcs11_dilithium_verify(dilithium_key* key, uint8_t const* message, 
         else
         {
                 /* Verify the signature */
-                ret = pkcs11_verify_dilithium2(secure_element_temp_key_id,
-                                               secure_element_temp_key_id_size,
+                ret = pkcs11_verify_dilithium2(secure_element_temp_key_sig_id,
+                                               secure_element_temp_key_sig_id_size,
                                                (CK_BYTE*) message,
                                                message_size,
                                                (CK_BYTE*) signature,
@@ -471,7 +598,7 @@ int wolfssl_pkcs11_dilithium_verify(dilithium_key* key, uint8_t const* message, 
                         ret = SIG_VERIFY_E;
                 }
 
-                pkcs11_destroy_objects(secure_element_temp_key_id, secure_element_temp_key_id_size);
+                pkcs11_destroy_objects(secure_element_temp_key_sig_id, secure_element_temp_key_sig_id_size);
         }
         
 }
