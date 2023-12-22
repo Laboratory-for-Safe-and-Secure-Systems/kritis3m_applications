@@ -20,4 +20,19 @@ void log_message(char const* module, char const* level, char const* fmt, ...)
     printf("<%s>\t%s: %s\r\n", level, module, message);
 }
 
+void shell_log(struct shell const* sh, char const* fmt, ...)
+{
+    (void) sh;
+
+    va_list args;
+    va_start(args, fmt);
+
+    char message[256];
+    vsnprintf(message, sizeof(message), fmt, args);
+
+    va_end(args);
+
+    printf("%s\r\n", message);
+}
+
 #endif

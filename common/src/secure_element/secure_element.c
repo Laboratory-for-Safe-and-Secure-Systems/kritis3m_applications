@@ -8,6 +8,7 @@
 
 #include "secure_element/secure_element.h"
 
+
 #if defined(_WIN32)
 
 #define DLL_CRYPTOKI_MODULE_PKCS11 "libcardos11-iot-pcsc.dll"
@@ -16,7 +17,24 @@
 
 #define DLL_CRYPTOKI_MODULE_PKCS11 "/usr/local/lib/libcardos11-iot-pcsc.so"
 
+#if defined(__ZEPHYR__)
+/* Dummy methods */
+void* dlopen(const char* filename, int flags)
+{
+  return NULL;
+}
+void dlclose(void* handle)
+{
+}
+void* dlsym(void* handle, const char* symbol)
+{
+  return NULL;
+}
+#define RTLD_NOW 0
+#else
 #include <dlfcn.h>
+#endif
+
 #define HINSTANCE void *
 #define LoadLibrary(filename) dlopen((filename), RTLD_NOW)
 #define FreeLibrary(handle) dlclose((handle))

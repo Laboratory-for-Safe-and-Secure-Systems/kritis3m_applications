@@ -866,7 +866,7 @@ int tls_proxy_backend_run(void)
 		proxy_connection_pool[i].listening_peer_sock = -1;
 		proxy_connection_pool[i].target_peer_sock = -1;
 		proxy_connection_pool[i].wolfssl_session = NULL;
-		proxy_connection_pool[i].num_of_bytes_in_recv_buffer;
+		proxy_connection_pool[i].num_of_bytes_in_recv_buffer = 0;
 		pthread_attr_init(&proxy_connection_pool[i].thread_attr);
 		pthread_attr_setdetachstate(&proxy_connection_pool[i].thread_attr, PTHREAD_CREATE_DETACHED);
 	}

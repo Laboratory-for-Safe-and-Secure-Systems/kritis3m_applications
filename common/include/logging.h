@@ -20,6 +20,18 @@
 
 void log_message(char const* module, char const* level, char const* fmt, ...);
 
+
+struct shell
+{
+        int dummy;
+};
+
+#define shell_print(sh, fmt, ...) shell_log(sh, fmt, ##__VA_ARGS__)
+#define shell_warn(sh, fmt, ...) shell_log(sh, fmt, ##__VA_ARGS__)
+#define shell_error(sh, fmt, ...) shell_log(sh, fmt, ##__VA_ARGS__)
+
+void shell_log(struct shell const* sh, char const* fmt, ...);
+
 #endif
 
 #endif /* LOGGING_H_ */

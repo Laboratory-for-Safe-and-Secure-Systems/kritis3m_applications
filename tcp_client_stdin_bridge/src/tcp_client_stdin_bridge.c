@@ -15,6 +15,8 @@
 LOG_MODULE_REGISTER(tcp_client_stdin_bridge);
 
 
+#if !defined(__ZEPHYR__)
+
 #define RECV_BUFFER_SIZE 1024
 
 
@@ -31,12 +33,6 @@ struct tcp_client_stdin_bridge
 
 /* File global variables */
 static struct tcp_client_stdin_bridge client_stdin_bridge;
-
-#if defined(__ZEPHYR__)
-#define STACK_SIZE 8*1024
-
-Z_KERNEL_STACK_DEFINE_IN(client_stdin_bridge_stack, STACK_SIZE, __attribute__((section("SRAM3"))));
-#endif
 
 
 /* Internal method declarations */
@@ -149,6 +145,8 @@ static void* tcp_client_stdin_bridge_main_thread(void* ptr)
 	return NULL;
 }
 
+#endif // !defined(__ZEPHYR__)
+
 
 /* Start a new thread and run the TCP client stdin bridge application.
  * 
@@ -156,6 +154,10 @@ static void* tcp_client_stdin_bridge_main_thread(void* ptr)
  */
 int tcp_client_stdin_bridge_run(struct tcp_client_stdin_bridge_config const* config)
 {
+#if defined(__ZEPHYR__)
+	LOG_ERR("TCP client stdin bridge not supported on Zephyr");
+	return -1;
+#else
         /* Init */
         poll_set_init(&client_stdin_bridge.poll_set);
 	client_stdin_bridge.num_of_bytes_in_recv_buffer = 0;
@@ -211,11 +213,6 @@ int tcp_client_stdin_bridge_run(struct tcp_client_stdin_bridge_config const* con
 	pthread_attr_init(&client_stdin_bridge.thread_attr);
 	pthread_attr_setdetachstate(&client_stdin_bridge.thread_attr, PTHREAD_CREATE_DETACHED);
 
-#if defined(__ZEPHYR__)
-	/* We have to properly set the attributes with the stack to use for Zephyr. */
-	pthread_attr_setstack(&client_stdin_bridge.thread_attr, client_stdin_bridge_stack, K_THREAD_STACK_SIZEOF(client_stdin_bridge_stack));
-#endif
-
         /* Create the new thread */
 	ret = pthread_create(&client_stdin_bridge.thread, &client_stdin_bridge.thread_attr, tcp_client_stdin_bridge_main_thread, &client_stdin_bridge);
 	if (ret == 0)
@@ -229,6 +226,7 @@ int tcp_client_stdin_bridge_run(struct tcp_client_stdin_bridge_config const* con
 	}
 
 	return ret;
+#endif
 }
 
 
@@ -238,8 +236,13 @@ int tcp_client_stdin_bridge_run(struct tcp_client_stdin_bridge_config const* con
  */
 int tcp_client_stdin_bridge_terminate(void)
 {
+#if defined(__ZEPHYR__)
+	LOG_ERR("TCP client stdin bridge not supported on Zephyr");
+	return -1;
+#else
 	/* Stop the main thread */
 	pthread_cancel(client_stdin_bridge.thread);
 
 	return 0;
+#endif
 }
