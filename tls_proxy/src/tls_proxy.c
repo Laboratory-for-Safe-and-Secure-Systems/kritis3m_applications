@@ -778,6 +778,21 @@ static void* connection_handler_thread(void *ptr)
 						poll_set_update_events(&poll_set, fd, POLLIN);
 					}
 				}
+				if (event & POLLERR)
+				{
+					/* Error on socket */
+					if (fd == connection->listening_peer_sock)
+					{
+						LOG_ERR("error on listening socket");
+					}
+					else if (fd == connection->target_peer_sock)
+					{
+						LOG_ERR("error on target socket");
+					}
+
+					shutdown = true;
+					break;
+				}
 
 				if (ret < 0)
 				{
@@ -830,6 +845,21 @@ static void* connection_handler_thread(void *ptr)
 						/* Wait again for incoming data */
 						poll_set_update_events(&poll_set, fd, POLLIN);
 					}
+				}
+				if (event & POLLERR)
+				{
+					/* Error on socket */
+					if (fd == connection->listening_peer_sock)
+					{
+						LOG_ERR("error on listening socket");
+					}
+					else if (fd == connection->target_peer_sock)
+					{
+						LOG_ERR("error on target socket");
+					}
+
+					shutdown = true;
+					break;
 				}
 
 				if (ret < 0)
