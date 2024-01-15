@@ -616,7 +616,7 @@ void* tls_proxy_main_thread(void* ptr)
 					}
 					else if (proxy_connection->direction == FORWARD_PROXY)
 					{
-						ret = poll_set_add_fd(&config->poll_set, proxy_connection->target_peer_sock, POLLOUT);
+						ret = poll_set_add_fd(&config->poll_set, proxy_connection->target_peer_sock, POLLOUT | POLLERR | POLLHUP);
 					}
 					if (ret != 0)
 					{
@@ -672,6 +672,13 @@ void* tls_proxy_main_thread(void* ptr)
 						/* We have to wait for more data from the peer */
 						poll_set_update_events(&config->poll_set, fd, POLLIN);
 					}
+				}
+				if ((event & POLLERR) || (event & POLLHUP))
+				{
+					LOG_ERR("Socket error");
+					poll_set_remove_fd(&config->poll_set, fd);
+					proxy_connection_cleanup(proxy_connection);
+					continue;
 				}
 			}
 			else
