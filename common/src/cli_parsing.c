@@ -37,19 +37,21 @@ struct certificates
 
 static const struct option cli_options[] =
 {
-    { "reverse_proxy",  no_argument, 0, 'w' },
-    { "forward_proxy",  no_argument, 0, 'x' },
-    { "echo_server",    no_argument, 0, 'y' },
-    { "echo_client",    no_argument, 0, 'z' },
-    { "incoming",       required_argument, 0, 'a' },
-    { "outgoing",       required_argument, 0, 'b' },
-    { "identity",       required_argument, 0, 'v' },
-    { "cert",           required_argument, 0, 'c' },
-    { "key",            required_argument, 0, 'k' },
-    { "intermediate",   required_argument, 0, 'i' },
-    { "root",           required_argument, 0, 'r' },
-    { "secure_element", no_argument,       0, 's' },
-    { "help",           no_argument,       0, 'h' },
+    { "reverse_proxy",   no_argument, 0, 'w' },
+    { "forward_proxy",   no_argument, 0, 'x' },
+    { "echo_server",     no_argument, 0, 'y' },
+    { "echo_client",     no_argument, 0, 'z' },
+    { "incoming",        required_argument, 0, 'a' },
+    { "outgoing",        required_argument, 0, 'b' },
+    { "identity",        required_argument, 0, 'v' },
+    { "cert",            required_argument, 0, 'c' },
+    { "key",             required_argument, 0, 'k' },
+    { "intermediate",    required_argument, 0, 'i' },
+    { "root",            required_argument, 0, 'r' },
+    { "secure_element",  no_argument,       0, 's' },
+    { "middleware_path", required_argument, 0, 'm' },
+    { "debug",           no_argument,       0, 'd' },
+    { "help",            no_argument,       0, 'h' },
     {NULL, 0, NULL, 0}
 };
 
@@ -64,8 +66,15 @@ static void print_help(const struct shell *sh, char const* name);
  * on console).
  */
 int parse_cli_arguments(enum application_role* role, struct proxy_config* proxy_config,
-                        const struct shell *sh, size_t argc, char** argv)
+                        wolfssl_library_configuration* wolfssl_config, struct shell *sh,
+                        size_t argc, char** argv)
 {
+        if ((role == NULL) || (proxy_config == NULL))
+        {
+                shell_error(sh, "mandatory argument missing for parse_cli_arguments()");
+                return -1;
+        }
+
 	/* Set default values */
         *role = NOT_SET;
 
@@ -79,7 +88,13 @@ int parse_cli_arguments(enum application_role* role, struct proxy_config* proxy_
 	proxy_config->tls_config.private_key.size = 0;
 	proxy_config->tls_config.root_certificate.buffer = NULL;
 	proxy_config->tls_config.root_certificate.size = 0;
-	proxy_config->tls_config.use_secure_element = false;
+	
+        if (wolfssl_config != NULL)
+        {
+                wolfssl_config->loggingEnabled = false;
+                wolfssl_config->use_secure_element = false;
+                wolfssl_config->secure_element_middleware_path = NULL;
+        }
 
         struct certificates certs = {
                 .certificate_path = NULL,
@@ -107,7 +122,7 @@ int parse_cli_arguments(enum application_role* role, struct proxy_config* proxy_
 #endif
 	while (true)
 	{
-		int result = getopt_long(argc, argv, "wxyza:b:v:c:k:i:r:sh", cli_options, &index);
+		int result = getopt_long(argc, argv, "wxyza:b:v:c:k:i:r:sm:dh", cli_options, &index);
 
 		if (result == -1) 
 		        break; /* end of list */
@@ -207,8 +222,17 @@ int parse_cli_arguments(enum application_role* role, struct proxy_config* proxy_
 				certs.root_path = optarg;
 				break;
 			case 's':
-				proxy_config->tls_config.use_secure_element = true;
+				if (wolfssl_config != NULL)
+                                        wolfssl_config->use_secure_element = true;
 				break;
+                        case 'm':
+                                if (wolfssl_config != NULL)
+                                        wolfssl_config->secure_element_middleware_path = optarg;
+                                break;
+                        case 'd':
+                                if (wolfssl_config != NULL)
+                                        wolfssl_config->loggingEnabled = true;
+                                break;
 			case 'h': 
 				print_help(sh, argv[0]);
 				return 1;
@@ -242,23 +266,25 @@ static void print_help(const struct shell *sh, char const* name)
 {
         shell_print(sh, "Usage: %s [OPTIONS]", name);
         shell_print(sh, "Roles:\n");
-        shell_print(sh, "  --reverse_proxy                start a TLS reverse proxy (use --incoming and --outgoing for connection configuration)");
-        shell_print(sh, "  --forward_proxy                start a TLS forward proxy (use --incoming and --outgoing for connection configuration)");
-        shell_print(sh, "  --echo_server                  start a TLS echo server (use --incoming for connection configuration)");
-        shell_print(sh, "  --echo_client                  start a TLS stdin echo client (use --outgoing for connection configuration)");
+        shell_print(sh, "  --reverse_proxy                  start a TLS reverse proxy (use --incoming and --outgoing for connection configuration)");
+        shell_print(sh, "  --forward_proxy                  start a TLS forward proxy (use --incoming and --outgoing for connection configuration)");
+        shell_print(sh, "  --echo_server                    start a TLS echo server (use --incoming for connection configuration)");
+        shell_print(sh, "  --echo_client                    start a TLS stdin echo client (use --outgoing for connection configuration)");
         shell_print(sh, "\nConnection configuration:\n");
-        shell_print(sh, "  --incoming <ip:>port           configuration of the incoming TCP/TLS connection");
-        shell_print(sh, "  --outgoing ip:port             configuration of the outgoing TCP/TLS connection");
+        shell_print(sh, "  --incoming <ip:>port             configuration of the incoming TCP/TLS connection");
+        shell_print(sh, "  --outgoing ip:port               configuration of the outgoing TCP/TLS connection");
         shell_print(sh, "\nOptions:\n");
 #if defined(__ZEPHYR__)
-        shell_print(sh, "  -v, --identity name            use stored certificates for given identity");
+        shell_print(sh, "  -v, --identity name              use stored certificates for given identity");
 #endif
-        shell_print(sh, "  -c, --cert file_path           path to the certificate file");
-        shell_print(sh, "  -k, --key file_path            path to the private key file");
-        shell_print(sh, "  -i, --intermediate file_path   path to an intermediate certificate file");
-        shell_print(sh, "  -r, --root file_path           path to the root certificate file");
-        shell_print(sh, "  -s, --secure_element           use secure element with the provided middleware");
-        shell_print(sh, "  -h, --help                     display this help and exit");
+        shell_print(sh, "  -c, --cert file_path             path to the certificate file");
+        shell_print(sh, "  -k, --key file_path              path to the private key file");
+        shell_print(sh, "  -i, --intermediate file_path     path to an intermediate certificate file");
+        shell_print(sh, "  -r, --root file_path             path to the root certificate file");
+        shell_print(sh, "  -s, --secure_element             use secure element");
+        shell_print(sh, "  -m, --middleware_path file_path  path to the secure element middleware");
+        shell_print(sh, "  -d, --debug                      enable debug output");
+        shell_print(sh, "  -h, --help                       display this help and exit");
 }
 
 

@@ -9,6 +9,7 @@
 #endif
 
 #include "logging.h"
+#include "wolfssl.h"
 #include "tls_proxy.h"
 
 
@@ -24,11 +25,12 @@ enum application_role
 
 /* Parse the provided argv array and store the information in the provided config variables. 
  * 
- * Returns 0 on success, +1 in case the help was printed and  -1 on failure (error is printed
+ * Returns 0 on success, +1 in case the help was printed and -1 on failure (error is printed
  * on console).
  */
 int parse_cli_arguments(enum application_role* role, struct proxy_config* proxy_config,
-                        const struct shell *sh, size_t argc, char** argv);
+                        wolfssl_library_configuration* wolfssl_config, struct shell *sh,
+                        size_t argc, char** argv);
 
 
 #endif // CLI_PARSING_H

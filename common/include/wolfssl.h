@@ -9,10 +9,11 @@
 
 
 /* Data structure for the library configuration */
-struct wolfssl_library_configuration
+typedef struct wolfssl_library_configuration
 {
         bool loggingEnabled;
 
+        bool use_secure_element;
         char const* secure_element_middleware_path;
 
 #ifdef WOLFSSL_STATIC_MEMORY
@@ -23,11 +24,12 @@ struct wolfssl_library_configuration
         }
         staticMemoryBuffer;
 #endif
-};
+}
+wolfssl_library_configuration;
 
 
 /* Data structure for the endpoint configuration */
-struct wolfssl_endpoint_configuration
+typedef struct wolfssl_endpoint_configuration
 {
         struct 
         {
@@ -49,9 +51,8 @@ struct wolfssl_endpoint_configuration
                 size_t size;
         } 
         root_certificate;
-
-        bool use_secure_element;
-};
+}
+wolfssl_endpoint_configuration;
 
 
 /* Initialize WolfSSL library.
@@ -60,7 +61,7 @@ struct wolfssl_endpoint_configuration
  *
  * Returns 0 on success, -1 in case of an error (error message is logged to the console).
  */
-int wolfssl_init(struct wolfssl_library_configuration const* config);
+int wolfssl_init(wolfssl_library_configuration const* config);
 
 
 /* Setup a TLS server context.
@@ -70,7 +71,7 @@ int wolfssl_init(struct wolfssl_library_configuration const* config);
  * Return value is a pointer to the newly created context or NULl in case of an error
  * (error message is logged to the console).
  */
-WOLFSSL_CTX* wolfssl_setup_server_context(struct wolfssl_endpoint_configuration const* config);
+WOLFSSL_CTX* wolfssl_setup_server_context(wolfssl_endpoint_configuration const* config);
 
 
 /* Setup a TLS client context.
@@ -80,7 +81,7 @@ WOLFSSL_CTX* wolfssl_setup_server_context(struct wolfssl_endpoint_configuration 
  * Return value is a pointer to the newly created context or NULl in case of an error
  * (error message is logged to the console).
  */
-WOLFSSL_CTX* wolfssl_setup_client_context(struct wolfssl_endpoint_configuration const* config);
+WOLFSSL_CTX* wolfssl_setup_client_context(wolfssl_endpoint_configuration const* config);
 
 
 /* Perform the TLS handshake for a newly created session.

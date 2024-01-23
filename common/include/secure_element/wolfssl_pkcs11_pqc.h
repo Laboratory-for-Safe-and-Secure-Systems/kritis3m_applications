@@ -21,11 +21,26 @@ uint32_t wolfssl_get_secure_element_private_key_id_size(void);
 int wolfssl_get_secure_element_device_id(void);
 
 
-/* Import the public/private key pair in the given PEM file into the secure element.
- *
- * Returns 0 on success, -1 in case of an error (error message is logged to the console).
+/* Fill a new dilithium key with data from the provided DER buffer. The dilithium level is
+ * encoded in the key_format parameter. The memory for the key is allocated by this method
+ * and must be freed by the caller.
+ * 
+ * Returns a pointer to the new key on success, NULL in case of an error (error message is
+ * logged to the console).
  */
-int wolfssl_import_key_pair_into_secure_element(uint8_t const* pem_buffer, uint32_t pem_size);
+dilithium_key* create_dilithium_key_from_buffer(int key_format, uint8_t const* der_buffer,
+						uint32_t der_size, uint8_t const* id, int len);
+
+
+/* Fill a new falcon key with data from the provided DER buffer. The dilithium level is
+ * encoded in the key_format parameter. The memory for the key is allocated by this method
+ * and must be freed by the caller.
+ * 
+ * Returns a pointer to the new key on success, NULL in case of an error (error message is
+ * logged to the console).
+ */
+falcon_key* create_falcon_key_from_buffer(int key_format, uint8_t const* der_buffer,
+					  uint32_t der_size, uint8_t const* id, int len);
 
 
 /* Install the central callback for post-quantum operations using the secure element.
