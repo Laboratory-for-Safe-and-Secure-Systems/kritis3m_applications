@@ -11,6 +11,9 @@
 #include "poll_set.h"
 #include "networking.h"
 #include "wolfssl.h"
+#include "time.h"
+
+struct timespec start_spectime, end_spectime;
 
 
 LOG_MODULE_REGISTER(tls_proxy);
@@ -624,6 +627,12 @@ void* tls_proxy_main_thread(void* ptr)
 						proxy_connection_cleanup(proxy_connection);
 						continue;
 					}
+					/*Start TLS handshake timer*/
+					if (clock_gettime(CLOCK_MONOTONIC, &start_spectime) != 0)
+					{
+            			// Handle error
+						LOG_ERR("Error starting handshake timer");
+        			}
 					break;
 				}
 			}
@@ -644,6 +653,17 @@ void* tls_proxy_main_thread(void* ptr)
 					}
 					else if (ret == 0)
 					{
+						/* END TLS handshake timer */
+						if (clock_gettime(CLOCK_MONOTONIC, &end_spectime) != 0) 
+						{
+                			// Handle error
+                			LOG_ERR("Error stopping handshake timer");
+            			}	
+						double elapsed_time2 = (end_spectime.tv_sec - start_spectime.tv_sec) * 1000.0 +
+                                  (end_spectime.tv_nsec - start_spectime.tv_nsec) / 1000000.0;
+
+            			LOG_INF("Handshake time: %.5f milliseconds\n", elapsed_time2);
+
 						/* Handshake done, remove respective socket from the poll_set */
 						poll_set_remove_fd(&config->poll_set, fd);
 
