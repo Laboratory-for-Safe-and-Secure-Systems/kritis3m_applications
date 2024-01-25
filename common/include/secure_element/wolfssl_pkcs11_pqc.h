@@ -43,14 +43,5 @@ falcon_key* create_falcon_key_from_buffer(int key_format, uint8_t const* der_buf
 					  uint32_t der_size, uint8_t const* id, int len);
 
 
-/* Install the central callback for post-quantum operations using the secure element.
- * The argument is an optional ctx pointer parameter that is forwarded to the callback.
- * Set to NULL if not needed.
- * 
- * Returns 0 on success, -1 in case of an error (error message is logged to the console).
- */
-int wolfssl_install_crypto_callback_secure_element(void* ctx);
-
-
 
 #endif /* WOLFSSSL_PKCS11_PQC_H */

@@ -31,13 +31,6 @@ static int pkcs11_pqc_kem_encapsulate(void* key, int type, uint8_t* ciphertext, 
 static int pkcs11_pqc_kem_decapsulate(void* key, int type, uint8_t const* ciphertext, uint32_t ciphertextLen,
     				      uint8_t* sharedSecret, uint32_t sharedSecretLen);
 
-/* Signatures */
-static int pkcs11_pqc_sig_sign(void* key, int type, uint8_t const* message, uint32_t message_size,
-                               uint8_t* signature, uint32_t* signature_size);
-static int pkcs11_pqc_sig_verify(void* key, int type, uint8_t const* message, uint32_t message_size,
-                                 uint8_t const* signature, uint32_t signature_size);
-static int pkcs11_pqc_sig_check_key(void* key, int type, uint8_t const* public_key, uint32_t public_key_size);
-
 
 /* Get the id of the static private key */
 uint8_t const* wolfssl_get_secure_element_private_key_id(void)
@@ -153,26 +146,6 @@ falcon_key* create_falcon_key_from_buffer(int key_format, uint8_t const* der_buf
 }
 
 
-/* Install the central callback for post-quantum operations using the secure element.
- * The argument is an optional ctx pointer parameter that is forwarded to the callback.
- * Set to NULL if not needed.
- * 
- * Returns 0 on success, -1 in case of an error (error message is logged to the console).
- */
-int wolfssl_install_crypto_callback_secure_element(void* ctx)
-{
-        int ret = wc_CryptoCb_RegisterDevice(wolfssl_get_secure_element_device_id(),
-					     wolfssl_crypto_callback_secure_element,
-					     ctx);
-	if (ret != 0)
-	{
-		LOG_ERR("error: unable to register crypto callback, error %d", ret);
-		return -1;
-	}
-
-        return 0;
-}
-
 
 static int wolfssl_crypto_callback_secure_element(int devId, wc_CryptoInfo* info, void* ctx)
 {
@@ -205,33 +178,6 @@ static int wolfssl_crypto_callback_secure_element(int devId, wc_CryptoInfo* info
 							 info->pk.pqc_decaps.ciphertextLen,
 							 info->pk.pqc_decaps.sharedSecret,
 							 info->pk.pqc_decaps.sharedSecretLen);
-			break;
-		case WC_PK_TYPE_PQC_SIG_KEYGEN:
-			/* ToDo */
-			break;
-		case WC_PK_TYPE_PQC_SIG_SIGN:
-			ret = pkcs11_pqc_sig_sign(info->pk.pqc_sign.key,
-						  info->pk.pqc_sign.type,
-						  info->pk.pqc_sign.in,
-						  info->pk.pqc_sign.inlen,
-						  info->pk.pqc_sign.out,
-						  info->pk.pqc_sign.outlen);
-			break;
-		case WC_PK_TYPE_PQC_SIG_VERIFY:
-			ret = pkcs11_pqc_sig_verify(info->pk.pqc_verify.key,
-						    info->pk.pqc_verify.type,
-						    info->pk.pqc_verify.msg,
-						    info->pk.pqc_verify.msglen,
-						    info->pk.pqc_verify.sig,
-						    info->pk.pqc_verify.siglen);
-			if (ret == 0)
-				*(info->pk.pqc_verify.res) = 1;
-			break;
-		case WC_PK_TYPE_PQC_SIG_CHECK_PRIV_KEY:
-			ret = pkcs11_pqc_sig_check_key(info->pk.pqc_sig_check.key,
-						       info->pk.pqc_sig_check.type,
-						       info->pk.pqc_sig_check.pubKey,
-						       info->pk.pqc_sig_check.pubKeySz);
 			break;
 		default:
 			break;
@@ -339,139 +285,4 @@ int pkcs11_pqc_kem_decapsulate(void* key, int type, uint8_t const* ciphertext, u
 }
 
 
-/* Sign given message with the provided external dilithium key and store the signature in given buffer.
- *
- * Returns 0 on success and a negative error code in case of an error
- */
-int pkcs11_pqc_sig_sign(void* key, int type, uint8_t const* message, uint32_t message_size,
-                        uint8_t* signature, uint32_t* signature_size)
-{
-	int ret = CRYPTOCB_UNAVAILABLE;
-
-        /* Helper variable as the pkcs11 lib wants a 64 bit integer here */
-        // unsigned long signature_size_tmp = 0;
-
-        // /* Create the signature */
-        // ret = pkcs11_sign_dilithium2(key->id,
-        //                              key->idLen,
-        //                              (CK_BYTE*) message, message_size,
-        //                              signature, &signature_size_tmp);
-        // if (ret != CKR_OK) 
-        // {
-        //         ret = WC_HW_E;
-        // }
-
-        // *signature_size = signature_size_tmp;
-
-        return ret;
-}
-
-
-/* Verify given signature for given message with the provided external dilithium key.
- * 
- * Returns 0 on success and a negative error code in case of an error
- */
-int pkcs11_pqc_sig_verify(void* key, int type, uint8_t const* message, uint32_t message_size,
-                          uint8_t const* signature, uint32_t signature_size)
-{
-        int ret = 0;
-        unsigned long external_public_key_size = 0;
-        
-        // if (key->level == 2)
-        // {
-        //         external_public_key_size = DILITHIUM_LEVEL2_PUB_KEY_SIZE;
-        // }
-        // else if (key->level == 3)
-        // {
-        //         external_public_key_size = DILITHIUM_LEVEL3_PUB_KEY_SIZE;
-        //         return CRYPTOCB_UNAVAILABLE; // Temporary workaround until the secure element supports Dilithium 3
-        // }
-        // else if (key->level == 5)
-        // {
-        //         external_public_key_size = DILITHIUM_LEVEL5_PUB_KEY_SIZE;
-        //         return CRYPTOCB_UNAVAILABLE; // Temporary workaround until the secure element supports Dilithium 5
-        // }
-        // else
-        // {
-        //         return BAD_FUNC_ARG;
-        // }
-                
-        // /* Import the provided public key into the secure element */
-        // ret = pkcs11_create_object_public_key_dilithium2(secure_element_temp_key_sig_id,
-        //                                                  secure_element_temp_key_sig_id_size,
-        //                                                  key->p,
-        //                                                  external_public_key_size);
-        // if (ret != CKR_OK) 
-        // {
-        //         ret = WC_HW_E;
-        // }
-        // else
-        // {
-        //         /* Verify the signature */
-                ret = pkcs11_verify_dilithium2(secure_element_temp_key_sig_id,
-                                               secure_element_temp_key_sig_id_size,
-                                               (CK_BYTE*) message,
-                                               message_size,
-                                               (CK_BYTE*) signature,
-                                               signature_size);
-        //         if (ret != CKR_OK) 
-        //         {
-        //                 ret = SIG_VERIFY_E;
-        //         }
-
-        //         pkcs11_destroy_objects(secure_element_temp_key_sig_id, secure_element_temp_key_sig_id_size);
-        // }
-        
-	return ret;
-}
-
-
-/* Compare the given external dilithium key with the provided public key to check if they match.
- *
- * Returns 0 on success and a negative error code in case of an error.
- */
-int pkcs11_pqc_sig_check_key(void* key, int type, uint8_t const* public_key, uint32_t public_key_size)
-{
-	int ret = CRYPTOCB_UNAVAILABLE;
-
-        // unsigned long external_public_key_size = DILITHIUM_MAX_PUB_KEY_SIZE;
-        // uint8_t* external_public_key_buffer = malloc(DILITHIUM_MAX_PUB_KEY_SIZE);
-        // if (external_public_key_buffer == NULL)
-        // {
-        //         return MEMORY_E;
-        // }
-
-        // /* Read the public key from the secure element */
-        // ret = pkcs11_read_public_key(key->id,
-        //                              key->idLen,
-        //                              external_public_key_buffer,
-        //                              &external_public_key_size);
-        // if (ret != CKR_OK) 
-        // {
-        //         ret = WC_HW_E;
-        // }
-
-        // /* Compare the read key from the secure element with the provided public key 
-        //  * from the certificate */
-        // if (ret == 0)
-        // {
-        //         if (external_public_key_size == public_key_size)
-        //         {
-        //                 ret = memcmp(external_public_key_buffer, public_key, public_key_size);
-
-        //                 if (ret != 0)
-        //                 {
-        //                         ret = MP_CMP_E;
-        //                 }
-        //         }
-        //         else
-        //         {
-        //                 ret = WC_KEY_SIZE_E;
-        //         }
-        // }
-
-        // free(external_public_key_buffer);
-
-        return ret;
-}
 
