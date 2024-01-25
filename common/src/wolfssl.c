@@ -32,8 +32,10 @@ extern size_t wolfsslMemoryBufferSize;
 /* PKCS#11 */
 typedef struct pkcs11_secure_element
 {
+#ifdef HAVE_PKCS11
 	Pkcs11Dev device;
 	Pkcs11Token token;
+#endif
 	bool initialized;
 }
 pkcs11_secure_element;
@@ -127,15 +129,17 @@ static void wolfssl_logging_callback(int level, const char* str)
 static int wolfssl_import_pem_key_into_secure_element(uint8_t const* pem_buffer, uint32_t pem_size,
 		uint8_t const* id, int len)
 {
+#ifdef HAVE_PKCS11
         DerBuffer* der = NULL;
 	EncryptedInfo info;
 	int keyFormat = 0;
 	int type = 0;
 	void* key = NULL;
+	int ret = -1;
 
 	/* Convert key to DER (binary) */
-	int ret = PemToDer(pem_buffer, pem_size, PRIVATEKEY_TYPE, &der, NULL,
-			   &info, &keyFormat);
+	ret = PemToDer(pem_buffer, pem_size, PRIVATEKEY_TYPE, &der, NULL,
+		       &info, &keyFormat);
 	if (ret < 0)
 	{
 		FreeDer(&der);
@@ -185,6 +189,9 @@ static int wolfssl_import_pem_key_into_secure_element(uint8_t const* pem_buffer,
 	}
 
 	return ret;
+#else
+	return -1;
+#endif
 }
 
 
@@ -225,6 +232,7 @@ int wolfssl_init(struct wolfssl_library_configuration const* config)
 	/* Load the secure element middleware */
 	if ((config->use_secure_element == true) && (config->secure_element_middleware_path != NULL))
 	{
+	#ifdef HAVE_PKCS11
 		LOG_INF("Initializing secure element");
 
 		/* Initialize the PKCS#11 library */
@@ -274,6 +282,9 @@ int wolfssl_init(struct wolfssl_library_configuration const* config)
 			wc_Pkcs11_Finalize(&pkcs11_secure_element_instance.device);
 			LOG_ERR("Secure element initialization failed: %d", ret);
 		}
+	#else
+		LOG_ERR("Secure element support is not compiled in, please compile with HAVE_PKCS11 preprocessor makro defined");
+	#endif
 	}
 	else
 	{
