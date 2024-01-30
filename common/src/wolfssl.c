@@ -6,7 +6,6 @@
 #include "logging.h"
 #include "networking.h"
 
-#include "secure_element/secure_element.h"
 #include "secure_element/wolfssl_pkcs11_pqc.h"
 
 #include "wolfssl.h"

@@ -51,6 +51,8 @@ static const struct option cli_options[] =
     { "secure_element",  no_argument,       0, 's' },
     { "middleware_path", required_argument, 0, 'm' },
     { "debug",           no_argument,       0, 'd' },
+    { "bridge_lan",      required_argument, 0, 'e' },
+    { "bridge_wan",      required_argument, 0, 'f' },
     { "help",            no_argument,       0, 'h' },
     {NULL, 0, NULL, 0}
 };
@@ -66,8 +68,8 @@ static void print_help(const struct shell *sh, char const* name);
  * on console).
  */
 int parse_cli_arguments(enum application_role* role, struct proxy_config* proxy_config,
-                        wolfssl_library_configuration* wolfssl_config, struct shell *sh,
-                        size_t argc, char** argv)
+                        wolfssl_library_configuration* wolfssl_config, l2_bridge_config* bridge_config,
+                        struct shell const* sh, size_t argc, char** argv)
 {
         if ((role == NULL) || (proxy_config == NULL))
         {
@@ -96,6 +98,12 @@ int parse_cli_arguments(enum application_role* role, struct proxy_config* proxy_
                 wolfssl_config->secure_element_middleware_path = NULL;
         }
 
+        if (bridge_config != NULL)
+        {
+                bridge_config->lan_interface = NULL;
+                bridge_config->wan_interface = NULL;
+        }
+
         struct certificates certs = {
                 .certificate_path = NULL,
                 .private_key_path = NULL,
@@ -122,7 +130,7 @@ int parse_cli_arguments(enum application_role* role, struct proxy_config* proxy_
 #endif
 	while (true)
 	{
-		int result = getopt_long(argc, argv, "wxyza:b:v:c:k:i:r:sm:dh", cli_options, &index);
+		int result = getopt_long(argc, argv, "wxyza:b:v:c:k:i:r:sm:de:f:h", cli_options, &index);
 
 		if (result == -1) 
 		        break; /* end of list */
@@ -233,7 +241,15 @@ int parse_cli_arguments(enum application_role* role, struct proxy_config* proxy_
                                 if (wolfssl_config != NULL)
                                         wolfssl_config->loggingEnabled = true;
                                 break;
-			case 'h': 
+                        case 'e':
+                                if (bridge_config != NULL)
+                                        bridge_config->lan_interface = optarg;
+                                break;
+                        case 'f':
+                                if (bridge_config != NULL)
+                                        bridge_config->wan_interface = optarg;
+                                break;
+			case 'h':
 				print_help(sh, argv[0]);
 				return 1;
 				break;
@@ -284,6 +300,8 @@ static void print_help(const struct shell *sh, char const* name)
         shell_print(sh, "  -s, --secure_element             use secure element");
         shell_print(sh, "  -m, --middleware_path file_path  path to the secure element middleware");
         shell_print(sh, "  -d, --debug                      enable debug output");
+        shell_print(sh, "  -e, --bridge_lan interface       name of the LAN interface for the Layer 2 bridge");
+        shell_print(sh, "  -f, --bridge_wan interface       name of the WAN interface for the Layer 2 bridge");
         shell_print(sh, "  -h, --help                       display this help and exit");
 }
 

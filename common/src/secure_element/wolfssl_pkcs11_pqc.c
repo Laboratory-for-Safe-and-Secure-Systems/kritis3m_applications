@@ -1,8 +1,6 @@
 
 #include "secure_element/wolfssl_pkcs11_pqc.h"
 
-#include "secure_element/secure_element.h"
-
 
 #include "logging.h"
 
@@ -14,16 +12,6 @@ LOG_MODULE_REGISTER(wolfssl_pkcs11);
 static char secure_element_private_key_id[] = "SERVER_KEY";
 static size_t secure_element_private_key_id_size = sizeof("SERVER_KEY") - 1;
 
-
-/* Internal method declarations */
-static int wolfssl_crypto_callback_secure_element(int devId, wc_CryptoInfo* info, void* ctx);
-
-/* KEMs */
-static int pkcs11_pqc_kem_keygen(void* key, int type, uint32_t keySize);
-static int pkcs11_pqc_kem_encapsulate(void* key, int type, uint8_t* ciphertext, uint32_t ciphertextLen,
-    				      uint8_t* sharedSecret, uint32_t sharedSecretLen);
-static int pkcs11_pqc_kem_decapsulate(void* key, int type, uint8_t const* ciphertext, uint32_t ciphertextLen,
-    				      uint8_t* sharedSecret, uint32_t sharedSecretLen);
 
 
 /* Get the id of the static private key */

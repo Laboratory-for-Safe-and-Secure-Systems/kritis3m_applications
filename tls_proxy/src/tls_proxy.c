@@ -22,7 +22,7 @@ LOG_MODULE_REGISTER(tls_proxy);
 #define RECV_BUFFER_SIZE 1024
 
 #define MAX_PROXYS 3
-#define MAX_CONNECTIONS_PER_PROXY 5
+#define MAX_CONNECTIONS_PER_PROXY 3
 
 
 enum tls_proxy_direction
@@ -93,13 +93,13 @@ static struct proxy proxy_pool[MAX_PROXYS];
 
 #if defined(__ZEPHYR__)
 #define CONNECTION_HANDLER_STACK_SIZE 32*1024
-#define BACKEND_STACK_SIZE 128*1024
+#define BACKEND_STACK_SIZE 127*1024
 
-// K_THREAD_STACK_ARRAY_DEFINE(client_stack_pool, MAX_CLIENTS, CLIENT_HANDLER_STACK_SIZE);
-// K_THREAD_STACK_DEFINE(server_stack, BACKEND_STACK_SIZE);
+Z_KERNEL_STACK_ARRAY_DEFINE_IN(connection_handler_stack_pool, MAX_CONNECTIONS_PER_PROXY, \
+		CONNECTION_HANDLER_STACK_SIZE, __attribute__((section(CONFIG_RAM_SECTION_STACKS_1))));
 
-Z_KERNEL_STACK_ARRAY_DEFINE_IN(connection_handler_stack_pool, MAX_CONNECTIONS_PER_PROXY, CONNECTION_HANDLER_STACK_SIZE, __attribute__((section("SRAM3"))));
-Z_KERNEL_STACK_DEFINE_IN(backend_stack, BACKEND_STACK_SIZE, __attribute__((section("SRAM3"))));
+Z_KERNEL_STACK_DEFINE_IN(backend_stack, BACKEND_STACK_SIZE, \
+		__attribute__((section(CONFIG_RAM_SECTION_STACKS_2))));
 #endif
 
 

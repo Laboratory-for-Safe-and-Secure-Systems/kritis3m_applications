@@ -10,3 +10,6 @@ add_subdirectory(tcp_client_stdin_bridge)
 
 # TLS proxy application
 add_subdirectory(tls_proxy)
+
+# Layer 2 bridge application
+add_subdirectory(l2_bridge)

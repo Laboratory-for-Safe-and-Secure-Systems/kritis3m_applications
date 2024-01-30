@@ -11,6 +11,7 @@
 #include "logging.h"
 #include "wolfssl.h"
 #include "tls_proxy.h"
+#include "l2_bridge.h"
 
 
 enum application_role
@@ -29,8 +30,8 @@ enum application_role
  * on console).
  */
 int parse_cli_arguments(enum application_role* role, struct proxy_config* proxy_config,
-                        wolfssl_library_configuration* wolfssl_config, struct shell *sh,
-                        size_t argc, char** argv);
+                        wolfssl_library_configuration* wolfssl_config, l2_bridge_config* bridge_config,
+                        struct shell const* sh, size_t argc, char** argv);
 
 
 #endif // CLI_PARSING_H

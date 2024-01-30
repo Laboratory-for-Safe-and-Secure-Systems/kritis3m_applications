@@ -4,7 +4,7 @@
 #include "poll_set.h"
 
 
-void poll_set_init(struct poll_set* poll_set)
+void poll_set_init(poll_set* poll_set)
 {
 	poll_set->num_fds = 0;
 
@@ -15,7 +15,7 @@ void poll_set_init(struct poll_set* poll_set)
 	}
 }
 
-int poll_set_add_fd(struct poll_set* poll_set, int fd, short events)
+int poll_set_add_fd(poll_set* poll_set, int fd, short events)
 {
 	if (poll_set->num_fds < NUM_FDS) 
 	{
@@ -33,7 +33,7 @@ int poll_set_add_fd(struct poll_set* poll_set, int fd, short events)
 	}
 }
 
-void poll_set_update_events(struct poll_set* poll_set, int fd, short events)
+void poll_set_update_events(poll_set* poll_set, int fd, short events)
 {
 	for (int i = 0; i < poll_set->num_fds; i++) 
 	{
@@ -44,7 +44,7 @@ void poll_set_update_events(struct poll_set* poll_set, int fd, short events)
 	}
 }
 
-void poll_set_remove_fd(struct poll_set* poll_set, int fd)
+void poll_set_remove_fd(poll_set* poll_set, int fd)
 {
 	for (int i = 0; i < poll_set->num_fds; i++) 
 	{

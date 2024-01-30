@@ -43,7 +43,8 @@ static struct echo_client client_pool[MAX_CLIENTS];
 #if defined(__ZEPHYR__)
 #define STACK_SIZE 8*1024
 
-Z_KERNEL_STACK_DEFINE_IN(echo_server_stack, STACK_SIZE, __attribute__((section("SRAM3"))));
+Z_KERNEL_STACK_DEFINE_IN(echo_server_stack, STACK_SIZE, \
+		__attribute__((section(CONFIG_RAM_SECTION_STACKS_1))));
 #endif
 
 
@@ -277,7 +278,7 @@ int tcp_echo_server_run(struct tcp_echo_server_config const* config)
 
         if (setsockopt(echo_server.tcp_server_socket, SOL_SOCKET, SO_REUSEADDR, &(int){1}, sizeof(int)) < 0)
         {
-                LOG_ERR("setsockopt(SO_REUSEADDR) failed: errer %d\n", errno);
+                LOG_ERR("setsockopt(SO_REUSEADDR) failed: error %d\n", errno);
 		close(echo_server.tcp_server_socket);
 		return -1;
         }
@@ -308,7 +309,7 @@ int tcp_echo_server_run(struct tcp_echo_server_config const* config)
 	int ret = poll_set_add_fd(&echo_server.poll_set, echo_server.tcp_server_socket, POLLIN);
 	if (ret != 0)
 	{
-		LOG_ERR("Error adding new proxy to poll_set");
+		LOG_ERR("Error adding socket to poll_set");
 		close(echo_server.tcp_server_socket);
 		return -1;
 	}
