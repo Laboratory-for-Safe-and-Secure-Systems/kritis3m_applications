@@ -13,8 +13,6 @@
 #include "wolfssl.h"
 #include "time.h"
 
-struct timespec start_spectime, end_spectime;
-
 
 LOG_MODULE_REGISTER(tls_proxy);
 
@@ -31,15 +29,34 @@ enum tls_proxy_direction
 	FORWARD_PROXY,
 };
 
+enum tls_state 
+{
+	TLS_STATE_NOT_CONNECTED,
+	TLS_STATE_HANDSHAKE,
+	TLS_STATE_CONNECTED,
+	TLS_STATE_ERROR,
+};
+
 struct proxy_connection
 {
 	bool in_use;
 	enum tls_proxy_direction direction;
+	enum tls_state state;
 	int listening_peer_sock;
 	int target_peer_sock;
 	WOLFSSL* wolfssl_session;
 	pthread_t thread;
 	pthread_attr_t thread_attr;
+
+	struct 
+	{
+		struct timespec start_time;
+		struct timespec end_time;
+		uint32_t txBytes;
+		uint32_t rxBytes;
+	}
+	handshake_metrics;
+
 	size_t num_of_bytes_in_recv_buffer;
 	uint8_t recv_buffer[RECV_BUFFER_SIZE];
 };
@@ -436,8 +453,11 @@ static struct proxy_connection* add_new_connection_to_proxy(struct proxy* proxy,
 	/* Store new client data */
 	connection->in_use = true;
 	connection->direction = proxy->direction;
+	connection->state = TLS_STATE_NOT_CONNECTED;
 	connection->listening_peer_sock = client_socket;
 	connection->wolfssl_session = new_session;
+	connection->handshake_metrics.txBytes = 0;
+	connection->handshake_metrics.rxBytes = 0;
 
 	setblocking(connection->listening_peer_sock, false);
 
@@ -497,11 +517,43 @@ static struct proxy_connection* add_new_connection_to_proxy(struct proxy* proxy,
 
 static int perform_handshake(struct proxy_connection* connection)
 {
+	/* Obtain handshake metrics */
+	if (connection->state == TLS_STATE_NOT_CONNECTED)
+	{
+		connection->state = TLS_STATE_HANDSHAKE;
+
+		/* Get start time */
+		if (clock_gettime(CLOCK_MONOTONIC,
+				  &connection->handshake_metrics.start_time) != 0)
+		{
+	    		// Handle error
+			LOG_ERR("Error starting handshake timer");
+			return -1;
+		}
+	}
+
 	/* Perform TLS handshake */
 	int ret = wolfssl_handshake(connection->wolfssl_session);
 	if (ret == 0)
 	{
+		connection->state = TLS_STATE_CONNECTED;
+
+		/* Get end time */
+		if (clock_gettime(CLOCK_MONOTONIC,
+				  &connection->handshake_metrics.end_time) != 0) 
+		{
+                	// Handle error
+                	LOG_ERR("Error stopping handshake timer");
+			return -1;
+            	}	
+
+		double handshake_time = (connection->handshake_metrics.end_time.tv_sec - connection->handshake_metrics.start_time.tv_sec) * 1000.0 +
+                        	(connection->handshake_metrics.end_time.tv_nsec - connection->handshake_metrics.start_time.tv_nsec) / 1000000.0;
+
 		LOG_INF("Handshake done");
+		LOG_INF("Handshake time: %.5f milliseconds\n", handshake_time);
+		// LOG_INF("Handshake Tx bytes: %d, Rx bytes: %d", connection->handshake_metrics.txBytes,
+		// 						connection->handshake_metrics.rxBytes);
 	}
 	
 	return ret;
@@ -529,6 +581,9 @@ static void proxy_connection_cleanup(struct proxy_connection* connection)
 		connection->wolfssl_session = NULL;
 	}
 
+	connection->state = TLS_STATE_NOT_CONNECTED;
+	connection->handshake_metrics.txBytes = 0;
+	connection->handshake_metrics.rxBytes = 0;
 	connection->num_of_bytes_in_recv_buffer = 0;
 	
 	connection->in_use = false;
@@ -627,12 +682,6 @@ void* tls_proxy_main_thread(void* ptr)
 						proxy_connection_cleanup(proxy_connection);
 						continue;
 					}
-					/*Start TLS handshake timer*/
-					if (clock_gettime(CLOCK_MONOTONIC, &start_spectime) != 0)
-					{
-            			// Handle error
-						LOG_ERR("Error starting handshake timer");
-        			}
 					break;
 				}
 			}
@@ -653,17 +702,6 @@ void* tls_proxy_main_thread(void* ptr)
 					}
 					else if (ret == 0)
 					{
-						/* END TLS handshake timer */
-						if (clock_gettime(CLOCK_MONOTONIC, &end_spectime) != 0) 
-						{
-                			// Handle error
-                			LOG_ERR("Error stopping handshake timer");
-            			}	
-						double elapsed_time2 = (end_spectime.tv_sec - start_spectime.tv_sec) * 1000.0 +
-                                  (end_spectime.tv_nsec - start_spectime.tv_nsec) / 1000000.0;
-
-            			LOG_INF("Handshake time: %.5f milliseconds\n", elapsed_time2);
-
 						/* Handshake done, remove respective socket from the poll_set */
 						poll_set_remove_fd(&config->poll_set, fd);
 
