@@ -16,6 +16,7 @@ struct certificates
 {
         char const* certificate_path;
         char const* private_key_path;
+        char const* additional_key_path;
         char const* intermediate_path;
         char const* root_path;
 
@@ -29,6 +30,9 @@ struct certificates
 
         uint8_t* key_buffer;
         size_t key_buffer_size;
+
+        uint8_t* additional_key_buffer;
+        size_t additional_key_buffer_size;
         
         uint8_t* root_buffer;
         size_t root_buffer_size;
@@ -48,6 +52,8 @@ static const struct option cli_options[] =
     { "key",             required_argument, 0, 'k' },
     { "intermediate",    required_argument, 0, 'i' },
     { "root",            required_argument, 0, 'r' },
+    { "additionalKey",   required_argument, 0, 'l' },
+    { "mutualAuth",      required_argument, 0, 'n' },
     { "secure_element",  no_argument,       0, 's' },
     { "middleware_path", required_argument, 0, 'm' },
     { "debug",           no_argument,       0, 'd' },
@@ -58,7 +64,8 @@ static const struct option cli_options[] =
 };
 
 
-static int read_certificates(const struct shell *sh, struct certificates* certs);
+static int read_certificates(const struct shell *sh, struct certificates* certs,
+                             enum application_role* role);
 static void print_help(const struct shell *sh, char const* name);
 
 
@@ -84,10 +91,13 @@ int parse_cli_arguments(enum application_role* role, struct proxy_config* proxy_
 	proxy_config->listening_port = 0;
 	proxy_config->target_ip_address = NULL;
 	proxy_config->target_port = 0;
+        proxy_config->tls_config.mutual_authentication = true;
 	proxy_config->tls_config.device_certificate_chain.buffer = NULL;
 	proxy_config->tls_config.device_certificate_chain.size = 0;
 	proxy_config->tls_config.private_key.buffer = NULL;
 	proxy_config->tls_config.private_key.size = 0;
+        proxy_config->tls_config.private_key.additional_key_buffer = NULL;
+	proxy_config->tls_config.private_key.additional_key_size = 0;
 	proxy_config->tls_config.root_certificate.buffer = NULL;
 	proxy_config->tls_config.root_certificate.size = 0;
 	
@@ -107,6 +117,7 @@ int parse_cli_arguments(enum application_role* role, struct proxy_config* proxy_
         struct certificates certs = {
                 .certificate_path = NULL,
                 .private_key_path = NULL,
+                .additional_key_path = NULL,
                 .intermediate_path = NULL,
                 .root_path = NULL,
 
@@ -118,6 +129,8 @@ int parse_cli_arguments(enum application_role* role, struct proxy_config* proxy_
                 .chain_buffer_size = 0,
                 .key_buffer = NULL,
                 .key_buffer_size = 0,
+                .additional_key_buffer = NULL,
+                .additional_key_buffer_size = 0,
                 .root_buffer = NULL,
                 .root_buffer_size = 0,
         };
@@ -229,6 +242,12 @@ int parse_cli_arguments(enum application_role* role, struct proxy_config* proxy_
 			case 'r':
 				certs.root_path = optarg;
 				break;
+                        case 'l':
+                                certs.additional_key_path = optarg;
+                                break;
+                        case 'n':
+                                proxy_config->tls_config.mutual_authentication = (bool) strtoul(optarg, NULL, 10);
+                                break;
 			case 's':
 				if (wolfssl_config != NULL)
                                         wolfssl_config->use_secure_element = true;
@@ -261,7 +280,7 @@ int parse_cli_arguments(enum application_role* role, struct proxy_config* proxy_
     	}
 
 	/* Read certificates */
-    	if (read_certificates(sh, &certs) != 0)
+    	if (read_certificates(sh, &certs, role) != 0)
 	{
         	return -1;
 	}
@@ -271,6 +290,8 @@ int parse_cli_arguments(enum application_role* role, struct proxy_config* proxy_
 	proxy_config->tls_config.device_certificate_chain.size = certs.chain_buffer_size;
 	proxy_config->tls_config.private_key.buffer = certs.key_buffer;
 	proxy_config->tls_config.private_key.size = certs.key_buffer_size;
+        proxy_config->tls_config.private_key.additional_key_buffer = certs.additional_key_buffer;
+	proxy_config->tls_config.private_key.additional_key_size = certs.additional_key_buffer_size;
 	proxy_config->tls_config.root_certificate.buffer = certs.root_buffer;
 	proxy_config->tls_config.root_certificate.size = certs.root_buffer_size;
 
@@ -297,11 +318,13 @@ static void print_help(const struct shell *sh, char const* name)
         shell_print(sh, "  -k, --key file_path              path to the private key file");
         shell_print(sh, "  -i, --intermediate file_path     path to an intermediate certificate file");
         shell_print(sh, "  -r, --root file_path             path to the root certificate file");
-        shell_print(sh, "  -s, --secure_element             use secure element");
-        shell_print(sh, "  -m, --middleware_path file_path  path to the secure element middleware");
-        shell_print(sh, "  -d, --debug                      enable debug output");
-        shell_print(sh, "  -e, --bridge_lan interface       name of the LAN interface for the Layer 2 bridge");
-        shell_print(sh, "  -f, --bridge_wan interface       name of the WAN interface for the Layer 2 bridge");
+        shell_print(sh, "  --additionalKey file_path        path to an additional private key file (hybrid signature mode)");
+        shell_print(sh, "  --mutualAuth 0|1                 enable or disable mutual authentication (default enabled)");
+        shell_print(sh, "  --secure_element                 use secure element");
+        shell_print(sh, "  --middleware_path file_path      path to the secure element middleware");
+        shell_print(sh, "  -d, --debug                      enable debug output\n");
+        shell_print(sh, "  --bridge_lan interface           name of the LAN interface for the Layer 2 bridge");
+        shell_print(sh, "  --bridge_wan interface           name of the WAN interface for the Layer 2 bridge\n");
         shell_print(sh, "  -h, --help                       display this help and exit");
 }
 
@@ -449,33 +472,19 @@ static int readFile(const char* filePath, uint8_t* buffer, size_t bufferSize)
  * and must be freed by the user. 
  * 
  * Returns 0 on success, -1 on failure (error is printed on console). */
-static int read_certificates(const struct shell *sh, struct certificates* certs)
+static int read_certificates(const struct shell *sh, struct certificates* certs,
+                             enum application_role* role)
 {
-        /* Allocate memory for the files to read */
-        certs->chain_buffer = (uint8_t*) malloc(certificate_chain_buffer_size);
-        if (certs->chain_buffer == NULL)
-        {
-                LOG_ERR("unable to allocate memory for certificate chain");
-                goto error;
-        }
-
-        certs->key_buffer = (uint8_t*) malloc(private_key_buffer_size);
-        if (certs->key_buffer == NULL)
-        {
-                LOG_ERR("unable to allocate memory for private key");
-                goto error;
-        }
-
-        certs->root_buffer = (uint8_t*) malloc(root_certificate_buffer_size);
-        if (certs->root_buffer == NULL)
-        {
-                LOG_ERR("unable to allocate memory for root certificate");
-                goto error;
-        }
-
         /* Read certificate chain */
         if (certs->certificate_path != NULL)
         {
+                certs->chain_buffer = (uint8_t*) malloc(certificate_chain_buffer_size);
+                if (certs->chain_buffer == NULL)
+                {
+                        LOG_ERR("unable to allocate memory for certificate chain");
+                        goto error;
+                }
+
                 int cert_size = readFile(certs->certificate_path,
                                          certs->chain_buffer,
                                          certificate_chain_buffer_size);
@@ -501,7 +510,7 @@ static int read_certificates(const struct shell *sh, struct certificates* certs)
                         certs->chain_buffer_size += inter_size;
                 }
         }
-        else
+        else if ((*role == ROLE_REVERSE_PROXY) || (*role == ROLE_ECHO_SERVER))
         {
                 LOG_ERR("no certificate file specified");
                 goto error;
@@ -510,6 +519,13 @@ static int read_certificates(const struct shell *sh, struct certificates* certs)
         /* Read private key */
         if (certs->private_key_path != 0)
         {
+                certs->key_buffer = (uint8_t*) malloc(private_key_buffer_size);
+                if (certs->key_buffer == NULL)
+                {
+                        LOG_ERR("unable to allocate memory for private key");
+                        goto error;
+                }
+
                 int key_size = readFile(certs->private_key_path,
                                         certs->key_buffer,
                                         private_key_buffer_size);
@@ -521,15 +537,44 @@ static int read_certificates(const struct shell *sh, struct certificates* certs)
 
                 certs->key_buffer_size = key_size;
         }
-        else
+        else if ((*role == ROLE_REVERSE_PROXY) || (*role == ROLE_ECHO_SERVER))
         {
                 LOG_ERR("no private key file specified");
                 goto error;
         }
 
+        /* Read addtional private key */
+        if (certs->additional_key_path != 0)
+        {
+                certs->additional_key_buffer = (uint8_t*) malloc(private_key_buffer_size);
+                if (certs->additional_key_buffer == NULL)
+                {
+                        LOG_ERR("unable to allocate memory for additional private key");
+                        goto error;
+                }
+
+                int key_size = readFile(certs->additional_key_path,
+                                        certs->additional_key_buffer,
+                                        private_key_buffer_size);
+                if (key_size < 0)
+                {
+                        LOG_ERR("unable to read private key from file %s", certs->private_key_path);
+                        goto error;
+                }
+
+                certs->additional_key_buffer_size = key_size;
+        }
+
         /* Read root certificate */
         if (certs->root_path != 0)
         {
+                certs->root_buffer = (uint8_t*) malloc(root_certificate_buffer_size);
+                if (certs->root_buffer == NULL)
+                {
+                        LOG_ERR("unable to allocate memory for root certificate");
+                        goto error;
+                }
+
                 int root_size = readFile(certs->root_path,
                                         certs->root_buffer,
                                         root_certificate_buffer_size);
@@ -552,6 +597,7 @@ static int read_certificates(const struct shell *sh, struct certificates* certs)
 error:
         free(certs->chain_buffer);
         free(certs->key_buffer);
+        free(certs->additional_key_buffer);
         free(certs->root_buffer);
 
         return -1;

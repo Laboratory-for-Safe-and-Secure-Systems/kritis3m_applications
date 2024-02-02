@@ -28,6 +28,39 @@ extern size_t wolfsslMemoryBufferSize;
 #define wolfssl_heap NULL
 #endif
 
+
+enum connection_state 
+{
+	CONNECTION_STATE_NOT_CONNECTED,
+	CONNECTION_STATE_HANDSHAKE,
+	CONNECTION_STATE_CONNECTED,
+};
+
+
+/* Data structure for an endpoint */
+struct wolfssl_endpoint 
+{
+        WOLFSSL_CTX* context;
+};
+
+
+/* Data structure for an active session */
+struct wolfssl_session
+{
+        WOLFSSL* session;
+	enum connection_state state;
+
+        struct 
+	{
+		struct timespec start_time;
+		struct timespec end_time;
+		uint32_t txBytes;
+		uint32_t rxBytes;
+	}
+	handshake_metrics_priv;
+};
+
+
 /* PKCS#11 */
 typedef struct pkcs11_secure_element
 {
@@ -68,11 +101,10 @@ static int errorOccured(int32_t ret)
 	return 0;
 }
 
-static int wolfssl_read_callback(WOLFSSL* session, char* buffer, int size, void* ctx)
+static int wolfssl_read_callback(WOLFSSL* wolfssl, char* buffer, int size, void* ctx)
 {
-	(void) ctx;
-
-	int socket = wolfSSL_get_fd(session);
+	int socket = wolfSSL_get_fd(wolfssl);
+	wolfssl_session* session = (wolfssl_session*) ctx;
 
 	int ret = recv(socket, buffer, size, 0);
 
@@ -89,15 +121,20 @@ static int wolfssl_read_callback(WOLFSSL* session, char* buffer, int size, void*
 		else
 			return WOLFSSL_CBIO_ERR_GENERAL;
 	}
+
+	/* Update handshake metrics */
+	if (session != NULL && session->state == CONNECTION_STATE_HANDSHAKE)
+	{
+		session->handshake_metrics_priv.rxBytes += ret;
+	}
 	
 	return ret;
 }
 
-static int wolfssl_write_callback(WOLFSSL* session, char* buffer, int size, void* ctx)
+static int wolfssl_write_callback(WOLFSSL* wolfssl, char* buffer, int size, void* ctx)
 {
-	(void) ctx;
-
-	int socket = wolfSSL_get_fd(session);
+	int socket = wolfSSL_get_fd(wolfssl);
+	wolfssl_session* session = (wolfssl_session*) ctx;
 
 	int ret = send(socket, buffer, size, 0);
 
@@ -109,6 +146,12 @@ static int wolfssl_write_callback(WOLFSSL* session, char* buffer, int size, void
 			return WOLFSSL_CBIO_ERR_WANT_WRITE;
 		else
 			return WOLFSSL_CBIO_ERR_GENERAL;
+	}
+
+	/* Update handshake metrics */
+	if (session != NULL && session->state == CONNECTION_STATE_HANDSHAKE)
+	{
+		session->handshake_metrics_priv.txBytes += ret;
 	}
 
 	return ret;
@@ -314,14 +357,18 @@ static int wolfssl_configure_context(WOLFSSL_CTX* context, struct wolfssl_endpoi
 		return -1;
 
 	/* Load device certificate chain */
-	ret = wolfSSL_CTX_use_certificate_chain_buffer_format(context,
-							      config->device_certificate_chain.buffer,
-							      config->device_certificate_chain.size,
-							      WOLFSSL_FILETYPE_PEM);
-	if (errorOccured(ret))
-		return -1;
+	if (config->device_certificate_chain.buffer != NULL)
+	{
+		ret = wolfSSL_CTX_use_certificate_chain_buffer_format(context,
+								config->device_certificate_chain.buffer,
+								config->device_certificate_chain.size,
+								WOLFSSL_FILETYPE_PEM);
+		if (errorOccured(ret))
+			return -1;
+	}
 
 	/* Load the private key */
+	bool privateKeyLoaded = false;
 	if (pkcs11_secure_element_instance.initialized == true)
 	{
 		wolfSSL_CTX_SetDevId(context, wolfssl_get_secure_element_device_id());
@@ -332,6 +379,12 @@ static int wolfssl_configure_context(WOLFSSL_CTX* context, struct wolfssl_endpoi
 			ret = wolfssl_import_pem_key_into_secure_element(config->private_key.buffer,
 				config->private_key.size, wolfssl_get_secure_element_private_key_id(),
 				wolfssl_get_secure_element_private_key_id_size());
+
+			if (ret != 0)
+			{
+				LOG_ERR("Failed to import private key into secure element");
+				return -1;
+			}
 		}
 
 		/* Load the private key from the secure element */
@@ -339,24 +392,42 @@ static int wolfssl_configure_context(WOLFSSL_CTX* context, struct wolfssl_endpoi
 						    wolfssl_get_secure_element_private_key_id(),
 						    wolfssl_get_secure_element_private_key_id_size(),
 						    wolfssl_get_secure_element_device_id());
+		privateKeyLoaded = true;
 	}
-	else
+	else if (config->private_key.buffer != NULL)
 	{
 		/* Load the private key from the buffer */
 		ret = wolfSSL_CTX_use_PrivateKey_buffer(context,
 							config->private_key.buffer,
 							config->private_key.size,
 							WOLFSSL_FILETYPE_PEM);
+
+		/* Load the additional private key from the buffer */
+		if (config->private_key.additional_key_buffer != NULL)
+		{
+			if (errorOccured(ret))
+				return -1;
+
+			ret = wolfSSL_CTX_use_AltPrivateKey_buffer(context,
+					config->private_key.additional_key_buffer,
+					config->private_key.additional_key_size,
+					WOLFSSL_FILETYPE_PEM);
+		}
+
+		privateKeyLoaded = true;
 	}
 
 	if (errorOccured(ret))
-		return -1; 
+		return -1;
 
 
 	/* Check if the private key and the device certificate match */
-	ret = wolfSSL_CTX_check_private_key(context);
-	if (errorOccured(ret))
-		return -1;
+	if (privateKeyLoaded == true)
+	{
+		ret = wolfSSL_CTX_check_private_key(context);
+		if (errorOccured(ret))
+			return -1;
+	}
 
 	/* Configure the available cipher suites for TLS 1.3;
 	 * We only support AES GCM with 256 bit key length */
@@ -378,74 +449,176 @@ static int wolfssl_configure_context(WOLFSSL_CTX* context, struct wolfssl_endpoi
 	if (errorOccured(ret))
 		return -1;
 
+	/* Set the preference for verfication of hybrid signatures to be for both the 
+	 * native and alternative chains. Ultimately, its the server's choice.
+	 */
+        static uint8_t cks_order[3] = {
+            WOLFSSL_CKS_SIGSPEC_BOTH,
+            WOLFSSL_CKS_SIGSPEC_ALTERNATIVE,
+            WOLFSSL_CKS_SIGSPEC_NATIVE,
+        };
+
+        ret = wolfSSL_CTX_UseCKS(context, cks_order, sizeof(cks_order));
+	if (errorOccured(ret))
+		return -1;
+
 	/* Set the IO callbacks for send and receive */
 	wolfSSL_CTX_SetIORecv(context, wolfssl_read_callback);
 	wolfSSL_CTX_SetIOSend(context, wolfssl_write_callback);
 
-	/* Set peer authentification to required */
-	wolfSSL_CTX_set_verify(context, WOLFSSL_VERIFY_PEER | WOLFSSL_VERIFY_FAIL_IF_NO_PEER_CERT, NULL);
+	/* Configure peer authentification */
+	int verify_mode = WOLFSSL_VERIFY_NONE;
+	if (config->mutual_authentication == true)
+	{
+		verify_mode = WOLFSSL_VERIFY_PEER | WOLFSSL_VERIFY_FAIL_IF_NO_PEER_CERT;
+	}
+	wolfSSL_CTX_set_verify(context, verify_mode, NULL);
 
 	return 0;
 }
 
 
-/* Setup a TLS server context.
+/* Setup a TLS server endpoint.
  *
  * Parameter is a pointer to a filled endpoint_configuration structure.
  *
- * Return value is a pointer to the newly created context or NULl in case of an error
+ * Return value is a pointer to the newly created endpoint or NULL in case of an error
  * (error message is logged to the console).
  */
-WOLFSSL_CTX* wolfssl_setup_server_context(struct wolfssl_endpoint_configuration const* config)
+wolfssl_endpoint* wolfssl_setup_server_endpoint(wolfssl_endpoint_configuration const* config)
 {
+	if (config == NULL)
+	{
+		LOG_ERR("Configuration is NULL");
+		return NULL;
+	}
+
+	/* Create a new endpoint object */
+	wolfssl_endpoint* new_endpoint = malloc(sizeof(wolfssl_endpoint));
+	if (new_endpoint == NULL)
+	{
+		LOG_ERR("Unable to allocate memory for new WolfSSL endpoint");
+		return NULL;
+	}
+
         /* Create the TLS server context */
-	WOLFSSL_CTX* new_context = wolfSSL_CTX_new_ex(wolfTLS_server_method_ex(wolfssl_heap), wolfssl_heap);
-	if (new_context == NULL)
+	new_endpoint->context = wolfSSL_CTX_new_ex(wolfTLS_server_method_ex(wolfssl_heap), wolfssl_heap);
+	if (new_endpoint->context == NULL)
 	{
 		LOG_ERR("Unable to create a new WolfSSL server context");
+		free(new_endpoint);
 		return NULL;
 	}
 
 	/* Configure the new context */
-        int ret = wolfssl_configure_context(new_context, config);
+        int ret = wolfssl_configure_context(new_endpoint->context, config);
         if (ret == -1)
         {
                 LOG_ERR("Failed to configure new TLS server context\r\n");
-                wolfSSL_CTX_free(new_context);
+                wolfSSL_CTX_free(new_endpoint->context);
+		free(new_endpoint);
 	        return NULL;
         }
 
-        return new_context;
+        return new_endpoint;
 }
 
 
-/* Setup a TLS client context.
+/* Setup a TLS client endpoint.
  *
  * Parameter is a pointer to a filled endpoint_configuration structure.
  *
- * Return value is a pointer to the newly created context or NULl in case of an error
+ * Return value is a pointer to the newly created endpoint or NULL in case of an error
  * (error message is logged to the console).
  */
-WOLFSSL_CTX* wolfssl_setup_client_context(struct wolfssl_endpoint_configuration const* config)
+wolfssl_endpoint* wolfssl_setup_client_endpoint(wolfssl_endpoint_configuration const* config)
 {
+	if (config == NULL)
+	{
+		LOG_ERR("Configuration is NULL");
+		return NULL;
+	}
+
+	/* Create a new endpoint object */
+	wolfssl_endpoint* new_endpoint = malloc(sizeof(wolfssl_endpoint));
+	if (new_endpoint == NULL)
+	{
+		LOG_ERR("Unable to allocate memory for new WolfSSL endpoint");
+		return NULL;
+	}
+
         /* Create the TLS client context */
-	WOLFSSL_CTX* new_context = wolfSSL_CTX_new_ex(wolfTLS_client_method_ex(wolfssl_heap), wolfssl_heap);
-	if (new_context == NULL)
+	new_endpoint->context = wolfSSL_CTX_new_ex(wolfTLS_client_method_ex(wolfssl_heap), wolfssl_heap);
+	if (new_endpoint->context == NULL)
 	{
 		LOG_ERR("Unable to create a new WolfSSL client context");
+		free(new_endpoint);
 		return NULL;
 	}
 
 	/* Configure the new context */
-        int ret = wolfssl_configure_context(new_context, config);
+        int ret = wolfssl_configure_context(new_endpoint->context, config);
         if (ret == -1)
         {
                 LOG_ERR("Failed to confiugre new TLS client context\r\n");
-                wolfSSL_CTX_free(new_context);
+                wolfSSL_CTX_free(new_endpoint->context);
+		free(new_endpoint);
 	        return NULL;
         }
 
-        return new_context;
+        return new_endpoint;
+}
+
+
+/* Create a new session for the endpoint.
+ *
+ * Parameters are a pointer to a configured endpoint and the socket fd of the underlying
+ * network connection.
+ * 
+ * Return value is a pointer to the newly created session or NULL in case of an error
+ * (error message is logged to the console).
+ */
+wolfssl_session* wolfssl_create_session(wolfssl_endpoint* endpoint, int socket_fd)
+{
+	if (endpoint == NULL)
+	{
+		LOG_ERR("Endpoint is NULL");
+		return NULL;
+	}
+
+	/* Create a new session object */
+	wolfssl_session* new_session = malloc(sizeof(wolfssl_session));
+	if (new_session == NULL)
+	{
+		LOG_ERR("Unable to allocate memory for new WolfSSL session");
+		return NULL;
+	}
+
+	/* Create a new TLS session */
+	new_session->session = wolfSSL_new(endpoint->context);
+	if (new_session->session == NULL)
+	{
+		LOG_ERR("Unable to create a new WolfSSL session");
+		free(new_session);
+		return NULL;
+	}
+
+	/* Initialize the remaining attributes */
+	new_session->state = CONNECTION_STATE_NOT_CONNECTED;
+	new_session->handshake_metrics_priv.txBytes = 0;
+	new_session->handshake_metrics_priv.rxBytes = 0;
+
+	/* Store the socket fd */
+	wolfSSL_set_fd(new_session->session, socket_fd);
+
+	/* Store a pointer to our session object to get access to the metrics from
+	 * the read and write callback. This must be done AFTER the call to
+	 * wolfSSL_set_fd() as this method overwrites the ctx variables.
+	 */
+	wolfSSL_SetIOReadCtx(new_session->session, new_session);
+	wolfSSL_SetIOWriteCtx(new_session->session, new_session);
+
+	return new_session;
 }
 
 
@@ -456,22 +629,54 @@ WOLFSSL_CTX* wolfssl_setup_client_context(struct wolfssl_endpoint_configuration 
  * data from the peer is present). The return code is then either WOLFSSL_ERROR_WANT_READ or
  * WOLFSSL_ERROR_WANT_WRITE.
  */
-int wolfssl_handshake(WOLFSSL* session)
+int wolfssl_handshake(wolfssl_session* session)
 {
         int ret = -1;
 
+	if (session == NULL)
+	{
+		LOG_ERR("Session is NULL");
+		return -1;
+	}
+
+	/* Obtain handshake metrics */
+	if (session->state == CONNECTION_STATE_NOT_CONNECTED)
+	{
+		session->state = CONNECTION_STATE_HANDSHAKE;
+
+		/* Get start time */
+		if (clock_gettime(CLOCK_MONOTONIC,
+				  &session->handshake_metrics_priv.start_time) != 0)
+		{
+			LOG_ERR("Error starting handshake timer");
+			session->state = CONNECTION_STATE_NOT_CONNECTED;
+			return -1;
+		}
+	}
+
 	while (ret != 0)
 	{
-		ret = wolfSSL_negotiate(session);
+		ret = wolfSSL_negotiate(session->session);
 
 		if (ret == WOLFSSL_SUCCESS)
 		{
+			session->state = CONNECTION_STATE_CONNECTED;
+
+			/* Get end time */
+			if (clock_gettime(CLOCK_MONOTONIC,
+					&session->handshake_metrics_priv.end_time) != 0) 
+			{
+				// Handle error
+				LOG_ERR("Error stopping handshake timer");
+				return -1;
+			}
+
 			ret = 0;
 			break;
 		}
 		else
 		{
-			ret = wolfSSL_get_error(session, ret);
+			ret = wolfSSL_get_error(session->session, ret);
 
 			if ((ret == WOLFSSL_ERROR_WANT_READ) || (ret == WOLFSSL_ERROR_WANT_WRITE))
 			{
@@ -493,23 +698,29 @@ int wolfssl_handshake(WOLFSSL* session)
 }
 
 
-/* Receive new data from the TLS peer (blocking read).
+/* Receive new data from the TLS peer.
  *
  * Returns the number of received bytes on success, -1 on failure (error message is logged
  * to the console).
  */
-int wolfssl_receive(WOLFSSL* session, uint8_t* buffer, int max_size)
+int wolfssl_receive(wolfssl_session* session, uint8_t* buffer, int max_size)
 {
 	uint8_t* tmp = buffer;
 	int bytes_read = 0;
+
+	if (session == NULL)
+	{
+		LOG_ERR("Session is NULL");
+		return -1;
+	}
 	
 	while (1)
 	{
-		int ret = wolfSSL_read(session, tmp, max_size - bytes_read);
+		int ret = wolfSSL_read(session->session, tmp, max_size - bytes_read);
 
 		if (ret <= 0) 
 		{
-			ret = wolfSSL_get_error(session, ret);
+			ret = wolfSSL_get_error(session->session, ret);
 
 			if (ret == WOLFSSL_ERROR_WANT_WRITE)
 			{
@@ -554,14 +765,20 @@ int wolfssl_receive(WOLFSSL* session, uint8_t* buffer, int max_size)
  * we cannot write the data in one call, WOLFSSL_ERROR_WANT_WRITE is returned, indicating
  * that you have to call the method again (with the same data!) once the socket is writable.
  */
-int wolfssl_send(WOLFSSL* session, uint8_t* buffer, int size)
+int wolfssl_send(wolfssl_session* session, uint8_t const* buffer, int size)
 {
-        uint8_t* tmp = buffer;
+        uint8_t const* tmp = buffer;
 	int ret = 0;
+
+	if (session == NULL)
+	{
+		LOG_ERR("Session is NULL");
+		return -1;
+	}
 
 	while (size > 0)
 	{
-		ret = wolfSSL_write(session, tmp, size);
+		ret = wolfSSL_write(session->session, tmp, size);
 
 		if (ret > 0)
 		{
@@ -572,7 +789,7 @@ int wolfssl_send(WOLFSSL* session, uint8_t* buffer, int size)
 		}
 		else
 		{
-			ret = wolfSSL_get_error(session, ret);
+			ret = wolfSSL_get_error(session->session, ret);
 
             		if (ret == WOLFSSL_ERROR_WANT_READ)
 			{
@@ -604,4 +821,58 @@ int wolfssl_send(WOLFSSL* session, uint8_t* buffer, int size)
 	}
 
 	return ret;
+}
+
+/* Get metics of the handshake. */
+tls_handshake_metrics wolfssl_get_handshake_metrics(wolfssl_session* session)
+{
+	tls_handshake_metrics metrics;
+	
+	metrics.duration_us = (session->handshake_metrics_priv.end_time.tv_sec - session->handshake_metrics_priv.start_time.tv_sec) * 1000000.0 +
+			      (session->handshake_metrics_priv.end_time.tv_nsec - session->handshake_metrics_priv.start_time.tv_nsec) / 1000.0;
+	metrics.txBytes = session->handshake_metrics_priv.txBytes;
+	metrics.rxBytes = session->handshake_metrics_priv.rxBytes;
+
+	return metrics;
+}
+
+
+/* Close the connection of the active session */
+void wolfssl_close_session(wolfssl_session* session)
+{
+	if (session != NULL)
+	{
+		wolfSSL_shutdown(session->session);
+		session->state = CONNECTION_STATE_NOT_CONNECTED;
+	}
+}
+
+
+/* Free ressources of a session. */
+void wolfssl_free_session(wolfssl_session* session)
+{
+	if (session != NULL)
+	{
+		if (session->session != NULL)
+		{
+			wolfSSL_free(session->session);
+		}
+
+		free(session);
+	}
+}
+
+
+/* Free ressources of an endpoint. */
+void wolfssl_free_endpoint(wolfssl_endpoint* endpoint)
+{
+	if (endpoint != NULL)
+	{
+		if (endpoint->context != NULL)
+		{
+			wolfSSL_CTX_free(endpoint->context);
+		}
+
+		free(endpoint);
+	}
 }

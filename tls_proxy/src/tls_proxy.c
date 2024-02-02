@@ -11,7 +11,6 @@
 #include "poll_set.h"
 #include "networking.h"
 #include "wolfssl.h"
-#include "time.h"
 
 
 LOG_MODULE_REGISTER(tls_proxy);
@@ -29,33 +28,16 @@ enum tls_proxy_direction
 	FORWARD_PROXY,
 };
 
-enum tls_state 
-{
-	TLS_STATE_NOT_CONNECTED,
-	TLS_STATE_HANDSHAKE,
-	TLS_STATE_CONNECTED,
-	TLS_STATE_ERROR,
-};
 
 struct proxy_connection
 {
 	bool in_use;
 	enum tls_proxy_direction direction;
-	enum tls_state state;
 	int listening_peer_sock;
 	int target_peer_sock;
-	WOLFSSL* wolfssl_session;
+	wolfssl_session* tls_session;
 	pthread_t thread;
 	pthread_attr_t thread_attr;
-
-	struct 
-	{
-		struct timespec start_time;
-		struct timespec end_time;
-		uint32_t txBytes;
-		uint32_t rxBytes;
-	}
-	handshake_metrics;
 
 	size_t num_of_bytes_in_recv_buffer;
 	uint8_t recv_buffer[RECV_BUFFER_SIZE];
@@ -67,7 +49,7 @@ struct proxy
 	enum tls_proxy_direction direction;
 	int listening_tcp_sock;
 	struct sockaddr_in target_addr;
-	WOLFSSL_CTX* wolfssl_contex;
+	wolfssl_endpoint* tls_endpoint;
 	struct proxy_connection* connections[MAX_CONNECTIONS_PER_PROXY];
 };
 
@@ -135,7 +117,6 @@ static struct proxy_connection* add_new_connection_to_proxy(struct proxy* proxy,
 							    int client_socket,
 							    struct sockaddr* client_addr,
 							    socklen_t client_addr_len);
-static int perform_handshake(struct proxy_connection* connection);
 
 static struct proxy* find_proxy_by_fd(int fd);
 static struct proxy_connection* find_proxy_connection_by_fd(int fd);
@@ -258,21 +239,21 @@ static int add_new_proxy(enum tls_proxy_direction direction, struct proxy_config
 		LOG_INF("Starting new reverse proxy on port %d using slot %d/%d", 
 			config->listening_port, freeSlot+1, MAX_PROXYS);
 
-		/* Create the wolfssl context */
-		proxy->wolfssl_contex = wolfssl_setup_server_context(&config->tls_config);
+		/* Create the TLS endpoint */
+		proxy->tls_endpoint = wolfssl_setup_server_endpoint(&config->tls_config);
 	}
 	else if (direction == FORWARD_PROXY)
 	{
 		LOG_INF("Starting new forward proxy to %s:%d using slot %d/%d", 
 		config->target_ip_address, config->target_port, freeSlot+1, MAX_PROXYS);
 
-		/* Create the wolfssl context */
-		proxy->wolfssl_contex = wolfssl_setup_client_context(&config->tls_config);
+		/* Create the TLS endpoint */
+		proxy->tls_endpoint = wolfssl_setup_client_endpoint(&config->tls_config);
 	}
 
-	if (proxy->wolfssl_contex == NULL)
+	if (proxy->tls_endpoint == NULL)
 	{
-		LOG_ERR("Error creating WolfSSL context");
+		LOG_ERR("Error creating TLS endpoint");
 		kill_proxy(proxy);
 		return -1;
 	}
@@ -367,10 +348,10 @@ static void kill_proxy(struct proxy* proxy)
 	}
 
 	/* Clear TLS context */
-	if (proxy->wolfssl_contex != NULL)
+	if (proxy->tls_endpoint != NULL)
 	{
-		wolfSSL_CTX_free(proxy->wolfssl_contex);
-		proxy->wolfssl_contex = NULL;
+		wolfssl_free_endpoint(proxy->tls_endpoint);
+		proxy->tls_endpoint = NULL;
 	}
 
 	proxy->in_use = false;
@@ -437,27 +418,12 @@ static struct proxy_connection* add_new_connection_to_proxy(struct proxy* proxy,
 		return NULL;
 	}
 
-
-	/* Create a new TLS session */
-	WOLFSSL* new_session = wolfSSL_new(proxy->wolfssl_contex);
-
-	if (new_session == NULL)
-	{
-		LOG_ERR("Cannot accept more connections (error creating TLS session)");
-		close(client_socket);
-		return NULL;
-	}
-
 	struct proxy_connection* connection = &proxy_connection_pool[freeSlotConnectionPool];
 
 	/* Store new client data */
 	connection->in_use = true;
 	connection->direction = proxy->direction;
-	connection->state = TLS_STATE_NOT_CONNECTED;
 	connection->listening_peer_sock = client_socket;
-	connection->wolfssl_session = new_session;
-	connection->handshake_metrics.txBytes = 0;
-	connection->handshake_metrics.rxBytes = 0;
 
 	setblocking(connection->listening_peer_sock, false);
 
@@ -482,14 +448,21 @@ static struct proxy_connection* add_new_connection_to_proxy(struct proxy* proxy,
 		return NULL;
 	}
 
-	/* Map the TLS session to the respective socket depending on the direction */
+	/* Create a new TLS session on the destined interface depending on the direction */
 	if (connection->direction == FORWARD_PROXY)
-	{	
-		wolfSSL_set_fd(connection->wolfssl_session, connection->target_peer_sock);
+	{
+		connection->tls_session = wolfssl_create_session(proxy->tls_endpoint, connection->target_peer_sock);
 	}
 	else if (connection->direction == REVERSE_PROXY)
 	{
-		wolfSSL_set_fd(connection->wolfssl_session, connection->listening_peer_sock);
+		connection->tls_session = wolfssl_create_session(proxy->tls_endpoint, connection->listening_peer_sock);
+	}
+
+	if (connection->tls_session == NULL)
+	{
+		LOG_ERR("Cannot accept more connections (error creating TLS session)");
+		proxy_connection_cleanup(connection);
+		return NULL;
 	}
 
 	/* Store the new connection within the proxy */
@@ -515,51 +488,6 @@ static struct proxy_connection* add_new_connection_to_proxy(struct proxy* proxy,
 }
 
 
-static int perform_handshake(struct proxy_connection* connection)
-{
-	/* Obtain handshake metrics */
-	if (connection->state == TLS_STATE_NOT_CONNECTED)
-	{
-		connection->state = TLS_STATE_HANDSHAKE;
-
-		/* Get start time */
-		if (clock_gettime(CLOCK_MONOTONIC,
-				  &connection->handshake_metrics.start_time) != 0)
-		{
-	    		// Handle error
-			LOG_ERR("Error starting handshake timer");
-			return -1;
-		}
-	}
-
-	/* Perform TLS handshake */
-	int ret = wolfssl_handshake(connection->wolfssl_session);
-	if (ret == 0)
-	{
-		connection->state = TLS_STATE_CONNECTED;
-
-		/* Get end time */
-		if (clock_gettime(CLOCK_MONOTONIC,
-				  &connection->handshake_metrics.end_time) != 0) 
-		{
-                	// Handle error
-                	LOG_ERR("Error stopping handshake timer");
-			return -1;
-            	}	
-
-		double handshake_time = (connection->handshake_metrics.end_time.tv_sec - connection->handshake_metrics.start_time.tv_sec) * 1000.0 +
-                        	(connection->handshake_metrics.end_time.tv_nsec - connection->handshake_metrics.start_time.tv_nsec) / 1000000.0;
-
-		LOG_INF("Handshake done");
-		LOG_INF("Handshake time: %.5f milliseconds\n", handshake_time);
-		// LOG_INF("Handshake Tx bytes: %d, Rx bytes: %d", connection->handshake_metrics.txBytes,
-		// 						connection->handshake_metrics.rxBytes);
-	}
-	
-	return ret;
-}
-
-
 static void proxy_connection_cleanup(struct proxy_connection* connection)
 {
 	/* Kill the network connections */
@@ -575,15 +503,12 @@ static void proxy_connection_cleanup(struct proxy_connection* connection)
 	}
 
 	/* Cleanup the TLS session */
-	if (connection->wolfssl_session != NULL) 
+	if (connection->tls_session != NULL) 
 	{
-		wolfSSL_free(connection->wolfssl_session);
-		connection->wolfssl_session = NULL;
+		wolfssl_free_session(connection->tls_session);
+		connection->tls_session = NULL;
 	}
 
-	connection->state = TLS_STATE_NOT_CONNECTED;
-	connection->handshake_metrics.txBytes = 0;
-	connection->handshake_metrics.rxBytes = 0;
 	connection->num_of_bytes_in_recv_buffer = 0;
 	
 	connection->in_use = false;
@@ -691,7 +616,7 @@ void* tls_proxy_main_thread(void* ptr)
 				if ((event & POLLIN) || (event & POLLOUT))
 				{	
 					/* Continue with the handshake */
-					ret = perform_handshake(proxy_connection);
+					ret = wolfssl_handshake(proxy_connection->tls_session);
 
 					if (ret < 0)
 					{
@@ -704,6 +629,12 @@ void* tls_proxy_main_thread(void* ptr)
 					{
 						/* Handshake done, remove respective socket from the poll_set */
 						poll_set_remove_fd(&config->poll_set, fd);
+
+						/* Get handshake metrics */
+						tls_handshake_metrics metrics = wolfssl_get_handshake_metrics(proxy_connection->tls_session);
+
+						LOG_INF("Handshake done\r\n\tDuration: %.3f milliseconds\r\n\tTx bytes: %d\r\n\tRx bytes: %d",
+							metrics.duration_us / 1000.0, metrics.txBytes, metrics.rxBytes);
 
 						/* Start thread for connection handling */
 						ret = pthread_create(&proxy_connection->thread,
@@ -786,7 +717,7 @@ static void* connection_handler_thread(void *ptr)
 				if (event & POLLIN)
 				{
 					/* Receive data from the peer */
-					ret = wolfssl_receive(connection->wolfssl_session,
+					ret = wolfssl_receive(connection->tls_session,
 							      connection->recv_buffer,
 							      sizeof(connection->recv_buffer));
 
@@ -879,7 +810,7 @@ static void* connection_handler_thread(void *ptr)
 						connection->num_of_bytes_in_recv_buffer = ret;
 
 						/* Send received data to the other socket */
-						ret = wolfssl_send(connection->wolfssl_session,
+						ret = wolfssl_send(connection->tls_session,
 								   connection->recv_buffer,
 								   connection->num_of_bytes_in_recv_buffer);
 
@@ -901,7 +832,7 @@ static void* connection_handler_thread(void *ptr)
 				if (event & POLLOUT)
 				{
 					/* Send received data to the other socket */
-					ret = wolfssl_send(connection->wolfssl_session, 
+					ret = wolfssl_send(connection->tls_session, 
 							   connection->recv_buffer, 
 							   connection->num_of_bytes_in_recv_buffer);
 					
@@ -937,7 +868,7 @@ static void* connection_handler_thread(void *ptr)
 		}
 	}
 
-	wolfSSL_shutdown(connection->wolfssl_session);
+	wolfssl_close_session(connection->tls_session);
 
 	LOG_INF("connection handler thread stopped");
 
@@ -960,7 +891,7 @@ int tls_proxy_backend_run(void)
 		proxy_connection_pool[i].direction = REVERSE_PROXY;
 		proxy_connection_pool[i].listening_peer_sock = -1;
 		proxy_connection_pool[i].target_peer_sock = -1;
-		proxy_connection_pool[i].wolfssl_session = NULL;
+		proxy_connection_pool[i].tls_session = NULL;
 		proxy_connection_pool[i].num_of_bytes_in_recv_buffer = 0;
 		pthread_attr_init(&proxy_connection_pool[i].thread_attr);
 		pthread_attr_setdetachstate(&proxy_connection_pool[i].thread_attr, PTHREAD_CREATE_DETACHED);
@@ -972,7 +903,7 @@ int tls_proxy_backend_run(void)
 		proxy_pool[i].in_use = false;
 		proxy_pool[i].direction = REVERSE_PROXY;
 		proxy_pool[i].listening_tcp_sock = -1;
-		proxy_pool[i].wolfssl_contex = NULL;
+		proxy_pool[i].tls_endpoint = NULL;
 
 		for (int j = 0; j < MAX_CONNECTIONS_PER_PROXY; j++)
 		{

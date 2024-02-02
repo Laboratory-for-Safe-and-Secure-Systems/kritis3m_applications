@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <time.h>
 
 #include "wolfssl/wolfcrypt/settings.h"
 #include "wolfssl/ssl.h"
@@ -31,28 +32,53 @@ wolfssl_library_configuration;
 /* Data structure for the endpoint configuration */
 typedef struct wolfssl_endpoint_configuration
 {
-        struct 
+        bool mutual_authentication;
+
+        struct
         {
                 uint8_t const* buffer;
                 size_t size;
-        } 
+        }
         device_certificate_chain;
 
-        struct 
+        struct
         {
                 uint8_t const* buffer;
                 size_t size;
-        } 
+
+                /* Additional key in case of hybrid signatures */
+                uint8_t const* additional_key_buffer;
+                size_t additional_key_size;
+        }
         private_key;
 
-        struct 
+        struct
         {
                 uint8_t const* buffer;
                 size_t size;
-        } 
+        }
         root_certificate;
 }
 wolfssl_endpoint_configuration;
+
+
+/* Data structure for an endpoint (definition is hidden in source file) */
+typedef struct wolfssl_endpoint wolfssl_endpoint;
+
+
+/* Data structure for an active session (definition is hidden in source file) */
+typedef struct wolfssl_session wolfssl_session;
+
+
+/* Data structure for TLS handshake metics */
+typedef struct tls_handshake_metrics
+{
+        uint32_t duration_us;
+        uint32_t txBytes;
+        uint32_t rxBytes;
+}
+tls_handshake_metrics;
+
 
 
 /* Initialize WolfSSL library.
@@ -64,24 +90,35 @@ wolfssl_endpoint_configuration;
 int wolfssl_init(wolfssl_library_configuration const* config);
 
 
-/* Setup a TLS server context.
+/* Setup a TLS server endpoint.
  *
  * Parameter is a pointer to a filled endpoint_configuration structure.
  *
- * Return value is a pointer to the newly created context or NULl in case of an error
+ * Return value is a pointer to the newly created endpoint or NULL in case of an error
  * (error message is logged to the console).
  */
-WOLFSSL_CTX* wolfssl_setup_server_context(wolfssl_endpoint_configuration const* config);
+wolfssl_endpoint* wolfssl_setup_server_endpoint(wolfssl_endpoint_configuration const* config);
 
 
-/* Setup a TLS client context.
+/* Setup a TLS client endpoint.
  *
  * Parameter is a pointer to a filled endpoint_configuration structure.
  *
- * Return value is a pointer to the newly created context or NULl in case of an error
+ * Return value is a pointer to the newly created endpoint or NULL in case of an error
  * (error message is logged to the console).
  */
-WOLFSSL_CTX* wolfssl_setup_client_context(wolfssl_endpoint_configuration const* config);
+wolfssl_endpoint* wolfssl_setup_client_endpoint(wolfssl_endpoint_configuration const* config);
+
+
+/* Create a new session for the endpoint.
+ *
+ * Parameters are a pointer to a configured endpoint and the socket fd of the underlying
+ * network connection.
+ * 
+ * Return value is a pointer to the newly created session or NULL in case of an error
+ * (error message is logged to the console).
+ */
+wolfssl_session* wolfssl_create_session(wolfssl_endpoint* endpoint, int socket_fd);
 
 
 /* Perform the TLS handshake for a newly created session.
@@ -91,15 +128,15 @@ WOLFSSL_CTX* wolfssl_setup_client_context(wolfssl_endpoint_configuration const* 
  * data from the peer is present). The return code is then either WOLFSSL_ERROR_WANT_READ or
  * WOLFSSL_ERROR_WANT_WRITE.
  */
-int wolfssl_handshake(WOLFSSL* session);
+int wolfssl_handshake(wolfssl_session* session);
 
 
-/* Receive new data from the TLS peer (blocking read).
+/* Receive new data from the TLS peer.
  *
  * Returns the number of received bytes on success, -1 on failure (error message is logged
  * to the console).
  */
-int wolfssl_receive(WOLFSSL* session, uint8_t* buffer, int max_size);
+int wolfssl_receive(wolfssl_session* session, uint8_t* buffer, int max_size);
 
 
 /* Send data to the TLS remote peer.
@@ -108,7 +145,23 @@ int wolfssl_receive(WOLFSSL* session, uint8_t* buffer, int max_size);
  * we cannot write the data in one call, WOLFSSL_ERROR_WANT_WRITE is returned, indicating
  * that you have to call the method again (with the same data!) once the socket is writable.
  */
-int wolfssl_send(WOLFSSL* session, uint8_t* buffer, int size);
+int wolfssl_send(wolfssl_session* session, uint8_t const* buffer, int size);
+
+
+/* Get metics of the handshake. */
+tls_handshake_metrics wolfssl_get_handshake_metrics(wolfssl_session* session);
+
+
+/* Close the connection of the active session */
+void wolfssl_close_session(wolfssl_session* session);
+
+
+/* Free ressources of a session. */
+void wolfssl_free_session(wolfssl_session* session);
+
+
+/* Free ressources of an endpoint. */
+void wolfssl_free_endpoint(wolfssl_endpoint* endpoint);
 
 
 #endif
