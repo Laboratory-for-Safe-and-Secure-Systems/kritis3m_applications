@@ -179,6 +179,8 @@ static int wolfssl_import_pem_key_into_secure_element(uint8_t const* pem_buffer,
 	void* key = NULL;
 	int ret = -1;
 
+	memset(&info, 0, sizeof(EncryptedInfo));
+
 	/* Convert key to DER (binary) */
 	ret = PemToDer(pem_buffer, pem_size, PRIVATEKEY_TYPE, &der, NULL,
 		       &info, &keyFormat);
@@ -190,7 +192,21 @@ static int wolfssl_import_pem_key_into_secure_element(uint8_t const* pem_buffer,
 	}
 
 	/* Check which key type we have */
-	if ((keyFormat == FALCON_LEVEL1k) || (keyFormat == FALCON_LEVEL5k)) 
+	if (keyFormat == RSAk)
+	{
+		/* Create the key object */
+		key = create_rsa_key_from_buffer(der->buffer, der->length, id, len);
+
+		type = PKCS11_KEY_TYPE_RSA;
+	}
+	else if (keyFormat == ECDSAk)
+	{
+		/* Create the key object */
+		key = create_ecc_key_from_buffer(der->buffer, der->length, id, len);
+
+		type = PKCS11_KEY_TYPE_EC;
+	}
+	else if ((keyFormat == FALCON_LEVEL1k) || (keyFormat == FALCON_LEVEL5k)) 
 	{
 		/* Create the key object */
 		key = create_falcon_key_from_buffer(keyFormat, der->buffer, der->length,
@@ -216,19 +232,35 @@ static int wolfssl_import_pem_key_into_secure_element(uint8_t const* pem_buffer,
 	}
 
 	/* Import the key into the secure element */
-	ret = wc_Pkcs11StoreKey(&pkcs11_secure_element_instance.token, type, 1, key);
+	ret = wc_Pkcs11StoreKey_ex(&pkcs11_secure_element_instance.token, type, 1, key, 1);
 	if (ret != 0)
 	{
-		FreeDer(&der);
-		free(key);
 		LOG_ERR("Error importing private key into secure element: %d", ret);
-		return -1;
+		ret = -1;
 	}
 
-	if (key != NULL)
+	/* Free key */
+	switch (keyFormat)
 	{
-		free(key);
+	case RSAk:
+		wc_FreeRsaKey(key);
+		break;
+	case ECDSAk:
+		wc_ecc_free(key);
+		break;
+	case FALCON_LEVEL1k:
+	case FALCON_LEVEL5k:
+		wc_falcon_free(key);
+		break;
+	case DILITHIUM_LEVEL2k:
+	case DILITHIUM_LEVEL3k:
+	case DILITHIUM_LEVEL5k:
+		wc_dilithium_free(key);
+		break;
 	}
+	free(key);
+
+	FreeDer(&der);
 
 	return ret;
 #else
@@ -299,7 +331,7 @@ int wolfssl_init(struct wolfssl_library_configuration const* config)
 		}
 
 		/* Register the device with WolfSSL */
-		ret = wc_CryptoCb_RegisterDevice(wolfssl_get_secure_element_device_id(),
+		ret = wc_CryptoCb_RegisterDevice(secure_element_device_id(),
 						 wc_Pkcs11_CryptoDevCb,
 						 &pkcs11_secure_element_instance.token);
 		if (ret != 0)
@@ -371,15 +403,15 @@ static int wolfssl_configure_context(WOLFSSL_CTX* context, struct wolfssl_endpoi
 	bool privateKeyLoaded = false;
 	if (pkcs11_secure_element_instance.initialized == true)
 	{
-		wolfSSL_CTX_SetDevId(context, wolfssl_get_secure_element_device_id());
+		// wolfSSL_CTX_SetDevId(context, secure_element_device_id());
 
 		/* Import private key into secure element if present */
 		if (config->private_key.buffer != NULL)
 		{
 			ret = wolfssl_import_pem_key_into_secure_element(config->private_key.buffer,
-				config->private_key.size, wolfssl_get_secure_element_private_key_id(),
-				wolfssl_get_secure_element_private_key_id_size());
-
+						config->private_key.size,
+						secure_element_private_key_id(),
+						secure_element_private_key_id_size());
 			if (ret != 0)
 			{
 				LOG_ERR("Failed to import private key into secure element");
@@ -389,9 +421,33 @@ static int wolfssl_configure_context(WOLFSSL_CTX* context, struct wolfssl_endpoi
 
 		/* Load the private key from the secure element */
 		ret = wolfSSL_CTX_use_PrivateKey_Id(context,
-						    wolfssl_get_secure_element_private_key_id(),
-						    wolfssl_get_secure_element_private_key_id_size(),
-						    wolfssl_get_secure_element_device_id());
+						    secure_element_private_key_id(),
+						    secure_element_private_key_id_size(),
+						    secure_element_device_id());
+
+		/* Import the additional private key into secure element if present */
+		if (config->private_key.additional_key_buffer != NULL)
+		{
+			if (errorOccured(ret))
+				return -1;
+
+			ret = wolfssl_import_pem_key_into_secure_element(config->private_key.additional_key_buffer,
+						config->private_key.additional_key_size, 
+						secure_element_additional_private_key_id(),
+						secure_element_additional_private_key_id_size());
+			if (ret != 0)
+			{
+				LOG_ERR("Failed to import additional private key into secure element");
+				return -1;
+			}
+
+			/* Load the private key from the secure element */
+			ret = wolfSSL_CTX_use_AltPrivateKey_Id(context,
+						secure_element_additional_private_key_id(),
+						secure_element_additional_private_key_id_size(),
+						secure_element_device_id());
+		}
+
 		privateKeyLoaded = true;
 	}
 	else if (config->private_key.buffer != NULL)
@@ -429,9 +485,11 @@ static int wolfssl_configure_context(WOLFSSL_CTX* context, struct wolfssl_endpoi
 			return -1;
 	}
 
-	/* Configure the available cipher suites for TLS 1.3;
-	 * We only support AES GCM with 256 bit key length */
-	ret = wolfSSL_CTX_set_cipher_list(context, "TLS13-AES256-GCM-SHA384");
+	/* Configure the available cipher suites for TLS 1.3
+	 * We only support AES GCM with 256 bit key length and the
+	 * integrity only cipher with SHA384.
+	 */
+	ret = wolfSSL_CTX_set_cipher_list(context, "TLS13-AES256-GCM-SHA384:TLS13-SHA384-SHA384");
 	if (errorOccured(ret))
 		return -1;
 
@@ -450,7 +508,7 @@ static int wolfssl_configure_context(WOLFSSL_CTX* context, struct wolfssl_endpoi
 		return -1;
 
 	/* Set the preference for verfication of hybrid signatures to be for both the 
-	 * native and alternative chains. Ultimately, its the server's choice.
+	 * native and alternative chains.
 	 */
         static uint8_t cks_order[3] = {
             WOLFSSL_CKS_SIGSPEC_BOTH,
