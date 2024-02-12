@@ -339,8 +339,11 @@ static void print_help(const struct shell *sh, char const* name)
  * and must be freed by the user. 
  * 
  * Returns 0 on success, -1 on failure (error is printed on console). */
-static int read_certificates(const struct shell *sh, struct certificates* certs)
+static int read_certificates(const struct shell *sh, struct certificates* certs,
+                             enum application_role* role)
 {
+        (void) role;
+        
         if (certs->certificate_path != NULL)
         {
                 shell_warn(sh, "--cert not support in Zephyr at the moment, ignoring...");
