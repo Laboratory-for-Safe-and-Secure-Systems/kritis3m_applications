@@ -19,8 +19,8 @@
 struct network_interfaces 
 {
 	void* management;
-	void* lan;
-	void* wan;
+	void* asset;
+	void* tunnel;
 };
 
 
