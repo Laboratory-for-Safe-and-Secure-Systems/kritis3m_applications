@@ -57,8 +57,8 @@ static const struct option cli_options[] =
     { "secure_element",  no_argument,       0, 's' },
     { "middleware_path", required_argument, 0, 'm' },
     { "debug",           no_argument,       0, 'd' },
-    { "bridge_lan",      required_argument, 0, 'e' },
-    { "bridge_wan",      required_argument, 0, 'f' },
+    { "bridge_",      required_argument, 0, 'e' },
+    { "bridge_tunnel",      required_argument, 0, 't' },
     { "help",            no_argument,       0, 'h' },
     {NULL, 0, NULL, 0}
 };
@@ -110,8 +110,8 @@ int parse_cli_arguments(enum application_role* role, struct proxy_config* proxy_
 
         if (bridge_config != NULL)
         {
-                bridge_config->lan_interface = NULL;
-                bridge_config->wan_interface = NULL;
+                bridge_config->asset_interface = NULL;
+                bridge_config->tunnel_interface = NULL;
         }
 
         struct certificates certs = {
@@ -262,11 +262,11 @@ int parse_cli_arguments(enum application_role* role, struct proxy_config* proxy_
                                 break;
                         case 'e':
                                 if (bridge_config != NULL)
-                                        bridge_config->lan_interface = optarg;
+                                        bridge_config->asset_interface= optarg;
                                 break;
-                        case 'f':
+                        case 't':
                                 if (bridge_config != NULL)
-                                        bridge_config->wan_interface = optarg;
+                                        bridge_config->tunnel_interface= optarg;
                                 break;
 			case 'h':
 				print_help(sh, argv[0]);

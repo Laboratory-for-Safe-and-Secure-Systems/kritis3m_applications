@@ -7,8 +7,8 @@
 
 typedef struct l2_bridge_config 
 {
-	void* lan_interface;
-	void* wan_interface;
+	void* asset_interface;
+	void* tunnel_interface;
 }
 l2_bridge_config;
 

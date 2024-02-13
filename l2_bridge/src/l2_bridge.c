@@ -35,14 +35,13 @@ typedef struct l2_bridge
 	pthread_t thread;
 	pthread_attr_t thread_attr;
 
-	int lan_socket;
-	int wan_socket;
+	int asset_socket;
+	int tunnel_socket; 
 
-	struct sockaddr_ll lan_interface;
-	struct sockaddr_ll wan_interface;
+	struct sockaddr_ll asset_interface;
+	struct sockaddr_ll tunnel_interface;
 }
 l2_bridge;
-
 
 /* File global variables */
 static l2_bridge theBridge;
@@ -86,11 +85,11 @@ static void* l2_bridge_main_thread(void* ptr)
                                 continue;
 
                         /* Check lan fd */
-			if (fd == bridge->lan_socket)
+			if (fd == bridge->asset_socket)
 			{
 				if (event & POLLIN)
 				{
-					recv_buffer_len = recvfrom(bridge->lan_socket, recv_buffer, sizeof(recv_buffer), 0,
+					recv_buffer_len = recvfrom(bridge->asset_socket, recv_buffer, sizeof(recv_buffer), 0,
 								   (struct sockaddr*)&source, &source_len);
 
 					if (recv_buffer_len < 0)
@@ -113,9 +112,9 @@ static void* l2_bridge_main_thread(void* ptr)
 					    (source.sll_pkttype == PACKET_MULTICAST) ||
 					    (source.sll_pkttype == PACKET_BROADCAST))
 					{
-						ret = sendto(bridge->wan_socket, recv_buffer, recv_buffer_len, 0,
-							(const struct sockaddr *)&bridge->wan_interface,
-							sizeof(bridge->wan_interface));
+						ret = sendto(bridge->tunnel_socket, recv_buffer, recv_buffer_len, 0,
+							(const struct sockaddr *)&bridge->tunnel_interface,
+							sizeof(bridge->tunnel_interface));
 						if (ret < 0) 
 						{
 							LOG_ERR("Failed to send to WAN interface, errno %d", errno);
@@ -129,11 +128,11 @@ static void* l2_bridge_main_thread(void* ptr)
 				}
 			}
 			/* Check all clients */
-			else if (fd == bridge->wan_socket)
+			else if (fd == bridge->tunnel_socket)
 			{
                                 if (event & POLLIN)
 				{
-					recv_buffer_len = recvfrom(bridge->wan_socket, recv_buffer, sizeof(recv_buffer), 0,
+					recv_buffer_len = recvfrom(bridge->tunnel_socket, recv_buffer, sizeof(recv_buffer), 0,
 								   (struct sockaddr*)&source, &source_len);
 
 					if (recv_buffer_len < 0)
@@ -156,9 +155,9 @@ static void* l2_bridge_main_thread(void* ptr)
 					    (source.sll_pkttype == PACKET_MULTICAST) ||
 					    (source.sll_pkttype == PACKET_BROADCAST))
 					{
-						ret = sendto(bridge->lan_socket, recv_buffer, recv_buffer_len, 0,
-			     			     (const struct sockaddr *)&bridge->lan_interface,
-			     			     sizeof(bridge->lan_interface));
+						ret = sendto(bridge->asset_socket, recv_buffer, recv_buffer_len, 0,
+			     			     (const struct sockaddr *)&bridge->asset_interface,
+			     			     sizeof(bridge->asset_interface));
 						if (ret < 0) 
 						{
 							LOG_ERR("Failed to send to LAN interface, errno %d", errno);
@@ -190,8 +189,8 @@ int l2_bridge_run(l2_bridge_config const* config)
 {
         poll_set_init(&theBridge.poll_set);
 
-	memset(&theBridge.lan_interface, 0, sizeof(theBridge.lan_interface));
-	memset(&theBridge.wan_interface, 0, sizeof(theBridge.wan_interface));
+	memset(&theBridge.asset_interface, 0, sizeof(theBridge.asset_interface));
+	memset(&theBridge.tunnel_interface, 0, sizeof(theBridge.tunnel_interface));
 
         /* Create the Packet sockets for the two interfaces */
 	int proto = ETH_P_ALL;
@@ -199,94 +198,94 @@ int l2_bridge_run(l2_bridge_config const* config)
 	proto = htons(ETH_P_ALL);
 #endif
 
-	theBridge.lan_socket = socket(AF_PACKET, SOCK_RAW, proto);
-	if (theBridge.lan_socket == -1)
+	theBridge.asset_socket = socket(AF_PACKET, SOCK_RAW, proto);
+	if (theBridge.asset_socket == -1)
 	{
 		LOG_ERR("Error creating LAN socket: %d", errno);
 		return -1;
 	}
 
-	theBridge.wan_socket = socket(AF_PACKET, SOCK_RAW, proto);
-	if (theBridge.wan_socket == -1)
+	theBridge.tunnel_socket = socket(AF_PACKET, SOCK_RAW, proto);
+	if (theBridge.tunnel_socket == -1)
 	{
 		LOG_ERR("Error creating WAN socket: %d", errno);
 		return -1;
 	}
 
 #if defined(__ZEPHYR__)
-	theBridge.lan_interface.sll_ifindex = net_if_get_by_iface(config->lan_interface);
-	theBridge.wan_interface.sll_ifindex = net_if_get_by_iface(config->wan_interface);
+	theBridge.asset_interface.sll_ifindex = net_if_get_by_iface(config->asset_interface);
+	theBridge.tunnel_interface.sll_ifindex = net_if_get_by_iface(config->tunnel_interface);
 #else
 	/* We have to get the mapping between interface name and index */
 	struct ifreq ifr;
 	memset(&ifr, 0, sizeof(ifr));
 
-	strncpy(ifr.ifr_name, (char const*) config->lan_interface, IFNAMSIZ);
-	ioctl(theBridge.lan_socket, SIOCGIFINDEX, &ifr);
+	strncpy(ifr.ifr_name, (char const*) config->asset_interface, IFNAMSIZ);
+	ioctl(theBridge.asset_socket, SIOCGIFINDEX, &ifr);
 
-	theBridge.lan_interface.sll_ifindex = ifr.ifr_ifindex;
+	theBridge.asset_interface.sll_ifindex = ifr.ifr_ifindex;
 
-	strncpy(ifr.ifr_name, (char const*) config->wan_interface, IFNAMSIZ);
-	ioctl(theBridge.wan_socket, SIOCGIFINDEX, &ifr);
+	strncpy(ifr.ifr_name, (char const*) config->tunnel_interface, IFNAMSIZ);
+	ioctl(theBridge.tunnel_socket, SIOCGIFINDEX, &ifr);
 
-	theBridge.wan_interface.sll_ifindex = ifr.ifr_ifindex;
+	theBridge.tunnel_interface.sll_ifindex = ifr.ifr_ifindex;
 #endif
-	theBridge.lan_interface.sll_family = AF_PACKET;
-	theBridge.wan_interface.sll_family = AF_PACKET;
+	theBridge.asset_interface.sll_family = AF_PACKET;
+	theBridge.tunnel_interface.sll_family = AF_PACKET;
 
 	/* Bind the packet sockets to their interfaces */
-	if (bind(theBridge.lan_socket, (struct sockaddr*) &theBridge.lan_interface, sizeof(theBridge.lan_interface)) < 0)
+	if (bind(theBridge.asset_socket, (struct sockaddr*) &theBridge.asset_interface, sizeof(theBridge.asset_interface)) < 0)
 	{
 		LOG_ERR("binding LAN socket to interface failed: error %d\n", errno);
-		close(theBridge.lan_socket);
-		close(theBridge.wan_socket);
+		close(theBridge.asset_socket);
+		close(theBridge.tunnel_socket);
 		return -1;
 	}
-	if (bind(theBridge.wan_socket, (struct sockaddr*) &theBridge.wan_interface, sizeof(theBridge.wan_interface)) < 0)
+	if (bind(theBridge.tunnel_socket, (struct sockaddr*) &theBridge.tunnel_interface, sizeof(theBridge.tunnel_interface)) < 0)
 	{
 		LOG_ERR("binding WAN socket to interface failed: error %d\n", errno);
-		close(theBridge.lan_socket);
-		close(theBridge.wan_socket);
+		close(theBridge.asset_socket);
+		close(theBridge.tunnel_socket);
 		return -1;
 	}
 
 #if !defined(__ZEPHYR__)
-        if (setsockopt(theBridge.lan_socket, SOL_PACKET, PACKET_IGNORE_OUTGOING, &(int){1}, sizeof(int)) < 0)
+        if (setsockopt(theBridge.asset_socket, SOL_PACKET, PACKET_IGNORE_OUTGOING, &(int){1}, sizeof(int)) < 0)
         {
                 LOG_ERR("setsockopt(PACKET_IGNORE_OUTGOING) on LAN socket failed: error %d\n", errno);
-		close(theBridge.lan_socket);
-		close(theBridge.wan_socket);
+		close(theBridge.asset_socket);
+		close(theBridge.tunnel_socket);
 		return -1;
         }
 
-	if (setsockopt(theBridge.wan_socket, SOL_PACKET, PACKET_IGNORE_OUTGOING, &(int){1}, sizeof(int)) < 0)
+	if (setsockopt(theBridge.tunnel_socket, SOL_PACKET, PACKET_IGNORE_OUTGOING, &(int){1}, sizeof(int)) < 0)
         {
                 LOG_ERR("setsockopt(PACKET_IGNORE_OUTGOING) on WAN socket failed: error %d\n", errno);
-		close(theBridge.lan_socket);
-		close(theBridge.wan_socket);
+		close(theBridge.asset_socket);
+		close(theBridge.tunnel_socket);
 		return -1;
         }
 #endif
 
 	/* Set the new sockets to non-blocking */
-	setblocking(theBridge.lan_socket, false);
-	setblocking(theBridge.wan_socket, false);
+	setblocking(theBridge.asset_socket, false);
+	setblocking(theBridge.tunnel_socket, false);
 
 	/* Add sockets to the poll_set */
-	int ret = poll_set_add_fd(&theBridge.poll_set, theBridge.lan_socket, POLLIN);
+	int ret = poll_set_add_fd(&theBridge.poll_set, theBridge.asset_socket, POLLIN);
 	if (ret != 0)
 	{
-		LOG_ERR("Error adding LAN socket to poll_set");
-		close(theBridge.lan_socket);
-		close(theBridge.wan_socket);
+		LOG_ERR("Error adding ASSET socket to poll_set");
+		close(theBridge.asset_socket);
+		close(theBridge.tunnel_socket);
 		return -1;
 	}
-	ret = poll_set_add_fd(&theBridge.poll_set, theBridge.wan_socket, POLLIN);
+	ret = poll_set_add_fd(&theBridge.poll_set, theBridge.tunnel_socket, POLLIN);
 	if (ret != 0)
 	{
-		LOG_ERR("Error adding WAN socket to poll_set");
-		close(theBridge.lan_socket);
-		close(theBridge.wan_socket);
+		LOG_ERR("Error adding TUNNEL socket to poll_set");
+		close(theBridge.asset_socket);
+		close(theBridge.tunnel_socket);
 		return -1;
 	}
 
@@ -324,8 +323,8 @@ int l2_bridge_terminate(void)
 	pthread_cancel(theBridge.thread);
 
 	/* Close the sockets */
-	close(theBridge.lan_socket);
-	close(theBridge.wan_socket);
+	close(theBridge.asset_socket);
+	close(theBridge.tunnel_socket);
 
 	return 0;
 }
