@@ -30,8 +30,7 @@ struct Bridge
 	connected_channel channel;	
 	Bridge* pipe; 
 	int fd;
-	struct sockaddr_ll asset_interface;
-} ;
+};
 
 // Define a function pointer type for send and pipe functions.
 typedef int (*sendOrPipeFunc)(Bridge* bridge, uint8_t* data, size_t len);
