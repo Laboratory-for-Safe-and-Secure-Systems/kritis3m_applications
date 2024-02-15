@@ -15,8 +15,8 @@ struct PacketSocket
 };
 
 int init_packet_socket_bridge(PacketSocket* bridge); 
-int packet_socket_send(PacketSocket *bridge, uint8_t *data, size_t len);
+int packet_socket_send(PacketSocket *bridge, uint8_t *buffer, int buffer_len, int frame_start);
 int packet_socket_receive(PacketSocket *bridge);
-int packet_socket_pipe(PacketSocket *bridge, uint8_t *data, size_t len);
+int packet_socket_pipe(PacketSocket *bridge);
 
 #endif //__PACKET_SOCKET_H__

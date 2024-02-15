@@ -33,15 +33,12 @@ int init_packet_socket_bridge(PacketSocket *bridge)
     return ret;
 }
 
-int packet_socket_send(PacketSocket *bridge, uint8_t *data, size_t len)
+int packet_socket_send(PacketSocket *bridge, uint8_t *buffer, int buffer_len, int frame_start)
 {
-    int ret = sendto(bridge->bridge.fd, data, len, 0, (struct sockaddr *)&bridge->addr, sizeof(bridge->addr));
-    if (ret < 0)
-    {
-        LOG_ERR("Failed to send data on packet socket: %s", strerror(errno));
-    }
+    // pre processing of the data
     switch (bridge->bridge.type)
     {
+    // apply vlan tag to the frames
     case PACKET_SOCKET_VLAN:
         return -1;
     case PACKET_SOCKET:
@@ -49,6 +46,12 @@ int packet_socket_send(PacketSocket *bridge, uint8_t *data, size_t len)
     default:
         LOG_ERR("Invalid interface type");
         return -1;
+    }
+
+    int ret = sendto(bridge->bridge.fd, buffer, buffer_len, 0, (struct sockaddr *)&bridge->addr, sizeof(bridge->addr));
+    if (ret < 0)
+    {
+        LOG_ERR("Failed to send data on packet socket: %s", strerror(errno));
     }
     return ret;
 }
@@ -63,31 +66,38 @@ int packet_socket_receive(PacketSocket *bridge)
     return ret;
 }
 
-int packet_socket_pipe(PacketSocket *bridge, uint8_t *data, size_t len)
+int packet_socket_pipe(PacketSocket *bridge)
 {
-    // check if this interface uses vlan
-    uint8_t *send_buf = NULL;
-    int vlan_header_len= 0;
+    // check if data available
+    if(bridge->bridge.len <= 0){
+        LOG_ERR("No data available to pipe");
+        return -1;
+    }
+    int offset = 0;
     switch (bridge->bridge.type)
     {
     case PACKET_SOCKET_VLAN:
         if (is_vlan_tagged(bridge->bridge.buf))
         {
-            vlan_header_len = 4;
-            send_buf = remove_vlan_tag(bridge->bridge.buf);
 
+            remove_vlan_tag(bridge->bridge.buf);
+            offset = VLAN_HEADER_SIZE;
         }
         else
         {
-            send_buf = bridge->bridge.buf;
+            LOG_INF("No VLAN tag found");
         }
         break;
     case PACKET_SOCKET:
-        send_buf = bridge->bridge.buf;
+        LOG_INF("no preprocessing required");
         break;
     default:
         LOG_ERR("Invalid interface type");
         return -1;
     }
-    return bridge_send(bridge->bridge.pipe, send_buf, bridge->bridge.len-vlan_header_len);
+    /**
+     * here would be a good place to apply a filter on the frames
+     */
+
+    return bridge_send(bridge->bridge.pipe, bridge->bridge.buf, bridge->bridge.len, offset);
 }

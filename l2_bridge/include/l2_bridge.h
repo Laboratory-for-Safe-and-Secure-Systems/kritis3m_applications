@@ -33,28 +33,29 @@ struct Bridge
 };
 
 // Define a function pointer type for send and pipe functions.
-typedef int (*sendOrPipeFunc)(Bridge* bridge, uint8_t* data, size_t len);
+typedef int (*sendFunc)(Bridge* bridge, uint8_t* buffer, int buffer_len, int frame_start);
 // Define a function pointer type for receive function.
-typedef int (*receiveFunc)(Bridge* self);
+typedef int (*receiveOrPipeFunc)(Bridge* self);
 
 
 //used to identify function pointer: BaseVtable[call_send] = bridge_send
 enum { call_send, call_receive, call_pipe };
 
-static int bridge_send(Bridge* bridge, uint8_t* data, size_t len){
-	sendOrPipeFunc send = (sendOrPipeFunc)bridge->vtable[call_send];
-	return send(bridge, data, len);
+
+static int bridge_send(Bridge* bridge, uint8_t* buffer, int buffer_len, int buffer_start){
+	sendFunc send = (sendFunc)bridge->vtable[call_send];
+	return send(bridge, buffer, buffer_len, buffer_start);
 }
 
 static int bridge_receive(Bridge* bridge){
-	receiveFunc receive = (receiveFunc)bridge->vtable[call_receive];
+	receiveOrPipeFunc receive = (receiveOrPipeFunc)bridge->vtable[call_receive];
 	return receive(bridge);
 
 }
 
-static int bridge_pipe(Bridge* bridge, void* data, size_t len){
-	sendOrPipeFunc pipe = (sendOrPipeFunc)bridge->vtable[call_pipe];
-	return pipe(bridge, data, len);
+static int bridge_pipe(Bridge* bridge){
+	receiveOrPipeFunc pipe = (receiveOrPipeFunc)bridge->vtable[call_pipe];
+	return pipe(bridge);
 }
 
 
