@@ -144,7 +144,7 @@ static void *l2_bridge_main_thread(void *ptr)
 	return NULL;
 }
 
-Bridge *init_bridge(interface_config *interface, connected_channel channel)
+Bridge *init_bridge(const interface_config *interface, connected_channel channel)
 {
 	// check which interface type is requested
 	switch (interface->type)

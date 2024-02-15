@@ -9,7 +9,7 @@
 
 LOG_MODULE_REGISTER(packet_socket);
 
-int init_packet_socket_bridge(PacketSocket *bridge, interface_config *interface, connected_channel channel)
+int init_packet_socket_bridge(PacketSocket *bridge,const  interface_config *interface, connected_channel channel)
 {
 
     int proto = ETH_P_ALL;

@@ -30,7 +30,7 @@ struct PacketSocket
  * @return 0 on success, negative error code on failure.
  */
 int init_packet_socket_bridge(PacketSocket *bridge,
-                              interface_config *interface,
+                              const interface_config *interface,
                               connected_channel channel);
 
 /**

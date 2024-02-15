@@ -5,6 +5,15 @@
 #include <stdlib.h>
 
 
+/**
+ * @brief Enumeration for the type of interface.
+ */
+typedef enum interface_type
+{
+	TUN_INTERFACE, /**< TUN interface type. */
+	PACKET_SOCKET, /**< Packet socket interface type. */
+} interface_type;
+
 typedef struct interface_config
 {
 	interface_type type;
@@ -19,15 +28,6 @@ typedef struct l2_bridge_config
 } l2_bridge_config;
 
 
-
-/**
- * @brief Enumeration for the type of interface.
- */
-typedef enum interface_type
-{
-	TUN_INTERFACE, /**< TUN interface type. */
-	PACKET_SOCKET, /**< Packet socket interface type. */
-} interface_type;
 
 /**
  * @brief Enumeration for the connected channel.
