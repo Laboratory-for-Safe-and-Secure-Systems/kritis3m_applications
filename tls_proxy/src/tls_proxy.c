@@ -595,11 +595,13 @@ void* tls_proxy_main_thread(void* ptr)
 	 				 * respective socket to the poll_set. */
 					if (proxy_connection->direction == REVERSE_PROXY)
 					{
-						ret = poll_set_add_fd(&config->poll_set, proxy_connection->listening_peer_sock, POLLIN);
+						ret = poll_set_add_fd(&config->poll_set, proxy_connection->listening_peer_sock,
+								      POLLIN);
 					}
 					else if (proxy_connection->direction == FORWARD_PROXY)
 					{
-						ret = poll_set_add_fd(&config->poll_set, proxy_connection->target_peer_sock, POLLOUT | POLLERR | POLLHUP);
+						ret = poll_set_add_fd(&config->poll_set, proxy_connection->target_peer_sock,
+								      POLLOUT | POLLERR | POLLHUP);
 					}
 					if (ret != 0)
 					{
@@ -630,11 +632,17 @@ void* tls_proxy_main_thread(void* ptr)
 						/* Handshake done, remove respective socket from the poll_set */
 						poll_set_remove_fd(&config->poll_set, fd);
 
-						/* Get handshake metrics */
-						tls_handshake_metrics metrics = wolfssl_get_handshake_metrics(proxy_connection->tls_session);
+						/* Get handshake metrics (only for reverse proxys, as the metrics are not correct
+						 * on the TLS client endpoint). */
+						if (proxy_connection->direction == REVERSE_PROXY)
+						{
+							tls_handshake_metrics metrics; 
+							metrics = wolfssl_get_handshake_metrics(proxy_connection->tls_session);
 
-						LOG_INF("Handshake done\r\n\tDuration: %.3f milliseconds\r\n\tTx bytes: %d\r\n\tRx bytes: %d",
-							metrics.duration_us / 1000.0, metrics.txBytes, metrics.rxBytes);
+							LOG_INF("Handshake done\r\n\tDuration: %.3f milliseconds\r\n\tTx bytes: "\
+								"%d\r\n\tRx bytes: %d", metrics.duration_us / 1000.0,
+								metrics.txBytes, metrics.rxBytes);
+						}
 
 						/* Start thread for connection handling */
 						ret = pthread_create(&proxy_connection->thread,
