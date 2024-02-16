@@ -19,26 +19,29 @@ LOG_MODULE_REGISTER(tcp_echo_server);
 #define RECV_BUFFER_SIZE 1024
 
 
-struct tcp_echo_server
+typedef struct tcp_echo_server
 {
+	bool running;
         int tcp_server_socket;
 	pthread_t thread;
 	pthread_attr_t thread_attr;
 	struct poll_set poll_set;
-};
+}
+tcp_echo_server;
 
-struct echo_client
+typedef struct echo_client
 {
         bool in_use;
         int socket;
         size_t num_of_bytes_in_recv_buffer;
         uint8_t recv_buffer[RECV_BUFFER_SIZE];
-};
+}
+echo_client;
 
 
 /* File global variables */
-static struct tcp_echo_server echo_server;
-static struct echo_client client_pool[MAX_CLIENTS];
+static tcp_echo_server echo_server;
+static echo_client client_pool[MAX_CLIENTS];
 
 #if defined(__ZEPHYR__)
 #define STACK_SIZE 8*1024
@@ -50,17 +53,21 @@ Z_KERNEL_STACK_DEFINE_IN(echo_server_stack, STACK_SIZE, \
 
 /* Internal method declarations */
 static void* tcp_echo_server_main_thread(void* ptr);
-static struct echo_client* add_new_client(struct tcp_echo_server* server,
-				          int client_socket,
-				          struct sockaddr* client_addr,
-				          socklen_t client_addr_len);
-static struct echo_client* find_client_by_fd(int fd);
-static void client_cleanup(struct echo_client* client);
+static echo_client* add_new_client(tcp_echo_server* server,
+				   int client_socket,
+				   struct sockaddr* client_addr,
+				   socklen_t client_addr_len);
+static echo_client* find_client_by_fd(int fd);
+static void client_cleanup(echo_client* client);
 
 
 static void* tcp_echo_server_main_thread(void* ptr)
 {
-	struct tcp_echo_server* server = (struct tcp_echo_server*) ptr;
+	tcp_echo_server* server = (tcp_echo_server*) ptr;
+
+	server->running = true;
+
+	pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
 	
 	while (1)
 	{
@@ -84,7 +91,7 @@ static void* tcp_echo_server_main_thread(void* ptr)
                         if(event == 0)
                                 continue;
 
-			struct echo_client* client = NULL;
+			echo_client* client = NULL;
 
                         /* Check server fd */
 			if (fd == server->tcp_server_socket)
@@ -184,10 +191,12 @@ static void* tcp_echo_server_main_thread(void* ptr)
 		}
 	}
 
+	server->running = false;
+
 	return NULL;
 }
 
-static struct echo_client* add_new_client(struct tcp_echo_server* server,
+static echo_client* add_new_client(tcp_echo_server* server,
 				          int client_socket,
 				          struct sockaddr* client_addr,
 				          socklen_t client_addr_len)
@@ -203,7 +212,7 @@ static struct echo_client* add_new_client(struct tcp_echo_server* server,
 		}
 	}
 
-        struct echo_client* client = &client_pool[freeSlot];
+        echo_client* client = &client_pool[freeSlot];
 
 	/* Store new client data */
 	client->in_use = true;
@@ -223,7 +232,7 @@ static struct echo_client* add_new_client(struct tcp_echo_server* server,
 	return client;
 }
 
-static struct echo_client* find_client_by_fd(int fd)
+static echo_client* find_client_by_fd(int fd)
 {
         for (int i = 0; i < MAX_CLIENTS; i++)
 	{
@@ -236,7 +245,7 @@ static struct echo_client* find_client_by_fd(int fd)
 	return NULL;
 }
 
-static void client_cleanup(struct echo_client* client)
+static void client_cleanup(echo_client* client)
 {
         if (client->socket > 0)
         {
@@ -256,7 +265,7 @@ static void client_cleanup(struct echo_client* client)
  * 
  * Returns 0 on success, -1 on failure (error message is printed to console).
  */
-int tcp_echo_server_run(struct tcp_echo_server_config const* config)
+int tcp_echo_server_run(tcp_echo_server_config const* config)
 {
         /* Init client pool */
 	for (int i = 0; i < MAX_CLIENTS; i++)
@@ -293,7 +302,7 @@ int tcp_echo_server_run(struct tcp_echo_server_config const* config)
 	/* Bind server socket to its destined IPv4 address */
 	if (bind(echo_server.tcp_server_socket, (struct sockaddr*) &bind_addr, sizeof(bind_addr)) == -1) 
 	{
-		LOG_ERR("Cannot bind socket %d to %s:%d: errer %d\n",
+		LOG_ERR("Cannot bind socket %d to %s:%d: error %d\n",
                         echo_server.tcp_server_socket, config->own_ip_address, config->listening_port, errno);
 		close(echo_server.tcp_server_socket);
 		return -1;
@@ -344,14 +353,27 @@ int tcp_echo_server_run(struct tcp_echo_server_config const* config)
  */
 int tcp_echo_server_terminate(void)
 {
-	/* Stop all running reverse proxies */
+	if (echo_server.running == false)
+	{
+		LOG_INF("TCP echo server is not running");
+		return 0;
+	}
+
+	/* Stop the main thread */
+	pthread_cancel(echo_server.thread);
+
+	/* Stop all running client connections */
 	for (int i = 0; i < MAX_CLIENTS; i++)
 	{
                 client_cleanup(&client_pool[i]);
 	}
 
-	/* Stop the main thread */
-	pthread_cancel(echo_server.thread);
+	/* Stop the listening socket */
+	if (echo_server.tcp_server_socket > 0)
+	{
+		close(echo_server.tcp_server_socket);
+		echo_server.tcp_server_socket = -1;
+	}
 
 	return 0;
 }

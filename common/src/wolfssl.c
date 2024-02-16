@@ -790,7 +790,7 @@ int wolfssl_receive(wolfssl_session* session, uint8_t* buffer, int max_size)
 				/* No more data, we have to asynchronously wait for new */
 				break;
 			}
-			else if ((ret == WOLFSSL_ERROR_ZERO_RETURN) || (ret == SOCKET_PEER_CLOSED_E))
+			else if ((ret == WOLFSSL_ERROR_ZERO_RETURN) || (ret == WOLFSSL_ERROR_SYSCALL))
 			{
 				LOG_INF("TLS connection was closed gracefully");
 				bytes_read = -1;

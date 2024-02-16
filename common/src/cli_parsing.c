@@ -366,61 +366,67 @@ static int read_certificates(const struct shell *sh, struct certificates* certs,
                 shell_error(sh, "no identity specified");
                 return -1;
         }
-        else if (strcmp(certs->identity, "rsa4096") == 0)
+        else if (strcmp(certs->identity, "classic") == 0)
         {
-                certs->chain_buffer = (uint8_t*) rsa4096_server_certificate;
-                certs->chain_buffer_size = sizeof(rsa4096_server_certificate);
+                certs->chain_buffer = (uint8_t*) classic_server_cert_chain;
+                certs->chain_buffer_size = sizeof(classic_server_cert_chain);
 
-                certs->key_buffer = (uint8_t*) rsa4096_server_private_key;
-                certs->key_buffer_size = sizeof(rsa4096_server_private_key);
+                certs->key_buffer = (uint8_t*) classic_server_privateKey;
+                certs->key_buffer_size = sizeof(classic_server_privateKey);
 
-                certs->root_buffer = (uint8_t*) rsa4096_root_certificate;
-                certs->root_buffer_size = sizeof(rsa4096_root_certificate);
+                certs->root_buffer = (uint8_t*) classic_root_cert;
+                certs->root_buffer_size = sizeof(classic_root_cert);
         }
-        else if (strcmp(certs->identity, "dilithium3") == 0)
+        else if (strcmp(certs->identity, "pqc") == 0)
         {
-                certs->chain_buffer = (uint8_t*) dilithium3_entitiy_certificate;
-                certs->chain_buffer_size = sizeof(dilithium3_entitiy_certificate);
+                certs->chain_buffer = (uint8_t*) pqc_server_cert_chain;
+                certs->chain_buffer_size = sizeof(pqc_server_cert_chain);
 
-                certs->key_buffer = (uint8_t*) dilithium3_entity_private_key;
-                certs->key_buffer_size = sizeof(dilithium3_entity_private_key);
+                certs->key_buffer = (uint8_t*) pqc_server_privateKey;
+                certs->key_buffer_size = sizeof(pqc_server_privateKey);
 
-                certs->root_buffer = (uint8_t*) dilithium3_root_certificate;
-                certs->root_buffer_size = sizeof(dilithium3_root_certificate);
+                certs->root_buffer = (uint8_t*) pqc_root_cert;
+                certs->root_buffer_size = sizeof(pqc_root_cert);
         }
-        else if (strcmp(certs->identity, "dilithium5") == 0)
+        else if (strcmp(certs->identity, "hybrid_classic") == 0)
         {
-                certs->chain_buffer = (uint8_t*) dilithium5_entitiy_certificate;
-                certs->chain_buffer_size = sizeof(dilithium5_entitiy_certificate);
+                certs->chain_buffer = (uint8_t*) hybrid_classic_server_cert_chain;
+                certs->chain_buffer_size = sizeof(hybrid_classic_server_cert_chain);
 
-                certs->key_buffer = (uint8_t*) dilithium5_entity_private_key;
-                certs->key_buffer_size = sizeof(dilithium5_entity_private_key);
+                certs->key_buffer = (uint8_t*) hybrid_classic_server_privateKey;
+                certs->key_buffer_size = sizeof(hybrid_classic_server_privateKey);
 
-                certs->root_buffer = (uint8_t*) dilithium5_root_certificate;
-                certs->root_buffer_size = sizeof(dilithium5_root_certificate);
+                certs->additional_key_buffer = (uint8_t*) hybrid_classic_server_altPrivateKey;
+                certs->additional_key_buffer_size = sizeof(hybrid_classic_server_altPrivateKey);
+
+                certs->root_buffer = (uint8_t*) hybrid_classic_root_cert;
+                certs->root_buffer_size = sizeof(hybrid_classic_root_cert);
         }
-        else if (strcmp(certs->identity, "falcon5") == 0)
+        else if (strcmp(certs->identity, "hybrid_pqc") == 0)
         {
-                certs->chain_buffer = (uint8_t*) falcon5_entitiy_certificate;
-                certs->chain_buffer_size = sizeof(falcon5_entitiy_certificate);
+                certs->chain_buffer = (uint8_t*) hybrid_pqc_server_cert_chain;
+                certs->chain_buffer_size = sizeof(hybrid_pqc_server_cert_chain);
 
-                certs->key_buffer = (uint8_t*) falcon5_entity_private_key;
-                certs->key_buffer_size = sizeof(falcon5_entity_private_key);
+                certs->key_buffer = (uint8_t*) hybrid_pqc_server_privateKey;
+                certs->key_buffer_size = sizeof(hybrid_pqc_server_privateKey);
 
-                certs->root_buffer = (uint8_t*) falcon5_root_certificate;
-                certs->root_buffer_size = sizeof(falcon5_root_certificate);
+                certs->additional_key_buffer = (uint8_t*) hybrid_pqc_server_altPrivateKey;
+                certs->additional_key_buffer_size = sizeof(hybrid_pqc_server_altPrivateKey);
+
+                certs->root_buffer = (uint8_t*) hybrid_pqc_root_cert;
+                certs->root_buffer_size = sizeof(hybrid_pqc_root_cert);
         }
         else 
         {
                 shell_error(sh, "no valid identity specified");
-                shell_error(sh, "valid options are: rsa4096, dilithium3, dilithium5, falcon5");
+                shell_error(sh, "valid options are: classic, pqc, hybrid_classic and hybrid_pqc");
                 return -1;
         }
 
         return 0;
 }
 
-#else
+#else /* __ZEPHYR__ */
 
 static const size_t certificate_chain_buffer_size = 32 * 1024;
 static const size_t private_key_buffer_size = 16 * 1024;
