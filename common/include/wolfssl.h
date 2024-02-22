@@ -33,6 +33,7 @@ wolfssl_library_configuration;
 typedef struct wolfssl_endpoint_configuration
 {
         bool mutual_authentication;
+        bool no_encryption;
 
         struct
         {

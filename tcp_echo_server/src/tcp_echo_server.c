@@ -3,13 +3,14 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include <stdint.h>
+#include <stdbool.h>
+#include <string.h>
 
 #include "tcp_echo_server.h"
 
 #include "logging.h"
 #include "poll_set.h"
 #include "networking.h"
-#include "wolfssl.h"
 
 
 LOG_MODULE_REGISTER(tcp_echo_server);

@@ -54,6 +54,7 @@ static const struct option cli_options[] =
     { "root",            required_argument, 0, 'r' },
     { "additionalKey",   required_argument, 0, 'l' },
     { "mutualAuth",      required_argument, 0, 'n' },
+    { "noEncryption",    required_argument, 0, 'o' },
     { "secure_element",  no_argument,       0, 's' },
     { "middleware_path", required_argument, 0, 'm' },
     { "debug",           no_argument,       0, 'd' },
@@ -87,19 +88,20 @@ int parse_cli_arguments(enum application_role* role, struct proxy_config* proxy_
 	/* Set default values */
         *role = NOT_SET;
 
-	proxy_config->own_ip_address = NULL;
-	proxy_config->listening_port = 0;
-	proxy_config->target_ip_address = NULL;
-	proxy_config->target_port = 0;
+        proxy_config->own_ip_address = NULL;
+        proxy_config->listening_port = 0;
+        proxy_config->target_ip_address = NULL;
+        proxy_config->target_port = 0;
         proxy_config->tls_config.mutual_authentication = true;
-	proxy_config->tls_config.device_certificate_chain.buffer = NULL;
-	proxy_config->tls_config.device_certificate_chain.size = 0;
-	proxy_config->tls_config.private_key.buffer = NULL;
-	proxy_config->tls_config.private_key.size = 0;
+        proxy_config->tls_config.no_encryption = false;
+        proxy_config->tls_config.device_certificate_chain.buffer = NULL;
+        proxy_config->tls_config.device_certificate_chain.size = 0;
+        proxy_config->tls_config.private_key.buffer = NULL;
+        proxy_config->tls_config.private_key.size = 0;
         proxy_config->tls_config.private_key.additional_key_buffer = NULL;
-	proxy_config->tls_config.private_key.additional_key_size = 0;
-	proxy_config->tls_config.root_certificate.buffer = NULL;
-	proxy_config->tls_config.root_certificate.size = 0;
+        proxy_config->tls_config.private_key.additional_key_size = 0;
+        proxy_config->tls_config.root_certificate.buffer = NULL;
+        proxy_config->tls_config.root_certificate.size = 0;
 	
         if (wolfssl_config != NULL)
         {
@@ -248,6 +250,9 @@ int parse_cli_arguments(enum application_role* role, struct proxy_config* proxy_
                         case 'n':
                                 proxy_config->tls_config.mutual_authentication = (bool) strtoul(optarg, NULL, 10);
                                 break;
+                        case 'o':
+                                proxy_config->tls_config.no_encryption = (bool) strtoul(optarg, NULL, 10);
+                                break;
 			case 's':
 				if (wolfssl_config != NULL)
                                         wolfssl_config->use_secure_element = true;
@@ -320,6 +325,7 @@ static void print_help(const struct shell *sh, char const* name)
         shell_print(sh, "  -r, --root file_path             path to the root certificate file");
         shell_print(sh, "  --additionalKey file_path        path to an additional private key file (hybrid signature mode)");
         shell_print(sh, "  --mutualAuth 0|1                 enable or disable mutual authentication (default enabled)");
+        shell_print(sh, "  --noEncryption 0|1               enable or disable encryption (default enabled)");
         shell_print(sh, "  --secure_element                 use secure element");
         shell_print(sh, "  --middleware_path file_path      path to the secure element middleware");
         shell_print(sh, "  -d, --debug                      enable debug output\n");
