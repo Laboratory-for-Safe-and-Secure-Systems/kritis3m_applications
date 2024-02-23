@@ -34,6 +34,7 @@ typedef struct wolfssl_endpoint_configuration
 {
         bool mutual_authentication;
         bool no_encryption;
+        bool secure_element_import_keys;
 
         struct
         {

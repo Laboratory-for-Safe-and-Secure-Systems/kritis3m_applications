@@ -57,6 +57,7 @@ static const struct option cli_options[] =
     { "noEncryption",    required_argument, 0, 'o' },
     { "secure_element",  no_argument,       0, 's' },
     { "middleware_path", required_argument, 0, 'm' },
+    { "se_import_keys",  required_argument, 0, 'p' },
     { "debug",           no_argument,       0, 'd' },
     { "bridge_lan",      required_argument, 0, 'e' },
     { "bridge_wan",      required_argument, 0, 'f' },
@@ -94,6 +95,7 @@ int parse_cli_arguments(enum application_role* role, struct proxy_config* proxy_
         proxy_config->target_port = 0;
         proxy_config->tls_config.mutual_authentication = true;
         proxy_config->tls_config.no_encryption = false;
+        proxy_config->tls_config.secure_element_import_keys = false;
         proxy_config->tls_config.device_certificate_chain.buffer = NULL;
         proxy_config->tls_config.device_certificate_chain.size = 0;
         proxy_config->tls_config.private_key.buffer = NULL;
@@ -145,7 +147,7 @@ int parse_cli_arguments(enum application_role* role, struct proxy_config* proxy_
 #endif
 	while (true)
 	{
-		int result = getopt_long(argc, argv, "wxyza:b:v:c:k:i:r:sm:de:f:h", cli_options, &index);
+		int result = getopt_long(argc, argv, "wxyza:b:v:c:k:i:r:sm:p:de:f:h", cli_options, &index);
 
 		if (result == -1) 
 		        break; /* end of list */
@@ -261,6 +263,9 @@ int parse_cli_arguments(enum application_role* role, struct proxy_config* proxy_
                                 if (wolfssl_config != NULL)
                                         wolfssl_config->secure_element_middleware_path = optarg;
                                 break;
+                        case 'p':
+                                proxy_config->tls_config.secure_element_import_keys = (bool) strtoul(optarg, NULL, 10);
+                                break;
                         case 'd':
                                 if (wolfssl_config != NULL)
                                         wolfssl_config->loggingEnabled = true;
@@ -328,6 +333,7 @@ static void print_help(const struct shell *sh, char const* name)
         shell_print(sh, "  --noEncryption 0|1               enable or disable encryption (default enabled)");
         shell_print(sh, "  --secure_element                 use secure element");
         shell_print(sh, "  --middleware_path file_path      path to the secure element middleware");
+        shell_print(sh, "  --se_import_keys 0|1             import provided keys into secure element (default disabled)");
         shell_print(sh, "  -d, --debug                      enable debug output\n");
         shell_print(sh, "  --bridge_lan interface           name of the LAN interface for the Layer 2 bridge");
         shell_print(sh, "  --bridge_wan interface           name of the WAN interface for the Layer 2 bridge\n");

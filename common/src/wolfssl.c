@@ -405,17 +405,38 @@ static int wolfssl_configure_context(WOLFSSL_CTX* context, struct wolfssl_endpoi
 	{
 		// wolfSSL_CTX_SetDevId(context, secure_element_device_id());
 
-		/* Import private key into secure element if present */
-		if (config->private_key.buffer != NULL)
+		/* Import private key into secure element if requested */
+		if (config->secure_element_import_keys)
 		{
-			ret = wolfssl_import_pem_key_into_secure_element(config->private_key.buffer,
-						config->private_key.size,
-						secure_element_private_key_id(),
-						secure_element_private_key_id_size());
-			if (ret != 0)
+			if (config->private_key.buffer != NULL)
 			{
-				LOG_ERR("Failed to import private key into secure element");
+				ret = wolfssl_import_pem_key_into_secure_element(config->private_key.buffer,
+							config->private_key.size,
+							secure_element_private_key_id(),
+							secure_element_private_key_id_size());
+				if (ret != 0)
+				{
+					LOG_ERR("Failed to import private key into secure element");
+					return -1;
+				}
+			}
+			else
+			{
+				LOG_ERR("No private key buffer provided for import into secure element");
 				return -1;
+			}
+
+			if (config->private_key.additional_key_buffer != NULL)
+			{
+				ret = wolfssl_import_pem_key_into_secure_element(config->private_key.additional_key_buffer,
+							config->private_key.additional_key_size,
+							secure_element_additional_private_key_id(),
+							secure_element_additional_private_key_id_size());
+				if (ret != 0)
+				{
+					LOG_ERR("Failed to import additional private key into secure element");
+					return -1;
+				}
 			}
 		}
 
@@ -425,27 +446,16 @@ static int wolfssl_configure_context(WOLFSSL_CTX* context, struct wolfssl_endpoi
 						    secure_element_private_key_id_size(),
 						    secure_element_device_id());
 
-		/* Import the additional private key into secure element if present */
+		if (errorOccured(ret))
+			return -1;
+
+		/* Load the private key from the secure element */
 		if (config->private_key.additional_key_buffer != NULL)
 		{
-			if (errorOccured(ret))
-				return -1;
-
-			ret = wolfssl_import_pem_key_into_secure_element(config->private_key.additional_key_buffer,
-						config->private_key.additional_key_size, 
-						secure_element_additional_private_key_id(),
-						secure_element_additional_private_key_id_size());
-			if (ret != 0)
-			{
-				LOG_ERR("Failed to import additional private key into secure element");
-				return -1;
-			}
-
-			/* Load the private key from the secure element */
 			ret = wolfSSL_CTX_use_AltPrivateKey_Id(context,
-						secure_element_additional_private_key_id(),
-						secure_element_additional_private_key_id_size(),
-						secure_element_device_id());
+						       secure_element_additional_private_key_id(),
+						       secure_element_additional_private_key_id_size(),
+						       secure_element_device_id());
 		}
 
 		privateKeyLoaded = true;
