@@ -14,7 +14,7 @@ typedef struct wolfssl_library_configuration
 {
         bool loggingEnabled;
 
-        bool use_secure_element;
+        bool secure_element_support;
         char const* secure_element_middleware_path;
 
 #ifdef WOLFSSL_STATIC_MEMORY
@@ -34,6 +34,7 @@ typedef struct wolfssl_endpoint_configuration
 {
         bool mutual_authentication;
         bool no_encryption;
+        bool use_secure_element;
         bool secure_element_import_keys;
 
         struct

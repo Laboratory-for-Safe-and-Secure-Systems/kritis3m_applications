@@ -304,7 +304,7 @@ int wolfssl_init(struct wolfssl_library_configuration const* config)
 	}
 
 	/* Load the secure element middleware */
-	if ((config->use_secure_element == true) && (config->secure_element_middleware_path != NULL))
+	if ((config->secure_element_support == true) && (config->secure_element_middleware_path != NULL))
 	{
 	#ifdef HAVE_PKCS11
 		LOG_INF("Initializing secure element");
@@ -401,7 +401,7 @@ static int wolfssl_configure_context(WOLFSSL_CTX* context, struct wolfssl_endpoi
 
 	/* Load the private key */
 	bool privateKeyLoaded = false;
-	if (pkcs11_secure_element_instance.initialized == true)
+	if (pkcs11_secure_element_instance.initialized == true && config->use_secure_element == true)
 	{
 		// wolfSSL_CTX_SetDevId(context, secure_element_device_id());
 
