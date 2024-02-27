@@ -98,6 +98,7 @@ int wolfssl_init(wolfssl_library_configuration const* config);
  * Return value is a pointer to the newly created endpoint or NULL in case of an error
  * (error message is logged to the console).
  */
+wolfssl_endpoint* wolfssl_setup_dtls_server_endpoint(wolfssl_endpoint_configuration const* config);
 wolfssl_endpoint* wolfssl_setup_server_endpoint(wolfssl_endpoint_configuration const* config);
 
 

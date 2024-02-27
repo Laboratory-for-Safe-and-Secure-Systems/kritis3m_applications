@@ -543,6 +543,51 @@ static int wolfssl_configure_context(WOLFSSL_CTX* context, struct wolfssl_endpoi
  * Return value is a pointer to the newly created endpoint or NULL in case of an error
  * (error message is logged to the console).
  */
+wolfssl_endpoint* wolfssl_setup_dtls_server_endpoint(wolfssl_endpoint_configuration const* config)
+{
+	if (config == NULL)
+	{
+		LOG_ERR("Configuration is NULL");
+		return NULL;
+	}
+
+	/* Create a new endpoint object */
+	wolfssl_endpoint* new_endpoint = malloc(sizeof(wolfssl_endpoint));
+	if (new_endpoint == NULL)
+	{
+		LOG_ERR("Unable to allocate memory for new WolfSSL endpoint");
+		return NULL;
+	}
+
+        /* Create the TLS server context */
+	new_endpoint->context = wolfSSL_CTX_new_ex(wolfDTLSv1_3_server_method_ex(wolfssl_heap), wolfssl_heap);
+	if (new_endpoint->context == NULL)
+	{
+		LOG_ERR("Unable to create a new WolfSSL server context");
+		free(new_endpoint);
+		return NULL;
+	}
+
+	/* Configure the new context */
+        int ret = wolfssl_configure_context(new_endpoint->context, config);
+        if (ret == -1)
+        {
+                LOG_ERR("Failed to configure new DTLS server context\r\n");
+                wolfSSL_CTX_free(new_endpoint->context);
+		free(new_endpoint);
+	        return NULL;
+        }
+
+        return new_endpoint;
+}
+
+/* Setup a TLS server endpoint.
+ *
+ * Parameter is a pointer to a filled endpoint_configuration structure.
+ *
+ * Return value is a pointer to the newly created endpoint or NULL in case of an error
+ * (error message is logged to the console).
+ */
 wolfssl_endpoint* wolfssl_setup_server_endpoint(wolfssl_endpoint_configuration const* config)
 {
 	if (config == NULL)
@@ -675,7 +720,6 @@ wolfssl_session* wolfssl_create_session(wolfssl_endpoint* endpoint, int socket_f
 	 */
 	wolfSSL_SetIOReadCtx(new_session->session, new_session);
 	wolfSSL_SetIOWriteCtx(new_session->session, new_session);
-
 	return new_session;
 }
 
@@ -790,7 +834,7 @@ int wolfssl_receive(wolfssl_session* session, uint8_t* buffer, int max_size)
 				/* No more data, we have to asynchronously wait for new */
 				break;
 			}
-			else if ((ret == WOLFSSL_ERROR_ZERO_RETURN) || (ret == WOLFSSL_ERROR_SYSCALL))
+			else if ((ret == WOLFSSL_ERROR_ZERO_RETURN) || (ret == SOCKET_PEER_CLOSED_E))
 			{
 				LOG_INF("TLS connection was closed gracefully");
 				bytes_read = -1;
