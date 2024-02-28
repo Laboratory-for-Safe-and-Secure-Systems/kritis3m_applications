@@ -7,6 +7,7 @@
 
 #include "wolfssl/wolfcrypt/settings.h"
 #include "wolfssl/ssl.h"
+#include "wolfssl/wolfcrypt/wc_pkcs11.h"
 
 
 /* Data structure for the library configuration */
@@ -29,6 +30,8 @@ typedef struct wolfssl_library_configuration
 wolfssl_library_configuration;
 
 
+/* Enum for the different modes during the handshake
+ * regarding hybrid signatures. */
 enum hybrid_signature_mode
 {
         HYBRID_SIGNATURE_MODE_NATIVE = 1,
@@ -71,6 +74,10 @@ typedef struct wolfssl_endpoint_configuration
                 size_t size;
         }
         root_certificate;
+
+#if defined(HAVE_SECRET_CALLBACK)
+        char const* keylog_file;
+#endif
 }
 wolfssl_endpoint_configuration;
 
@@ -92,6 +99,16 @@ typedef struct tls_handshake_metrics
 }
 tls_handshake_metrics;
 
+
+/* Data structure for a PKCS#11 module */
+typedef struct pkcs11_module
+{
+	Pkcs11Dev device;
+	Pkcs11Token token;
+	
+	bool initialized;
+}
+pkcs11_module;
 
 
 /* Initialize WolfSSL library.

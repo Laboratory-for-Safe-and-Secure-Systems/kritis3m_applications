@@ -15,8 +15,15 @@
 
 LOG_MODULE_REGISTER(tls_proxy);
 
+#if defined(__ZEPHYR__)
 
 #define RECV_BUFFER_SIZE 1024
+
+#else
+
+#define RECV_BUFFER_SIZE 16384
+
+#endif
 
 #define MAX_PROXYS 3
 #define MAX_CONNECTIONS_PER_PROXY 3
@@ -39,8 +46,10 @@ struct proxy_connection
 	pthread_t thread;
 	pthread_attr_t thread_attr;
 
-	size_t num_of_bytes_in_recv_buffer;
-	uint8_t recv_buffer[RECV_BUFFER_SIZE];
+	size_t num_of_bytes_in_tun2ass_buffer;
+	uint8_t tun2ass_buffer[RECV_BUFFER_SIZE];
+	size_t num_of_bytes_in_ass2tun_buffer;
+	uint8_t ass2tun_buffer[RECV_BUFFER_SIZE];
 };
 
 struct proxy
@@ -509,7 +518,8 @@ static void proxy_connection_cleanup(struct proxy_connection* connection)
 		connection->tls_session = NULL;
 	}
 
-	connection->num_of_bytes_in_recv_buffer = 0;
+	connection->num_of_bytes_in_tun2ass_buffer = 0;
+	connection->num_of_bytes_in_ass2tun_buffer = 0;
 	
 	connection->in_use = false;
 }
@@ -719,114 +729,95 @@ static void* connection_handler_thread(void *ptr)
 			if(event == 0)
                                 continue;
 
-			if (((connection->direction == REVERSE_PROXY) && (fd == connection->listening_peer_sock)) ||
-			    ((connection->direction == FORWARD_PROXY) && (fd == connection->target_peer_sock)))
+			if ((fd == connection->listening_peer_sock) && (connection->direction == REVERSE_PROXY))
 			{
+				/* Reverse Proxy TLS connection */
+
 				if (event & POLLIN)
 				{
-					/* Receive data from the peer */
+					/* Data received from the TLS tunnel */
 					ret = wolfssl_receive(connection->tls_session,
-							      connection->recv_buffer,
-							      sizeof(connection->recv_buffer));
+							      connection->tun2ass_buffer,
+							      sizeof(connection->tun2ass_buffer));
 
 					if (ret > 0)
 					{
-						connection->num_of_bytes_in_recv_buffer = ret;
+						connection->num_of_bytes_in_tun2ass_buffer = ret;
 
 						/* Send received data to the other socket */
-						int destination_fd = -1;
-						if (connection->direction == REVERSE_PROXY)
-						{
-							destination_fd = connection->target_peer_sock;
-						}
-						else if (connection->direction == FORWARD_PROXY)
-						{
-							destination_fd = connection->listening_peer_sock;
-						}
-
-						ret = send(destination_fd,
-							   connection->recv_buffer,
-							   connection->num_of_bytes_in_recv_buffer,
+						ret = send(connection->target_peer_sock,
+							   connection->tun2ass_buffer,
+							   connection->num_of_bytes_in_tun2ass_buffer,
 							   0);
 
 						if ((ret == -1) && ((errno == EAGAIN) || (errno == EWOULDBLOCK)))
 						{	
 							/* We have to wait for the socket to be writable */
-							poll_set_update_events(&poll_set, fd, POLLOUT);
+							poll_set_update_events(&poll_set, connection->target_peer_sock, POLLOUT);
 							ret = 0;
+						}
+						else
+						{
+							connection->num_of_bytes_in_tun2ass_buffer = 0;
 						}
 					}
 				}
 				if (event & POLLOUT)
 				{
-					/* Send received data to the other socket */
-					int destination_fd = -1;
-					if (connection->direction == REVERSE_PROXY)
-					{
-						destination_fd = connection->target_peer_sock;
-					}
-					else if (connection->direction == FORWARD_PROXY)
-					{
-						destination_fd = connection->listening_peer_sock;
-					}
-
-					ret = send(destination_fd,
-						   connection->recv_buffer,
-						   connection->num_of_bytes_in_recv_buffer,
-						   0);
-
+					/* We can send data on the TLS connection now. Send remaining TCP
+					 * data from the asset. */
+					ret = wolfssl_send(connection->tls_session, 
+							   connection->ass2tun_buffer, 
+							   connection->num_of_bytes_in_ass2tun_buffer);
 					
 					if (ret >= 0)
 					{
 						/* Wait again for incoming data */
-						poll_set_update_events(&poll_set, fd, POLLIN);
+						poll_set_update_events(&poll_set, connection->listening_peer_sock, POLLIN);
+						connection->num_of_bytes_in_ass2tun_buffer = 0;
 					}
 				}
 				if (event & POLLERR)
 				{
-					/* Error on socket */
-					if (fd == connection->listening_peer_sock)
-					{
-						LOG_ERR("error on listening socket");
-					}
-					else if (fd == connection->target_peer_sock)
-					{
-						LOG_ERR("error on target socket");
-					}
-
+					LOG_ERR("Error on reverse proxy TLS connection");
 					shutdown = true;
 					break;
 				}
 
 				if (ret < 0)
 				{
-					/* Error, close session */
 					shutdown = true;
 					break;
 				}
+
 			}
-			else if (((connection->direction == REVERSE_PROXY) && (fd == connection->target_peer_sock)) ||
-			    	 ((connection->direction == FORWARD_PROXY) && (fd == connection->listening_peer_sock)))
+			else if ((fd == connection->target_peer_sock) && (connection->direction == REVERSE_PROXY))
 			{
+				/* Reverse Proxy TCP connection */
+
 				if (event & POLLIN)
 				{
-					/* Receive data from the peer */
-					ret = read(fd, connection->recv_buffer, sizeof(connection->recv_buffer));
+					/* Data received from the TCP connection */
+					ret = read(connection->target_peer_sock, connection->ass2tun_buffer, sizeof(connection->ass2tun_buffer));
 
 					if (ret > 0)
 					{
-						connection->num_of_bytes_in_recv_buffer = ret;
+						connection->num_of_bytes_in_ass2tun_buffer = ret;
 
 						/* Send received data to the other socket */
 						ret = wolfssl_send(connection->tls_session,
-								   connection->recv_buffer,
-								   connection->num_of_bytes_in_recv_buffer);
+								   connection->ass2tun_buffer,
+								   connection->num_of_bytes_in_ass2tun_buffer);
 
 						if (ret == WOLFSSL_ERROR_WANT_WRITE)
 						{
 							/* We have to wait for the socket to be writable */
-							poll_set_update_events(&poll_set, fd, POLLOUT);
+							poll_set_update_events(&poll_set, connection->listening_peer_sock, POLLOUT);
 							ret = 0;
+						}
+						else
+						{
+							connection->num_of_bytes_in_ass2tun_buffer = 0;
 						}
 
 					}
@@ -839,40 +830,164 @@ static void* connection_handler_thread(void *ptr)
 				}
 				if (event & POLLOUT)
 				{
-					/* Send received data to the other socket */
-					ret = wolfssl_send(connection->tls_session, 
-							   connection->recv_buffer, 
-							   connection->num_of_bytes_in_recv_buffer);
+					/* We can send data on the TCP connection now. Send remaining TLS
+					 * tunnel data. */
+					ret = send(connection->target_peer_sock,
+						   connection->tun2ass_buffer,
+						   connection->num_of_bytes_in_tun2ass_buffer,
+						   0);
+
 					
 					if (ret >= 0)
 					{
 						/* Wait again for incoming data */
-						poll_set_update_events(&poll_set, fd, POLLIN);
+						poll_set_update_events(&poll_set, connection->target_peer_sock, POLLIN);
+						connection->num_of_bytes_in_tun2ass_buffer = 0;
 					}
+
 				}
 				if (event & POLLERR)
 				{
-					/* Error on socket */
-					if (fd == connection->listening_peer_sock)
-					{
-						LOG_ERR("error on listening socket");
-					}
-					else if (fd == connection->target_peer_sock)
-					{
-						LOG_ERR("error on target socket");
-					}
-
+					LOG_ERR("Error on reverse proxy TCP connection");
 					shutdown = true;
 					break;
 				}
 
 				if (ret < 0)
 				{
-					/* Error, close session */
 					shutdown = true;
 					break;
 				}
 			}
+			else if ((fd == connection->target_peer_sock) && (connection->direction == FORWARD_PROXY))
+			{
+				/* Forward Proxy TLS connection */
+
+				if (event & POLLIN)
+				{
+					/* Data received from the TLS connection */
+					ret = wolfssl_receive(connection->tls_session,
+							      connection->tun2ass_buffer,
+							      sizeof(connection->tun2ass_buffer));
+
+					if (ret > 0)
+					{
+						connection->num_of_bytes_in_tun2ass_buffer = ret;
+
+						/* Send received data to the other socket */
+						ret = send(connection->listening_peer_sock,
+							   connection->tun2ass_buffer,
+							   connection->num_of_bytes_in_tun2ass_buffer,
+							   0);
+
+						if ((ret == -1) && ((errno == EAGAIN) || (errno == EWOULDBLOCK)))
+						{	
+							/* We have to wait for the socket to be writable */
+							poll_set_update_events(&poll_set, connection->listening_peer_sock, POLLOUT);
+							ret = 0;
+						}
+						else
+						{
+							connection->num_of_bytes_in_tun2ass_buffer = 0;
+						}
+					}
+				}
+				if (event & POLLOUT)
+				{
+					/* We can send data on the TLS connection now. Send remaining TCP
+					 * data from the asset. */
+					ret = wolfssl_send(connection->tls_session, 
+							   connection->ass2tun_buffer, 
+							   connection->num_of_bytes_in_ass2tun_buffer);
+					
+					if (ret >= 0)
+					{
+						/* Wait again for incoming data */
+						poll_set_update_events(&poll_set, connection->target_peer_sock, POLLIN);
+						connection->num_of_bytes_in_ass2tun_buffer = 0;
+					}
+					
+				}
+				if (event & POLLERR)
+				{
+					LOG_ERR("Error on forward proxy TLS connection");
+					shutdown = true;
+					break;
+				}
+
+				if (ret < 0)
+				{
+					shutdown = true;
+					break;
+				}
+			}
+			else if ((fd == connection->listening_peer_sock) && (connection->direction == FORWARD_PROXY))
+			{
+				/* Forward Proxy TCP connection */
+
+				if (event & POLLIN)
+				{
+					/* Data received from the TCP connection */
+					ret = read(connection->listening_peer_sock, connection->ass2tun_buffer, sizeof(connection->ass2tun_buffer));
+
+					if (ret > 0)
+					{
+						connection->num_of_bytes_in_ass2tun_buffer = ret;
+
+						/* Send received data to the other socket */
+						ret = wolfssl_send(connection->tls_session,
+								   connection->ass2tun_buffer,
+								   connection->num_of_bytes_in_ass2tun_buffer);
+
+						if (ret == WOLFSSL_ERROR_WANT_WRITE)
+						{
+							/* We have to wait for the socket to be writable */
+							poll_set_update_events(&poll_set, connection->target_peer_sock, POLLOUT);
+							ret = 0;
+						}
+						else
+						{
+							connection->num_of_bytes_in_ass2tun_buffer = 0;
+						}
+
+					}
+					else if (ret == 0)
+					{
+						/* Connection closed */
+						LOG_INF("TCP connection closed by peer");
+						ret = -1;
+					}
+				}
+				if (event & POLLOUT)
+				{
+					/* We can send data on the TCP connection now. Send remaining TLS
+					 * tunnel data. */
+					ret = send(connection->listening_peer_sock,
+						   connection->tun2ass_buffer,
+						   connection->num_of_bytes_in_tun2ass_buffer,
+						   0);
+
+					
+					if (ret >= 0)
+					{
+						/* Wait again for incoming data */
+						poll_set_update_events(&poll_set, connection->listening_peer_sock, POLLIN);
+						connection->num_of_bytes_in_tun2ass_buffer = 0;
+					}
+				}
+				if (event & POLLERR)
+				{
+					LOG_ERR("Error on forward proxy TCP connection");
+					shutdown = true;
+					break;
+				}
+
+				if (ret < 0)
+				{
+					shutdown = true;
+					break;
+				}
+			}	
 		}
 	}
 
@@ -900,7 +1015,8 @@ int tls_proxy_backend_run(void)
 		proxy_connection_pool[i].listening_peer_sock = -1;
 		proxy_connection_pool[i].target_peer_sock = -1;
 		proxy_connection_pool[i].tls_session = NULL;
-		proxy_connection_pool[i].num_of_bytes_in_recv_buffer = 0;
+		proxy_connection_pool[i].num_of_bytes_in_tun2ass_buffer = 0;
+		proxy_connection_pool[i].num_of_bytes_in_ass2tun_buffer = 0;
 		pthread_attr_init(&proxy_connection_pool[i].thread_attr);
 		pthread_attr_setdetachstate(&proxy_connection_pool[i].thread_attr, PTHREAD_CREATE_DETACHED);
 	}

@@ -60,6 +60,7 @@ static const struct option cli_options[] =
     { "middleware_path",  required_argument,    0, 'm' },
     { "se_import_keys",   required_argument,    0, 'p' },
     { "debug",            no_argument,          0, 'd' },
+    { "keylogFile",       required_argument,    0, 'j' },
     { "bridge_lan",       required_argument,    0, 'e' },
     { "bridge_wan",       required_argument,    0, 'f' },
     { "help",             no_argument,          0, 'h' },
@@ -107,7 +108,10 @@ int parse_cli_arguments(enum application_role* role, struct proxy_config* proxy_
         proxy_config->tls_config.private_key.additional_key_size = 0;
         proxy_config->tls_config.root_certificate.buffer = NULL;
         proxy_config->tls_config.root_certificate.size = 0;
-	
+#if defined(HAVE_SECRET_CALLBACK)
+        proxy_config->tls_config.keylog_file = NULL;
+#endif
+
         if (wolfssl_config != NULL)
         {
                 wolfssl_config->loggingEnabled = false;
@@ -150,7 +154,7 @@ int parse_cli_arguments(enum application_role* role, struct proxy_config* proxy_
 #endif
 	while (true)
 	{
-		int result = getopt_long(argc, argv, "wxyza:b:v:c:k:i:r:l:n:o:q:sm:p:de:f:h", cli_options, &index);
+		int result = getopt_long(argc, argv, "wxyza:b:v:c:k:i:r:l:n:o:q:sm:p:dj:e:f:h", cli_options, &index);
 
 		if (result == -1) 
 		        break; /* end of list */
@@ -292,6 +296,13 @@ int parse_cli_arguments(enum application_role* role, struct proxy_config* proxy_
                                 if (wolfssl_config != NULL)
                                         wolfssl_config->loggingEnabled = true;
                                 break;
+                        case 'j':
+                        #if defined(HAVE_SECRET_CALLBACK)
+                                proxy_config->tls_config.keylog_file = optarg;
+                        #else   
+                                shell_warn(sh, "--keylogFile is not compiled in, ignoring...");
+                        #endif
+                                break;
                         case 'e':
                                 if (bridge_config != NULL)
                                         bridge_config->lan_interface = optarg;
@@ -357,7 +368,8 @@ static void print_help(const struct shell *sh, char const* name)
         shell_print(sh, "  --secure_element                 use secure element");
         shell_print(sh, "  --middleware_path file_path      path to the secure element middleware");
         shell_print(sh, "  --se_import_keys 0|1             import provided keys into secure element (default disabled)\n");
-        shell_print(sh, "  -d, --debug                      enable debug output\n");
+        shell_print(sh, "  -d, --debug                      enable debug output");
+        shell_print(sh, "  --keylogFile file_path           path to the keylog file for Wireshark\n");
         shell_print(sh, "  --bridge_lan interface           name of the LAN interface for the Layer 2 bridge");
         shell_print(sh, "  --bridge_wan interface           name of the WAN interface for the Layer 2 bridge\n");
         shell_print(sh, "  -h, --help                       display this help and exit");

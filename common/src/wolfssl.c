@@ -41,6 +41,10 @@ enum connection_state
 struct wolfssl_endpoint 
 {
         WOLFSSL_CTX* context;
+
+#if defined(HAVE_SECRET_CALLBACK)
+        char const* keylog_file;
+#endif
 };
 
 
@@ -61,18 +65,8 @@ struct wolfssl_session
 };
 
 
-/* PKCS#11 */
-typedef struct pkcs11_secure_element
-{
-#ifdef HAVE_PKCS11
-	Pkcs11Dev device;
-	Pkcs11Token token;
-#endif
-	bool initialized;
-}
-pkcs11_secure_element;
-
-static pkcs11_secure_element pkcs11_secure_element_instance;
+/* PKCS#11 module for the secure element */
+static pkcs11_module secure_element;
 
 
 /* Internal method declarations */
@@ -80,8 +74,6 @@ static int errorOccured(int32_t ret);
 static int wolfssl_read_callback(WOLFSSL* session, char* buffer, int size, void* ctx);
 static int wolfssl_write_callback(WOLFSSL* session, char* buffer, int size, void* ctx);
 static void wolfssl_logging_callback(int level, const char* str);
-static int wolfssl_import_pem_key_into_secure_element(uint8_t const* pem_buffer, 
-		uint32_t pem_size, uint8_t const* id, int len);
 static int wolfssl_configure_context(WOLFSSL_CTX* context,
 		wolfssl_endpoint_configuration const* config);
 
@@ -164,109 +156,78 @@ static void wolfssl_logging_callback(int level, const char* str)
 	LOG_INF("%s", str);
 }
 
-/* Import the public/private key pair in the given PEM file into the secure element.
- *
- * Returns 0 on success, -1 in case of an error (error message is logged to the console).
- */
-static int wolfssl_import_pem_key_into_secure_element(uint8_t const* pem_buffer, uint32_t pem_size,
-		uint8_t const* id, int len)
+#if defined(HAVE_SECRET_CALLBACK)
+/* Callback function for TLS v1.3 secrets for use with Wireshark */
+static int wolfssl_secret_callback(WOLFSSL* ssl, int id, const uint8_t* secret,
+    				   int secretSz, void* ctx)
 {
-#ifdef HAVE_PKCS11
-        DerBuffer* der = NULL;
-	EncryptedInfo info;
-	int keyFormat = 0;
-	int type = 0;
-	void* key = NULL;
-	int ret = -1;
-
-	memset(&info, 0, sizeof(EncryptedInfo));
-
-	/* Convert key to DER (binary) */
-	ret = PemToDer(pem_buffer, pem_size, PRIVATEKEY_TYPE, &der, NULL,
-		       &info, &keyFormat);
-	if (ret < 0)
+	int i;
+	const char* str = NULL;
+	unsigned char serverRandom[32];
+	int serverRandomSz;
+	FILE* fp = stderr;
+	if (ctx) 
 	{
-		FreeDer(&der);
-		LOG_ERR("Error converting private key to DER");
-		return -1;
+		fp = fopen((const char*)ctx, "a");
+		if (fp == NULL) 
+		{
+			return BAD_FUNC_ARG;
+		}
 	}
 
-	/* Check which key type we have */
-	if (keyFormat == RSAk)
-	{
-		/* Create the key object */
-		key = create_rsa_key_from_buffer(der->buffer, der->length, id, len);
+	serverRandomSz = (int)wolfSSL_get_client_random(ssl, serverRandom,
+							sizeof(serverRandom));
 
-		type = PKCS11_KEY_TYPE_RSA;
-	}
-	else if (keyFormat == ECDSAk)
+	if (serverRandomSz <= 0)
 	{
-		/* Create the key object */
-		key = create_ecc_key_from_buffer(der->buffer, der->length, id, len);
-
-		type = PKCS11_KEY_TYPE_EC;
-	}
-	else if ((keyFormat == FALCON_LEVEL1k) || (keyFormat == FALCON_LEVEL5k)) 
-	{
-		/* Create the key object */
-		key = create_falcon_key_from_buffer(keyFormat, der->buffer, der->length,
-						    id, len);
-
-		type = PKCS11_KEY_TYPE_FALCON;
-	}
-    	else if ((keyFormat == DILITHIUM_LEVEL2k) || (keyFormat == DILITHIUM_LEVEL3k) ||
-        	 (keyFormat == DILITHIUM_LEVEL5k)) 
-	{
-		/* Create the key object */
-		key = create_dilithium_key_from_buffer(keyFormat, der->buffer, der->length,
-						       id, len);
-
-		type = PKCS11_KEY_TYPE_DILITHIUM;
-        }
-
-	if (key == NULL)
-	{
-		FreeDer(&der);
-		LOG_ERR("Error creating private key object");
-		return -1;
+		LOG_ERR("Error getting server random: %d\n", serverRandomSz);
 	}
 
-	/* Import the key into the secure element */
-	ret = wc_Pkcs11StoreKey_ex(&pkcs11_secure_element_instance.token, type, 1, key, 1);
-	if (ret != 0)
+	switch (id) 
 	{
-		LOG_ERR("Error importing private key into secure element: %d", ret);
-		ret = -1;
+		case CLIENT_EARLY_TRAFFIC_SECRET:
+			str = "CLIENT_EARLY_TRAFFIC_SECRET";
+			break;
+		case EARLY_EXPORTER_SECRET:
+			str = "EARLY_EXPORTER_SECRET";
+			break;
+		case CLIENT_HANDSHAKE_TRAFFIC_SECRET:
+			str = "CLIENT_HANDSHAKE_TRAFFIC_SECRET";
+			break;
+		case SERVER_HANDSHAKE_TRAFFIC_SECRET:
+			str = "SERVER_HANDSHAKE_TRAFFIC_SECRET";
+			break;
+		case CLIENT_TRAFFIC_SECRET:
+			str = "CLIENT_TRAFFIC_SECRET_0";
+			break;
+		case SERVER_TRAFFIC_SECRET:
+			str = "SERVER_TRAFFIC_SECRET_0";
+			break;
+		case EXPORTER_SECRET:
+			str = "EXPORTER_SECRET";
+			break;
 	}
 
-	/* Free key */
-	switch (keyFormat)
+	fprintf(fp, "%s ", str);
+	for (i = 0; i < (int)serverRandomSz; i++)
 	{
-	case RSAk:
-		wc_FreeRsaKey(key);
-		break;
-	case ECDSAk:
-		wc_ecc_free(key);
-		break;
-	case FALCON_LEVEL1k:
-	case FALCON_LEVEL5k:
-		wc_falcon_free(key);
-		break;
-	case DILITHIUM_LEVEL2k:
-	case DILITHIUM_LEVEL3k:
-	case DILITHIUM_LEVEL5k:
-		wc_dilithium_free(key);
-		break;
+		fprintf(fp, "%02x", serverRandom[i]);
 	}
-	free(key);
+	fprintf(fp, " ");
+	for (i = 0; i < secretSz; i++)
+	{
+		fprintf(fp, "%02x", secret[i]);
+	}
+	fprintf(fp, "\n");
 
-	FreeDer(&der);
+	if (fp != stderr)
+	{
+		fclose(fp);
+	}
 
-	return ret;
-#else
-	return -1;
-#endif
+	return 0;
 }
+#endif /* HAVE_SECRET_CALLBACK */
 
 
 /* Initialize WolfSSL library.
@@ -310,7 +271,7 @@ int wolfssl_init(struct wolfssl_library_configuration const* config)
 		LOG_INF("Initializing secure element");
 
 		/* Initialize the PKCS#11 library */
-		ret = wc_Pkcs11_Initialize(&pkcs11_secure_element_instance.device,
+		ret = wc_Pkcs11_Initialize(&secure_element.device,
 					   config->secure_element_middleware_path, wolfssl_heap);
 		if (ret != 0)
 		{
@@ -319,41 +280,41 @@ int wolfssl_init(struct wolfssl_library_configuration const* config)
 		}
 
 		/* Initialize the token */
-		ret = wc_Pkcs11Token_Init(&pkcs11_secure_element_instance.token,
-					  &pkcs11_secure_element_instance.device,
+		ret = wc_Pkcs11Token_Init(&secure_element.token,
+					  &secure_element.device,
 					  -1, NULL,
 					  "12345678", 8);
 		if (ret != 0)
 		{
 			LOG_ERR("unable to initialize PKCS#11 token: %d", ret);
-			wc_Pkcs11_Finalize(&pkcs11_secure_element_instance.device);
+			wc_Pkcs11_Finalize(&secure_element.device);
 			return -1;
 		}
 
 		/* Register the device with WolfSSL */
 		ret = wc_CryptoCb_RegisterDevice(secure_element_device_id(),
 						 wc_Pkcs11_CryptoDevCb,
-						 &pkcs11_secure_element_instance.token);
+						 &secure_element.token);
 		if (ret != 0)
 		{
 			LOG_ERR("Failed to register PKCS#11 callback: %d", ret);
-			wc_Pkcs11Token_Final(&pkcs11_secure_element_instance.token);
-			wc_Pkcs11_Finalize(&pkcs11_secure_element_instance.device);
+			wc_Pkcs11Token_Final(&secure_element.token);
+			wc_Pkcs11_Finalize(&secure_element.device);
 			return -1;
 		}
 
 		/* Create a persistent session with the secure element */
-		ret = wc_Pkcs11Token_Open(&pkcs11_secure_element_instance.token, 1);
+		ret = wc_Pkcs11Token_Open(&secure_element.token, 1);
 		if (ret == 0)
 		{
-			pkcs11_secure_element_instance.initialized = true;
+			secure_element.initialized = true;
 			LOG_INF("Secure element initialized");
 		}
 		else
 		{
-			pkcs11_secure_element_instance.initialized = false;
-			wc_Pkcs11Token_Final(&pkcs11_secure_element_instance.token);
-			wc_Pkcs11_Finalize(&pkcs11_secure_element_instance.device);
+			secure_element.initialized = false;
+			wc_Pkcs11Token_Final(&secure_element.token);
+			wc_Pkcs11_Finalize(&secure_element.device);
 			LOG_ERR("Secure element initialization failed: %d", ret);
 		}
 	#else
@@ -362,7 +323,7 @@ int wolfssl_init(struct wolfssl_library_configuration const* config)
 	}
 	else
 	{
-		pkcs11_secure_element_instance.initialized = false;
+		secure_element.initialized = false;
 	}
 
         return 0;
@@ -401,7 +362,7 @@ static int wolfssl_configure_context(WOLFSSL_CTX* context, struct wolfssl_endpoi
 
 	/* Load the private key */
 	bool privateKeyLoaded = false;
-	if (pkcs11_secure_element_instance.initialized == true && config->use_secure_element == true)
+	if (secure_element.initialized == true && config->use_secure_element == true)
 	{
 		// wolfSSL_CTX_SetDevId(context, secure_element_device_id());
 
@@ -410,10 +371,11 @@ static int wolfssl_configure_context(WOLFSSL_CTX* context, struct wolfssl_endpoi
 		{
 			if (config->private_key.buffer != NULL)
 			{
-				ret = wolfssl_import_pem_key_into_secure_element(config->private_key.buffer,
-							config->private_key.size,
-							secure_element_private_key_id(),
-							secure_element_private_key_id_size());
+				ret = pkcs11_import_pem_key(&secure_element,
+							    config->private_key.buffer,
+							    config->private_key.size,
+							    secure_element_private_key_id(),
+							    secure_element_private_key_id_size());
 				if (ret != 0)
 				{
 					LOG_ERR("Failed to import private key into secure element");
@@ -428,10 +390,11 @@ static int wolfssl_configure_context(WOLFSSL_CTX* context, struct wolfssl_endpoi
 
 			if (config->private_key.additional_key_buffer != NULL)
 			{
-				ret = wolfssl_import_pem_key_into_secure_element(config->private_key.additional_key_buffer,
-							config->private_key.additional_key_size,
-							secure_element_additional_private_key_id(),
-							secure_element_additional_private_key_id_size());
+				ret = pkcs11_import_pem_key(&secure_element,
+							    config->private_key.additional_key_buffer,
+							    config->private_key.additional_key_size,
+							    secure_element_additional_private_key_id(),
+							    secure_element_additional_private_key_id_size());
 				if (ret != 0)
 				{
 					LOG_ERR("Failed to import additional private key into secure element");
@@ -505,6 +468,7 @@ static int wolfssl_configure_context(WOLFSSL_CTX* context, struct wolfssl_endpoi
 
 	/* Configure the available curves for Key Exchange */
 	int wolfssl_key_exchange_curves[] = {
+		WOLFSSL_ECC_SECP384R1,
 		// WOLFSSL_KYBER_LEVEL1,
         	WOLFSSL_KYBER_LEVEL3,
         	WOLFSSL_KYBER_LEVEL5,
@@ -593,6 +557,10 @@ wolfssl_endpoint* wolfssl_setup_server_endpoint(wolfssl_endpoint_configuration c
 	        return NULL;
         }
 
+#ifdef HAVE_SECRET_CALLBACK
+	new_endpoint->keylog_file = config->keylog_file;
+#endif
+
         return new_endpoint;
 }
 
@@ -664,6 +632,10 @@ wolfssl_endpoint* wolfssl_setup_client_endpoint(wolfssl_endpoint_configuration c
 	        return NULL;
         }
 
+#ifdef HAVE_SECRET_CALLBACK
+	new_endpoint->keylog_file = config->keylog_file;
+#endif
+
         return new_endpoint;
 }
 
@@ -715,6 +687,19 @@ wolfssl_session* wolfssl_create_session(wolfssl_endpoint* endpoint, int socket_f
 	 */
 	wolfSSL_SetIOReadCtx(new_session->session, new_session);
 	wolfSSL_SetIOWriteCtx(new_session->session, new_session);
+
+#ifdef HAVE_SECRET_CALLBACK
+	if (endpoint->keylog_file != NULL)
+	{
+		/* required for getting random used */
+		wolfSSL_KeepArrays(new_session->session);
+
+		/* optional logging for wireshark */
+		wolfSSL_set_tls13_secret_cb(new_session->session,
+					    wolfssl_secret_callback,
+					    (void*)endpoint->keylog_file);
+	}
+#endif
 
 	return new_session;
 }
@@ -768,6 +753,10 @@ int wolfssl_handshake(wolfssl_session* session)
 				LOG_ERR("Error stopping handshake timer");
 				return -1;
 			}
+
+		#ifdef HAVE_SECRET_CALLBACK
+        		wolfSSL_FreeArrays(session->session);
+    		#endif
 
 			ret = 0;
 			break;
