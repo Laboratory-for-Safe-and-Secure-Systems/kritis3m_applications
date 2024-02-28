@@ -29,6 +29,14 @@ typedef struct wolfssl_library_configuration
 wolfssl_library_configuration;
 
 
+enum hybrid_signature_mode
+{
+        HYBRID_SIGNATURE_MODE_NATIVE = 1,
+        HYBRID_SIGNATURE_MODE_ALTERNATIVE = 2,
+        HYBRID_SIGNATURE_MODE_BOTH = 3
+};
+
+
 /* Data structure for the endpoint configuration */
 typedef struct wolfssl_endpoint_configuration
 {
@@ -36,6 +44,8 @@ typedef struct wolfssl_endpoint_configuration
         bool no_encryption;
         bool use_secure_element;
         bool secure_element_import_keys;
+        
+        enum hybrid_signature_mode hybrid_signature_mode;
 
         struct
         {

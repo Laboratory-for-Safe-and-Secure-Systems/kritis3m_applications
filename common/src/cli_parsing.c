@@ -41,27 +41,28 @@ struct certificates
 
 static const struct option cli_options[] =
 {
-    { "reverse_proxy",   no_argument, 0, 'w' },
-    { "forward_proxy",   no_argument, 0, 'x' },
-    { "echo_server",     no_argument, 0, 'y' },
-    { "echo_client",     no_argument, 0, 'z' },
-    { "incoming",        required_argument, 0, 'a' },
-    { "outgoing",        required_argument, 0, 'b' },
-    { "identity",        required_argument, 0, 'v' },
-    { "cert",            required_argument, 0, 'c' },
-    { "key",             required_argument, 0, 'k' },
-    { "intermediate",    required_argument, 0, 'i' },
-    { "root",            required_argument, 0, 'r' },
-    { "additionalKey",   required_argument, 0, 'l' },
-    { "mutualAuth",      required_argument, 0, 'n' },
-    { "noEncryption",    required_argument, 0, 'o' },
-    { "secure_element",  no_argument,       0, 's' },
-    { "middleware_path", required_argument, 0, 'm' },
-    { "se_import_keys",  required_argument, 0, 'p' },
-    { "debug",           no_argument,       0, 'd' },
-    { "bridge_lan",      required_argument, 0, 'e' },
-    { "bridge_wan",      required_argument, 0, 'f' },
-    { "help",            no_argument,       0, 'h' },
+    { "reverse_proxy",    no_argument,          0, 'w' },
+    { "forward_proxy",    no_argument,          0, 'x' },
+    { "echo_server",      no_argument,          0, 'y' },
+    { "echo_client",      no_argument,          0, 'z' },
+    { "incoming",         required_argument,    0, 'a' },
+    { "outgoing",         required_argument,    0, 'b' },
+    { "identity",         required_argument,    0, 'v' },
+    { "cert",             required_argument,    0, 'c' },
+    { "key",              required_argument,    0, 'k' },
+    { "intermediate",     required_argument,    0, 'i' },
+    { "root",             required_argument,    0, 'r' },
+    { "additionalKey",    required_argument,    0, 'l' },
+    { "mutualAuth",       required_argument,    0, 'n' },
+    { "noEncryption",     required_argument,    0, 'o' },
+    { "hybrid_signature", required_argument,    0, 'q' },
+    { "secure_element",   no_argument,          0, 's' },
+    { "middleware_path",  required_argument,    0, 'm' },
+    { "se_import_keys",   required_argument,    0, 'p' },
+    { "debug",            no_argument,          0, 'd' },
+    { "bridge_lan",       required_argument,    0, 'e' },
+    { "bridge_wan",       required_argument,    0, 'f' },
+    { "help",             no_argument,          0, 'h' },
     {NULL, 0, NULL, 0}
 };
 
@@ -97,6 +98,7 @@ int parse_cli_arguments(enum application_role* role, struct proxy_config* proxy_
         proxy_config->tls_config.no_encryption = false;
         proxy_config->tls_config.use_secure_element = false;
         proxy_config->tls_config.secure_element_import_keys = false;
+        proxy_config->tls_config.hybrid_signature_mode = HYBRID_SIGNATURE_MODE_BOTH;
         proxy_config->tls_config.device_certificate_chain.buffer = NULL;
         proxy_config->tls_config.device_certificate_chain.size = 0;
         proxy_config->tls_config.private_key.buffer = NULL;
@@ -148,7 +150,7 @@ int parse_cli_arguments(enum application_role* role, struct proxy_config* proxy_
 #endif
 	while (true)
 	{
-		int result = getopt_long(argc, argv, "wxyza:b:v:c:k:i:r:sm:p:de:f:h", cli_options, &index);
+		int result = getopt_long(argc, argv, "wxyza:b:v:c:k:i:r:l:n:o:q:sm:p:de:f:h", cli_options, &index);
 
 		if (result == -1) 
 		        break; /* end of list */
@@ -256,6 +258,24 @@ int parse_cli_arguments(enum application_role* role, struct proxy_config* proxy_
                         case 'o':
                                 proxy_config->tls_config.no_encryption = (bool) strtoul(optarg, NULL, 10);
                                 break;
+                        case 'q':
+                        {
+                                enum hybrid_signature_mode mode;
+                                if (strcmp(optarg, "both") == 0)
+                                        mode = HYBRID_SIGNATURE_MODE_BOTH;
+                                else if (strcmp(optarg, "native") == 0)
+                                        mode = HYBRID_SIGNATURE_MODE_NATIVE;
+                                else if (strcmp(optarg, "alternative") == 0)
+                                        mode = HYBRID_SIGNATURE_MODE_ALTERNATIVE;
+                                else
+                                {
+                                        shell_warn(sh, "invalid hybrid signature mode: %s", optarg);
+                                        print_help(sh, argv[0]);
+                                        return 1;
+                                }
+                                proxy_config->tls_config.hybrid_signature_mode = mode;
+                                break;
+                        }
 			case 's':
                                 proxy_config->tls_config.use_secure_element = true;
 				if (wolfssl_config != NULL)
@@ -330,12 +350,13 @@ static void print_help(const struct shell *sh, char const* name)
         shell_print(sh, "  -k, --key file_path              path to the private key file");
         shell_print(sh, "  -i, --intermediate file_path     path to an intermediate certificate file");
         shell_print(sh, "  -r, --root file_path             path to the root certificate file");
-        shell_print(sh, "  --additionalKey file_path        path to an additional private key file (hybrid signature mode)");
+        shell_print(sh, "  --additionalKey file_path        path to an additional private key file (hybrid signature mode)\n");
         shell_print(sh, "  --mutualAuth 0|1                 enable or disable mutual authentication (default enabled)");
         shell_print(sh, "  --noEncryption 0|1               enable or disable encryption (default enabled)");
+        shell_print(sh, "  --hybrid_signature mode          mode for hybrid signatures: both, native, alternative (default: both)\n");
         shell_print(sh, "  --secure_element                 use secure element");
         shell_print(sh, "  --middleware_path file_path      path to the secure element middleware");
-        shell_print(sh, "  --se_import_keys 0|1             import provided keys into secure element (default disabled)");
+        shell_print(sh, "  --se_import_keys 0|1             import provided keys into secure element (default disabled)\n");
         shell_print(sh, "  -d, --debug                      enable debug output\n");
         shell_print(sh, "  --bridge_lan interface           name of the LAN interface for the Layer 2 bridge");
         shell_print(sh, "  --bridge_wan interface           name of the WAN interface for the Layer 2 bridge\n");

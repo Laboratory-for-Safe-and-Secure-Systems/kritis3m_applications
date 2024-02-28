@@ -517,19 +517,6 @@ static int wolfssl_configure_context(WOLFSSL_CTX* context, struct wolfssl_endpoi
 	if (errorOccured(ret))
 		return -1;
 
-	/* Set the preference for verfication of hybrid signatures to be for both the 
-	 * native and alternative chains.
-	 */
-        static uint8_t cks_order[3] = {
-            WOLFSSL_CKS_SIGSPEC_BOTH,
-            WOLFSSL_CKS_SIGSPEC_ALTERNATIVE,
-            WOLFSSL_CKS_SIGSPEC_NATIVE,
-        };
-
-        ret = wolfSSL_CTX_UseCKS(context, cks_order, sizeof(cks_order));
-	if (errorOccured(ret))
-		return -1;
-
 	/* Set the IO callbacks for send and receive */
 	wolfSSL_CTX_SetIORecv(context, wolfssl_read_callback);
 	wolfSSL_CTX_SetIOSend(context, wolfssl_write_callback);
@@ -588,6 +575,24 @@ wolfssl_endpoint* wolfssl_setup_server_endpoint(wolfssl_endpoint_configuration c
 	        return NULL;
         }
 
+	/* Set the preference for verfication of hybrid signatures to be for both the 
+	 * native and alternative chains.
+	 */
+        static uint8_t cks_order[] = {
+            WOLFSSL_CKS_SIGSPEC_BOTH,
+            WOLFSSL_CKS_SIGSPEC_NATIVE,
+	    WOLFSSL_CKS_SIGSPEC_ALTERNATIVE
+        };
+
+        ret = wolfSSL_CTX_UseCKS(new_endpoint->context, cks_order, sizeof(cks_order));
+	if (errorOccured(ret))
+	{
+                LOG_ERR("Failed to set hybrid signature CKS\r\n");
+                wolfSSL_CTX_free(new_endpoint->context);
+		free(new_endpoint);
+	        return NULL;
+        }
+
         return new_endpoint;
 }
 
@@ -629,6 +634,31 @@ wolfssl_endpoint* wolfssl_setup_client_endpoint(wolfssl_endpoint_configuration c
         if (ret == -1)
         {
                 LOG_ERR("Failed to confiugre new TLS client context\r\n");
+                wolfSSL_CTX_free(new_endpoint->context);
+		free(new_endpoint);
+	        return NULL;
+        }
+
+	/* Set the preference for verfication of hybrid signatures to the user defined.
+	 */
+        static uint8_t cks[] = {WOLFSSL_CKS_SIGSPEC_BOTH};
+	switch (config->hybrid_signature_mode)
+	{
+		case HYBRID_SIGNATURE_MODE_NATIVE:
+			cks[0] = WOLFSSL_CKS_SIGSPEC_NATIVE;
+			break;
+		case HYBRID_SIGNATURE_MODE_ALTERNATIVE:
+			cks[0] = WOLFSSL_CKS_SIGSPEC_ALTERNATIVE;
+			break;
+		case HYBRID_SIGNATURE_MODE_BOTH:
+		default:
+			cks[0] = WOLFSSL_CKS_SIGSPEC_BOTH;
+			break;
+        };
+        ret = wolfSSL_CTX_UseCKS(new_endpoint->context, cks, sizeof(cks));
+	if (errorOccured(ret))
+	{
+                LOG_ERR("Failed to set hybrid signature CKS\r\n");
                 wolfSSL_CTX_free(new_endpoint->context);
 		free(new_endpoint);
 	        return NULL;
