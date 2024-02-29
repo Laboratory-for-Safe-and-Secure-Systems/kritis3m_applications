@@ -42,7 +42,31 @@ void poll_set_update_events(poll_set* poll_set, int fd, short events)
 			poll_set->fds[i].events = events;
 		}
 	}
+
 }
+
+void poll_set_add_events(poll_set* poll_set, int fd, short events)
+{
+	for (int i = 0; i < poll_set->num_fds; i++) 
+	{
+		if (poll_set->fds[i].fd == fd) 
+		{
+			poll_set->fds[i].events |= events;
+		}
+	}
+}
+
+void poll_set_remove_events(poll_set* poll_set, int fd, short events)
+{
+	for (int i = 0; i < poll_set->num_fds; i++) 
+	{
+		if (poll_set->fds[i].fd == fd) 
+		{
+			poll_set->fds[i].events &= ~events;
+		}
+	}
+}
+
 
 void poll_set_remove_fd(poll_set* poll_set, int fd)
 {

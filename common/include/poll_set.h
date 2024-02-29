@@ -24,9 +24,14 @@ poll_set;
 
 /* Method declarations for interacting with a poll set */
 void poll_set_init(poll_set* poll_set);
+
 int poll_set_add_fd(poll_set* poll_set, int fd, short events);
-void poll_set_update_events(poll_set* poll_set, int fd, short events);
 void poll_set_remove_fd(poll_set* poll_set, int fd);
+
+void poll_set_update_events(poll_set* poll_set, int fd, short events);
+void poll_set_add_events(poll_set* poll_set, int fd, short events);
+void poll_set_remove_events(poll_set* poll_set, int fd, short events);
+
 
 
 #endif

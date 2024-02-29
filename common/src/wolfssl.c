@@ -102,6 +102,7 @@ static int wolfssl_read_callback(WOLFSSL* wolfssl, char* buffer, int size, void*
 
 	if (ret == 0)
 	{
+		// LOG_WRN("connection closed by peer");
 		return WOLFSSL_CBIO_ERR_CONN_CLOSE;
 	}
 	else if (ret < 0)
@@ -136,6 +137,8 @@ static int wolfssl_write_callback(WOLFSSL* wolfssl, char* buffer, int size, void
 		// LOG_WRN("send error: %d", error);
 		if ((error == EAGAIN) || (error == EWOULDBLOCK))
 			return WOLFSSL_CBIO_ERR_WANT_WRITE;
+		else if (error == ECONNRESET)
+			return WOLFSSL_CBIO_ERR_CONN_RST;
 		else
 			return WOLFSSL_CBIO_ERR_GENERAL;
 	}
@@ -206,6 +209,9 @@ static int wolfssl_secret_callback(WOLFSSL* ssl, int id, const uint8_t* secret,
 		case EXPORTER_SECRET:
 			str = "EXPORTER_SECRET";
 			break;
+		default:
+			str = "UNKNOWN";
+			break;
 	}
 
 	fprintf(fp, "%s ", str);
@@ -245,11 +251,14 @@ int wolfssl_init(struct wolfssl_library_configuration const* config)
 
 #ifdef WOLFSSL_STATIC_MEMORY
 	/* Load static memory to avoid malloc */
-	if (wc_LoadStaticMemory(&wolfssl_heap, config->staticMemoryBuffer.buffer,
-				config->staticMemoryBuffer.size, WOLFMEM_GENERAL, 1) != 0)
+	if ((config->staticMemoryBuffer.buffer != NULL) && (config->staticMemoryBuffer.size > 0))
 	{
-		LOG_ERR("unable to load static memory");
-		return -1;
+		if (wc_LoadStaticMemory(&wolfssl_heap, config->staticMemoryBuffer.buffer,
+					config->staticMemoryBuffer.size, WOLFMEM_GENERAL, 1) != 0)
+		{
+			LOG_ERR("unable to load static memory");
+			return -1;
+		}
 	}
 #endif
 
@@ -280,10 +289,9 @@ int wolfssl_init(struct wolfssl_library_configuration const* config)
 		}
 
 		/* Initialize the token */
-		ret = wc_Pkcs11Token_Init(&secure_element.token,
-					  &secure_element.device,
-					  -1, NULL,
-					  "12345678", 8);
+		ret = wc_Pkcs11Token_Init_NoLogin(&secure_element.token,
+					  	  &secure_element.device,
+					  	  -1, NULL);
 		if (ret != 0)
 		{
 			LOG_ERR("unable to initialize PKCS#11 token: %d", ret);
@@ -821,7 +829,6 @@ int wolfssl_receive(wolfssl_session* session, uint8_t* buffer, int max_size)
 			}
 			else if ((ret == WOLFSSL_ERROR_ZERO_RETURN) || (ret == WOLFSSL_ERROR_SYSCALL))
 			{
-				LOG_INF("TLS connection was closed gracefully");
 				bytes_read = -1;
 				break;
 			}
@@ -857,6 +864,8 @@ int wolfssl_send(wolfssl_session* session, uint8_t const* buffer, int size)
         uint8_t const* tmp = buffer;
 	int ret = 0;
 
+	int debug_size = size;
+
 	if (session == NULL)
 	{
 		LOG_ERR("Session is NULL");
@@ -890,8 +899,17 @@ int wolfssl_send(wolfssl_session* session, uint8_t const* buffer, int size)
 				/* We have more to write. */
 				break;
 			}
+			else if (ret == WOLFSSL_ERROR_SYSCALL)
+			{
+				ret = -1;
+				break;
+			}
 			else
 			{
+				if (ret == -173)
+				{
+					LOG_ERR("size: %d, debug_size: %d", size, debug_size);
+				}
 				if (ret != 0)
 				{
 					char errMsg[WOLFSSL_MAX_ERROR_SZ];

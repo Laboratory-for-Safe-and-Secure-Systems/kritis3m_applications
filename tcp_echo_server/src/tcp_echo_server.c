@@ -54,10 +54,7 @@ Z_KERNEL_STACK_DEFINE_IN(echo_server_stack, STACK_SIZE, \
 
 /* Internal method declarations */
 static void* tcp_echo_server_main_thread(void* ptr);
-static echo_client* add_new_client(tcp_echo_server* server,
-				   int client_socket,
-				   struct sockaddr* client_addr,
-				   socklen_t client_addr_len);
+static echo_client* add_new_client(int client_socket, struct sockaddr* client_addr);
 static echo_client* find_client_by_fd(int fd);
 static void client_cleanup(echo_client* client);
 
@@ -110,10 +107,8 @@ static void* tcp_echo_server_main_thread(void* ptr)
 					}
 
 					/* Handle new client */
-					client = add_new_client(server,
-								client_socket,
-								&client_addr,
-								client_addr_len);
+					client = add_new_client(client_socket,
+								&client_addr);
 					if (client == NULL)
 					{
 						LOG_ERR("Error adding new client");
@@ -197,10 +192,8 @@ static void* tcp_echo_server_main_thread(void* ptr)
 	return NULL;
 }
 
-static echo_client* add_new_client(tcp_echo_server* server,
-				          int client_socket,
-				          struct sockaddr* client_addr,
-				          socklen_t client_addr_len)
+static echo_client* add_new_client(int client_socket,
+				   struct sockaddr* client_addr)
 {
         /* Search for a free client slot in the pool */
 	int freeSlot = -1;

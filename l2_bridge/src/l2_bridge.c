@@ -62,7 +62,7 @@ static void* l2_bridge_main_thread(void* ptr)
 {
 	l2_bridge* bridge = (l2_bridge*) ptr;
 	static uint8_t recv_buffer[2048];
-	uint32_t recv_buffer_len = 0;
+	ssize_t recv_buffer_len = 0;
 	struct sockaddr_ll source;
 	socklen_t source_len = sizeof(source);
 	

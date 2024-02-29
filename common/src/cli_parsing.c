@@ -91,6 +91,7 @@ int parse_cli_arguments(enum application_role* role, struct proxy_config* proxy_
 	/* Set default values */
         *role = NOT_SET;
 
+        memset(proxy_config, 0, sizeof(*proxy_config));
         proxy_config->own_ip_address = NULL;
         proxy_config->listening_port = 0;
         proxy_config->target_ip_address = NULL;
@@ -114,6 +115,7 @@ int parse_cli_arguments(enum application_role* role, struct proxy_config* proxy_
 
         if (wolfssl_config != NULL)
         {
+                memset(wolfssl_config, 0, sizeof(*wolfssl_config));
                 wolfssl_config->loggingEnabled = false;
                 wolfssl_config->secure_element_support = false;
                 wolfssl_config->secure_element_middleware_path = NULL;
@@ -121,6 +123,7 @@ int parse_cli_arguments(enum application_role* role, struct proxy_config* proxy_
 
         if (bridge_config != NULL)
         {
+                memset(bridge_config, 0, sizeof(*bridge_config));
                 bridge_config->lan_interface = NULL;
                 bridge_config->wan_interface = NULL;
         }
@@ -515,10 +518,10 @@ static int readFile(const char* filePath, uint8_t* buffer, size_t bufferSize)
     
     /* Get length of file */
     fseek(file, 0, SEEK_END);
-    int fileSize = ftell(file);
+    long fileSize = ftell(file);
     rewind(file);
 
-    if (fileSize > bufferSize)
+    if ((size_t)fileSize > bufferSize)
     {
         LOG_ERR("file (%s) is too large for internal buffer", filePath);
         fclose(file);
@@ -553,6 +556,8 @@ static int readFile(const char* filePath, uint8_t* buffer, size_t bufferSize)
 static int read_certificates(const struct shell *sh, struct certificates* certs,
                              enum application_role* role)
 {
+        (void) sh;
+        
         /* Read certificate chain */
         if (certs->certificate_path != NULL)
         {

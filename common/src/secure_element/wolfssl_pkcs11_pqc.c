@@ -300,7 +300,7 @@ RsaKey* create_rsa_key_from_buffer(uint8_t const* der_buffer, uint32_t der_size,
 	}
 
 	/* Import the actual private key from the DER buffer */
-	int index = 0;
+	uint32_t index = 0;
 	ret = wc_RsaPrivateKeyDecode(der_buffer, &index, key, der_size);
 	if (ret != 0) 
 	{
@@ -340,7 +340,7 @@ ecc_key* create_ecc_key_from_buffer(uint8_t const* der_buffer, uint32_t der_size
 	}
 
 	/* Import the actual private key from the DER buffer */
-	int index = 0;
+	uint32_t index = 0;
 	ret = wc_EccPrivateKeyDecode(der_buffer, &index, key, der_size);
 	if (ret != 0) 
 	{

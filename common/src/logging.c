@@ -5,6 +5,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
+#include <unistd.h>
+#include <sys/syscall.h>
 
 
 void log_message(char const* module, char const* level, char const* fmt, ...)
@@ -17,7 +19,7 @@ void log_message(char const* module, char const* level, char const* fmt, ...)
 
     va_end(args);
 
-    printf("<%s>\t%s: %s\r\n", level, module, message);
+    printf("<%s>\t%s (%ld): %s\r\n", level, module, syscall(SYS_gettid), message);
 }
 
 void shell_log(struct shell const* sh, char const* fmt, ...)
