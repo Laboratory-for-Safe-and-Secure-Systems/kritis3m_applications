@@ -476,7 +476,7 @@ static int wolfssl_configure_context(WOLFSSL_CTX* context, struct wolfssl_endpoi
 
 	/* Configure the available curves for Key Exchange */
 	int wolfssl_key_exchange_curves[] = {
-		WOLFSSL_ECC_SECP384R1,
+		// WOLFSSL_ECC_SECP384R1,
 		// WOLFSSL_KYBER_LEVEL1,
         	WOLFSSL_KYBER_LEVEL3,
         	WOLFSSL_KYBER_LEVEL5,
