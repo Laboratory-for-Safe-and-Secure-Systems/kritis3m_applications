@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <time.h>
-
+#include <sys/socket.h>
 #include "wolfssl/wolfcrypt/settings.h"
 #include "wolfssl/ssl.h"
 
@@ -101,6 +101,8 @@ int wolfssl_init(wolfssl_library_configuration const* config);
 wolfssl_endpoint* wolfssl_setup_dtls_server_endpoint(wolfssl_endpoint_configuration const* config);
 wolfssl_endpoint* wolfssl_setup_server_endpoint(wolfssl_endpoint_configuration const* config);
 
+int wolfssl_dtls_server_handshake(wolfssl_session *session, struct sockaddr_in* servAddr);
+int wolfssl_dtls_client_handshake(wolfssl_session *session, struct sockaddr_in* servAddr);
 
 /* Setup a TLS client endpoint.
  *
@@ -111,6 +113,7 @@ wolfssl_endpoint* wolfssl_setup_server_endpoint(wolfssl_endpoint_configuration c
  */
 wolfssl_endpoint* wolfssl_setup_client_endpoint(wolfssl_endpoint_configuration const* config);
 
+wolfssl_endpoint* wolfssl_setup_dtls_client_endpoint(wolfssl_endpoint_configuration const* config);
 
 /* Create a new session for the endpoint.
  *
