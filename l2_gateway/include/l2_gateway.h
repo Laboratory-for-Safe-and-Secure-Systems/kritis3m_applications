@@ -14,15 +14,15 @@ typedef enum interface_type
 	TUN_INTERFACE, /**< TUN interface type. */
 	PACKET_SOCKET, /**< Packet socket interface type. */
 	UDP_SOCKET,
-	DTLS_SOCKET,
+	DTLS_CLIENT_SOCKET,
+	DTLS_SERVER_SOCKET,
 } interface_type;
 
-
-typedef enum dtls_type{
+typedef enum dtls_type
+{
 	DTLS_CLIENT,
 	DTLS_SERVER
 } dtls_type;
-
 
 typedef struct interface_config
 {
@@ -37,12 +37,31 @@ typedef struct l2_gateway_config
 	interface_config tunnel_interface;
 } l2_gateway_config;
 
+typedef struct l2_gateway_configg
+{
+	interface_type asset_type;
+	const char *asset_ip;
+	int asset_port;
+	const char *asset_target_ip;
+	int asset_target_port;
+	int asset_vlan_tag;
+
+	interface_type tunnel_type;
+	const char *tunnel_ip;
+	int tunnel_port;
+	const char *tunnel_target_ip;
+	int tunnel_target_port;
+
+	int tunnel_vlan_tag;
+	struct wolfssl_endpoint_configuration dtls_config;
+
+} l2_gateway_configg;
 
 struct dtls_config
 {
-	char const* own_ip_address;
+	char const *own_ip_address;
 	uint16_t listening_port;
-	char const* target_ip_address;
+	char const *target_ip_address;
 	uint16_t target_port;
 	struct wolfssl_endpoint_configuration dtls_config;
 };
@@ -52,7 +71,7 @@ struct dtls_config
  */
 typedef enum connected_channel
 {
-	ASSET, /**< Asset channel. */
+	ASSET,	/**< Asset channel. */
 	TUNNEL, /**< Tunnel channel. */
 } connected_channel;
 
@@ -103,7 +122,6 @@ typedef int (*sendFunc)(L2_Gateway *l2_gateway, uint8_t *buffer, int buffer_len,
  * @return Integer indicating the status of the receive or l2_gw_pipe operation.
  */
 typedef int (*receiveOrPipeFunc)(L2_Gateway *self);
-
 
 /**
  * @brief Enumeration of call types.
@@ -171,10 +189,13 @@ int l2_gateway_close(L2_Gateway *l2_gateway);
  */
 int l2_gateway_run(l2_gateway_config const *config);
 
+
+int l2_gateway_start(l2_gateway_configg const *config);
+
 /* Terminate the Layer 2 l2_gateway.
  *
  * Returns 0 on success, -1 on failure (error message is printed to console).
  */
 int l2_gateway_terminate(void);
 
-#endif //L2_GATEWAY_H_
+#endif // L2_GATEWAY_H_

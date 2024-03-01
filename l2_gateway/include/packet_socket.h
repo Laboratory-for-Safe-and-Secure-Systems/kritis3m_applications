@@ -11,6 +11,8 @@ struct PacketSocket
     struct sockaddr_ll source; /**< The source address, which is used by the recieve function. */
 };
 
+int init_packet_socket_gateway(PacketSocket *l2_gw, const l2_gateway_configg *config, connected_channel channel);
+
 int init_packet_socket_bridge(PacketSocket *bridge,
                               const interface_config *interface,
                               connected_channel channel);

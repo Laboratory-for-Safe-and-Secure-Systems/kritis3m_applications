@@ -12,7 +12,7 @@
 #else
 #include <errno.h>      //For errno - the error number
 #include <netinet/ip.h> //Provides declarations for ip header
-#include <arpa/inet.h>   
+#include <arpa/inet.h>
 #include <linux/if_packet.h>
 #include <net/ethernet.h> /* the L2 protocols */ // inet_addr
 #endif
@@ -24,7 +24,80 @@
 #include "networking.h"
 #include "wolfssl.h"
 
-LOG_MODULE_REGISTER(packet_socket);
+LOG_MODULE_REGISTER(packet_socket_l2_gw);
+
+int init_packet_socket_gateway(PacketSocket *l2_gw, const l2_gateway_configg *config, connected_channel channel)
+{
+
+    int proto = ETH_P_ALL;
+#if !defined(__ZEPHYR__)
+    proto = htons(proto);
+#endif
+
+    memset(&l2_gw->addr, 0, sizeof(l2_gw->addr));
+    memset(&l2_gw->source, 0, sizeof(l2_gw->source));
+
+    l2_gw->addr.sll_family = AF_PACKET;
+    l2_gw->addr.sll_protocol = proto;
+    l2_gw->addr.sll_pkttype = (PACKET_BROADCAST | PACKET_MULTICAST | PACKET_OTHERHOST);
+    l2_gw->bridge.type = PACKET_SOCKET;
+    l2_gw->bridge.channel = channel;
+
+    struct net_if *t_iface = NULL;
+#if defined(__ZEPHYR__)
+    switch (channel)
+    {
+    case ASSET:
+        t_iface = (struct net_if *)network_interfaces()->asset;
+        l2_gw->bridge.vlan_tag = config->asset_vlan_tag;
+        break;
+    case TUNNEL:
+        t_iface = (struct net_if *)network_interfaces()->tunnel;
+        l2_gw->bridge.vlan_tag = config->tunnel_vlan_tag;
+        break;
+    }
+    // get vlan tag of interface
+#else
+    /* We have to get the mapping between interface name and index */
+    struct ifreq ifr;
+    memset(&ifr, 0, sizeof(ifr));
+    strncpy(ifr.ifr_name, (char const *)interface->interface, IFNAMSIZ);
+    ioctl(l2_gw->bridge.fd, SIOCGIFINDEX, &ifr);
+    l2_gw->addr.sll_ifindex = ifr.ifr_ifindex;
+#endif
+
+    l2_gw->addr.sll_ifindex = net_if_get_by_iface(t_iface);
+
+    l2_gw->bridge.fd = socket(l2_gw->addr.sll_family, SOCK_RAW, l2_gw->addr.sll_protocol);
+
+    // check if socket initialization was successful
+    if (l2_gw->bridge.fd < 0)
+    {
+        LOG_ERR("Failed to create packet socket: %d", errno);
+        return -1;
+    }
+    /* Bind the packet sockets to their interfaces */
+    if (bind(l2_gw->bridge.fd, (struct sockaddr *)&l2_gw->addr, sizeof(l2_gw->addr)) < 0)
+    {
+        LOG_ERR("binding ASSET socket to interface failed: error %d\n", errno);
+        return -1;
+    }
+
+#if !defined(__ZEPHYR__)
+    if (setsockopt(l2_gw->bridge.fd, SOL_PACKET, PACKET_IGNORE_OUTGOING, &(int){1}, sizeof(int)) < 0)
+    {
+        LOG_ERR("setsockopt(PACKET_IGNORE_OUTGOING) on LAN socket failed: error %d\n", errno);
+        return -1;
+    }
+#endif
+
+    l2_gw->bridge.vtable[call_send] = (int (*)())packet_socket_send;
+    l2_gw->bridge.vtable[call_receive] = (int (*)())packet_socket_receive;
+    l2_gw->bridge.vtable[call_pipe] = (int (*)())packet_socket_pipe;
+    l2_gw->bridge.vtable[call_close] = (int (*)())packet_socket_close;
+
+    return 1;
+}
 
 int init_packet_socket_bridge(PacketSocket *l2_gw, const interface_config *interface, connected_channel channel)
 {
@@ -246,6 +319,7 @@ int packet_socket_pipe(PacketSocket *l2_gw)
     if (ret < 0)
     {
         LOG_ERR("Failed to l2_gw_pipe data to other bridge: %d", ret);
+        l2_gateway_terminate();
     }
     l2_gw->bridge.len = 0;
     return ret;

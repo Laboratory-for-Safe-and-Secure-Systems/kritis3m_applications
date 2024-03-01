@@ -23,6 +23,8 @@
 
 #endif
 #include "packet_socket.h"
+#include "dtls_socket.h"
+// #include "udp_socket.h"
 
 #include "logging.h"
 #include "poll_set.h"
@@ -39,14 +41,246 @@ typedef struct l2_gateway
 	L2_Gateway *tunnel;
 } l2_gateway;
 
+static l2_gateway theBridge = {
+	.asset = NULL,
+	.tunnel = NULL,
+};
+
+/* Internal method declarations */
+static void *l2_gateway_main_thread(void *ptr);
+void marry_bridges(L2_Gateway *bridge1, L2_Gateway *bridge2);
 /* File global variables */
-static l2_gateway theBridge;
+
 #if defined(__ZEPHYR__)
-#define STACK_SIZE 8 * 1024
+#define STACK_SIZE 12 * 1024
 
 Z_KERNEL_STACK_DEFINE_IN(l2_gateway_stack, STACK_SIZE,
 						 __attribute__((section(CONFIG_RAM_SECTION_STACKS_1))));
 #endif
+
+void reset_l2_gateway()
+{
+	pthread_attr_init(&theBridge.thread_attr);
+	pthread_attr_setdetachstate(&theBridge.thread_attr, PTHREAD_CREATE_DETACHED);
+	poll_set_init(&theBridge.poll_set);
+	if (theBridge.asset != NULL)
+	{
+		l2_gateway_close(theBridge.asset);
+	}
+	if (theBridge.tunnel != NULL)
+	{
+		l2_gateway_close(theBridge.tunnel);
+	}
+}
+int configure_interfaces(l2_gateway_configg const *config)
+{
+	int ret = -1;
+
+	// ***********VLAN TAG AREA***********
+#if defined(__ZEPHYR__)
+
+	// set tunnel vlan tag
+	if (config->tunnel_vlan_tag > 0)
+	{
+
+		ret = net_eth_vlan_enable(network_interfaces()->tunnel, config->tunnel_vlan_tag);
+		if (ret < 0)
+		{
+			LOG_ERR("Cannot enable VLAN for tag %d: error %d", config->tunnel_vlan_tag, ret);
+			return ret;
+		}
+	}
+
+	// set asset vlan tag
+	if (config->asset_vlan_tag > 0)
+	{
+		ret = net_eth_vlan_enable(network_interfaces()->asset, config->asset_vlan_tag);
+		if (ret < 0)
+		{
+			LOG_ERR("Cannot enable VLAN for tag %d: error %d", config->asset_vlan_tag, ret);
+			return ret;
+		}
+	}
+
+#else
+	if (config->asset_vlan_tag < 0 || config->tunnel_vlan_tag < 0)
+	{
+		LOG_ERR("VLAN is not supported in LINUX");
+		return -1;
+	}
+#endif
+
+// ***********Promisous MODE AREA ***********
+#if defined(__ZEPHYR__)
+
+#if IS_ENABLED(CONFIG_NET_PROMISCUOUS_MODE)
+	// if (config->asset_type == PACKET_SOCKET)
+	// {
+	// 	ret = net_if_set_promisc(network_interfaces()->asset);
+	// 	if (ret < 0)
+	// 	{
+	// 		LOG_ERR("Cannot set promiscuous mode for asset: error %d", ret);
+	// 		return ret;
+	// 	}
+	// }
+	// if (config->tunnel_type == PACKET_SOCKET)
+	// {
+	// 	ret = net_if_set_promisc(network_interfaces()->tunnel);
+	// 	if (ret < 0)
+	// 	{
+	// 		LOG_ERR("Cannot set promiscuous mode for tunnel: error %d", ret);
+	// 		return ret;
+	// 	}
+	// }
+#endif
+
+#else
+	if (config->asset_type == PACKET_SOCKET)
+	{
+		ret = set_promiscous_mode(network_interfaces()->asset, true);
+		if (ret < 0)
+		{
+			LOG_ERR("Cannot set promiscuous mode for asset: error %d", ret);
+			return ret;
+		}
+	}
+	if (config->tunnel_type == PACKET_SOCKET)
+	{
+		ret = set_promiscous_mode(network_interfaces()->tunnel, true);
+		if (ret < 0)
+		{
+			LOG_ERR("Cannot set promiscuous mode for tunnel: error %d", ret);
+			return ret;
+		}
+	}
+#endif
+
+	return ret;
+}
+
+int l2_gateway_start(l2_gateway_configg const *config)
+{
+	int ret = -1;
+	reset_l2_gateway();
+	ret = configure_interfaces(config);
+	L2_Gateway *asset = NULL;
+	L2_Gateway *tunnel = NULL;
+
+	switch (config->asset_type)
+	{
+	case PACKET_SOCKET:
+		asset = (L2_Gateway *)((PacketSocket *)malloc(sizeof(PacketSocket)));
+		memset(asset, 0, sizeof(PacketSocket));
+		ret = init_packet_socket_gateway((PacketSocket *)asset, config, ASSET);
+		if (ret < 0)
+		{
+			LOG_ERR("Failed to initialize packet socket gateway");
+			return -1;
+		}
+		break;
+	case DTLS_SERVER_SOCKET:
+		asset = (L2_Gateway *)((DtlsSocket *)malloc(sizeof(DtlsSocket)));
+		memset((DtlsSocket*)asset, 0, sizeof(DtlsSocket));
+
+		ret = init_dtls_server_socket_gateway((DtlsSocket *)asset, config, ASSET);
+		if (ret < 0)
+		{
+			LOG_ERR("Failed to initialize dtls server socket gateway");
+			return -1;
+		}
+		break;
+	case DTLS_CLIENT_SOCKET:
+		asset = (L2_Gateway *)((DtlsSocket *)malloc(sizeof(DtlsSocket)));
+		memset((DtlsSocket*)asset, 0, sizeof(DtlsSocket));
+		ret = init_dtls_client_socket_gateway((DtlsSocket *)asset, config, ASSET);
+		if (ret < 0)
+		{
+			LOG_ERR("Failed to initialize dtls client socket gateway");
+			return -1;
+		}
+		break;
+	case UDP_SOCKET:
+		LOG_INF("Not implemented yet");
+		break;
+	case TUN_INTERFACE:
+		LOG_INF("Not implemented yet");
+		break;
+	}
+
+	switch (config->tunnel_type)
+	{
+	case PACKET_SOCKET:
+		tunnel = (L2_Gateway *)((PacketSocket *)malloc(sizeof(PacketSocket)));
+		memset((PacketSocket*)tunnel, 0, sizeof(PacketSocket));
+		init_packet_socket_gateway((PacketSocket *)tunnel, config, TUNNEL);
+		break;
+	case DTLS_SERVER_SOCKET:
+		tunnel = (L2_Gateway *)((DtlsSocket *)malloc(sizeof(DtlsSocket)));
+		memset((DtlsSocket *)tunnel, 0, sizeof(DtlsSocket));
+		ret = init_dtls_server_socket_gateway((DtlsSocket *)tunnel, config, TUNNEL);
+		// ret = init_dt((PacketSocket*)tunnel ,config,TUNNEL);
+
+		break;
+	case DTLS_CLIENT_SOCKET:
+		tunnel = (L2_Gateway *)((DtlsSocket *)malloc(sizeof(DtlsSocket)));
+		memset((DtlsSocket *)tunnel, 0, sizeof(DtlsSocket));
+		ret = init_dtls_client_socket_gateway((DtlsSocket *)tunnel, config, TUNNEL);
+		break;
+	case UDP_SOCKET:
+		LOG_ERR("UDP_SOCKET not implemented yet");
+		break;
+	case TUN_INTERFACE:
+		LOG_INF("Not implemented yet");
+		break;
+	}
+	theBridge.asset = asset;
+	theBridge.tunnel = tunnel;
+	marry_bridges(theBridge.asset, theBridge.tunnel);
+
+	/* Set the new sockets to non-blocking */
+	setblocking(theBridge.asset->fd, false);
+	setblocking(theBridge.tunnel->fd, false);
+
+	/* Add sockets to the poll_set */
+	ret = poll_set_add_fd(&theBridge.poll_set, theBridge.asset->fd, POLLIN);
+	if (ret != 0)
+	{
+		LOG_ERR("Error adding ASSET socket to poll_set");
+		l2_gateway_close(theBridge.asset);
+		l2_gateway_close(theBridge.tunnel);
+		return -1;
+	}
+	ret = poll_set_add_fd(&theBridge.poll_set, theBridge.tunnel->fd, POLLIN);
+	if (ret != 0)
+	{
+		LOG_ERR("Error adding TUNNEL socket to poll_set");
+		l2_gateway_close(theBridge.asset);
+		l2_gateway_close(theBridge.tunnel);
+		return -1;
+	}
+
+	/* Init main backend */
+	pthread_attr_init(&theBridge.thread_attr);
+	pthread_attr_setdetachstate(&theBridge.thread_attr, PTHREAD_CREATE_DETACHED);
+
+#if defined(__ZEPHYR__)
+	/* We have to properly set the attributes with the stack to use for Zephyr. */
+	pthread_attr_setstack(&theBridge.thread_attr, l2_gateway_stack, K_THREAD_STACK_SIZEOF(l2_gateway_stack));
+#endif
+
+	/* Create the new thread */
+	ret = pthread_create(&theBridge.thread, &theBridge.thread_attr, l2_gateway_main_thread, &theBridge);
+	if (ret == 0)
+	{
+		LOG_INF("L2 bridge main thread started");
+	}
+	else
+	{
+		LOG_ERR("Error starting L2 bridge thread: %s", strerror(ret));
+	}
+
+	return 1;
+}
 
 int l2_gateway_send(L2_Gateway *bridge, uint8_t *buffer, int buffer_len, int buffer_start)
 {
@@ -70,9 +304,6 @@ int l2_gateway_close(L2_Gateway *l2_gateway)
 	return l2_gateway->vtable[call_close](l2_gateway);
 }
 
-/* Internal method declarations */
-static void *l2_gateway_main_thread(void *ptr);
-
 L2_Gateway *find_bridge_by_fd(int fd)
 {
 	if (theBridge.asset->fd == fd)
@@ -93,7 +324,7 @@ static void *l2_gateway_main_thread(void *ptr)
 {
 	l2_gateway
 		*l2_gw_container = (l2_gateway
-						   *)ptr;
+								*)ptr;
 
 	while (1)
 	{
@@ -166,114 +397,10 @@ static void *l2_gateway_main_thread(void *ptr)
 	return NULL;
 }
 
-L2_Gateway *init_bridge(const interface_config *interface, connected_channel channel)
-{
-	// check which interface type is requested
-	switch (interface->type)
-	{
-	case PACKET_SOCKET:
-		// dynammic memory allocation for PacketSocket
-		PacketSocket *bridge = (PacketSocket *)malloc(sizeof(PacketSocket));
-		init_packet_socket_bridge(bridge, interface, channel);
-
-		return (L2_Gateway *)bridge;
-	case TUN_INTERFACE:
-#if defined(__ZEPHYR__)
-		LOG_INF("ZEPHYR does not support TUN interface yet");
-#else
-		LOG_INF("TUN interface is not implemented yet");
-#endif
-		return NULL;
-	default:
-		LOG_ERR("Invalid interface type");
-		return NULL;
-	}
-}
 void marry_bridges(L2_Gateway *bridge1, L2_Gateway *bridge2)
 {
 	bridge1->l2_gw_pipe = bridge2;
 	bridge2->l2_gw_pipe = bridge1;
-}
-
-/* Start a new thread and run the Layer 2 bridge.
- *
- * Returns 0 on success, -1 on failure (error message is printed to console).
- */
-int l2_gateway_run(l2_gateway_config const *config)
-{
-// handle not implemented interfaces
-#if defined(__ZEPHYR__)
-	if (config->asset_interface.type == TUN_INTERFACE ||
-		config->tunnel_interface.type == TUN_INTERFACE)
-	{
-		LOG_ERR("TUN interface not supported");
-		return -1;
-	}
-#endif
-	L2_Gateway *t_bridge = init_bridge(&config->asset_interface, ASSET);
-	if (t_bridge == NULL)
-	{
-		LOG_ERR("Failed to initialize asset bridge");
-		l2_gateway_close(t_bridge);
-		return -1;
-	}
-	theBridge.asset = t_bridge;
-	t_bridge = init_bridge(&config->tunnel_interface, TUNNEL);
-	if (t_bridge == NULL)
-	{
-		LOG_ERR("Failed to initialize tunnel bridge");
-		l2_gateway_close(t_bridge);
-		return -1;
-	}
-	theBridge.tunnel = t_bridge;
-
-	marry_bridges(theBridge.asset, theBridge.tunnel);
-
-	poll_set_init(&theBridge.poll_set);
-
-	/* Set the new sockets to non-blocking */
-	setblocking(theBridge.asset->fd, false);
-	setblocking(theBridge.tunnel->fd, false);
-
-	/* Add sockets to the poll_set */
-	int ret = poll_set_add_fd(&theBridge.poll_set, theBridge.asset->fd, POLLIN);
-	if (ret != 0)
-	{
-		LOG_ERR("Error adding ASSET socket to poll_set");
-		l2_gateway_close(theBridge.asset);
-		l2_gateway_close(theBridge.tunnel);
-		return -1;
-	}
-	ret = poll_set_add_fd(&theBridge.poll_set, theBridge.tunnel->fd, POLLIN);
-	if (ret != 0)
-	{
-		LOG_ERR("Error adding TUNNEL socket to poll_set");
-		l2_gateway_close(theBridge.asset);
-		l2_gateway_close(theBridge.tunnel);
-		return -1;
-	}
-
-	/* Init main backend */
-	pthread_attr_init(&theBridge.thread_attr);
-	pthread_attr_setdetachstate(&theBridge.thread_attr, PTHREAD_CREATE_DETACHED);
-
-#if defined(__ZEPHYR__)
-	/* We have to properly set the attributes with the stack to use for Zephyr. */
-	pthread_attr_setstack(&theBridge.thread_attr, l2_gateway_stack, K_THREAD_STACK_SIZEOF(l2_gateway_stack));
-#endif
-
-	/* Create the new thread */
-	ret = pthread_create(&theBridge.thread, &theBridge.thread_attr,l2_gateway_main_thread, &theBridge);
-	if (ret == 0)
-	{
-		LOG_INF("L2 bridge main thread started");
-	}
-	else
-	{
-		LOG_ERR("Error starting L2 bridge thread: %s", strerror(ret));
-	}
-
-	return ret;
 }
 
 /* Terminate the Layer 2 bridge.
@@ -287,6 +414,7 @@ int l2_gateway_terminate(void)
 
 	/* Close the sockets */
 	l2_gateway_close(theBridge.asset);
+	l2_gateway_close(theBridge.tunnel);
 
 	return 0;
 }

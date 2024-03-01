@@ -9,6 +9,7 @@
 #include <errno.h>
 #include "networking.h"
 #include <zephyr/net/ethernet.h>
+#include "logging.h"
 
 LOG_MODULE_REGISTER(udp_socket);
 
