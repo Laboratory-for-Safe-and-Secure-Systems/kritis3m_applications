@@ -52,10 +52,10 @@ void marry_bridges(L2_Gateway *bridge1, L2_Gateway *bridge2);
 /* File global variables */
 
 #if defined(__ZEPHYR__)
-#define STACK_SIZE 12 * 1024
+#define STACK_SIZE 50 * 1024
 
 Z_KERNEL_STACK_DEFINE_IN(l2_gateway_stack, STACK_SIZE,
-						 __attribute__((section(CONFIG_RAM_SECTION_STACKS_1))));
+						 __attribute__((section(CONFIG_RAM_SECTION_STACKS_2))));
 #endif
 
 void reset_l2_gateway()
