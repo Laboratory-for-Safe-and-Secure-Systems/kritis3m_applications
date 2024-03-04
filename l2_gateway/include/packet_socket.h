@@ -3,6 +3,12 @@
 
 #include "l2_gateway.h"
 
+#if !defined(__ZEPHYR__)
+       #include <linux/if_packet.h>
+       #include <net/ethernet.h> /* the L2 protocols */
+       #endif
+
+
 typedef struct PacketSocket PacketSocket;
 struct PacketSocket
 {

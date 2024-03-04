@@ -12,6 +12,9 @@ LOG_MODULE_REGISTER(cli_parsing);
 
 struct certificates
 {
+        char const *ca_CAcertLoc;
+        char const *ca_servCertLoc;
+        char const *ca_servKeyLoc;
         char const *certificate_path;
         char const *private_key_path;
         char const *additional_key_path;
@@ -34,6 +37,13 @@ struct certificates
 
         uint8_t *root_buffer;
         size_t root_buffer_size;
+
+        uint8_t *client_cert;
+        size_t client_cert_size;
+        uint8_t *server_cert;
+        size_t server_cert_size;
+        uint8_t *server_key;
+        size_t server_key_size;
 };
 
 static const struct option cli_options[] =
@@ -54,6 +64,9 @@ static const struct option cli_options[] =
         {"tunnel_target_ip", required_argument, 0, 'F'},
         {"asset_vlan_tag", required_argument, 0, 'G'},
         {"tunnel_vlan_tag", required_argument, 0, 'H'},
+        {"ca_cert", required_argument, 0, 'I'},
+        {"serv_cert", required_argument, 0, 'J'},
+        {"serv_key", required_argument, 0, 'K'},
         {"identity", required_argument, 0, 'v'},
         {"cert", required_argument, 0, 'c'},
         {"key", required_argument, 0, 'k'},
@@ -156,6 +169,9 @@ int parse_cli_arguments(enum application_role *role, struct proxy_config *proxy_
                 .additional_key_path = NULL,
                 .intermediate_path = NULL,
                 .root_path = NULL,
+                .ca_CAcertLoc = NULL,
+                .ca_servCertLoc = NULL,
+                .ca_servKeyLoc = NULL,
 
 #if defined(__ZEPHYR__)
                 .identity = NULL,
@@ -330,7 +346,7 @@ int parse_cli_arguments(enum application_role *role, struct proxy_config *proxy_
                         if (separator == NULL)
                         {
                                 port_str = optarg;
-                                l2_gw_config->asset_ip = CONFIG_NET_IP_ASSET;
+                                // l2_gw_config->asset_ip = CONFIG_NET_IP_ASSET;
                         }
                         else
                         {
@@ -358,7 +374,7 @@ int parse_cli_arguments(enum application_role *role, struct proxy_config *proxy_
                         if (separator == NULL)
                         {
                                 port_str = optarg;
-                                l2_gw_config->asset_target_ip = CONFIG_NET_IP_ASSET_PEER;
+                                // l2_gw_config->asset_target_ip = CONFIG_NET_IP_ASSET_PEER;
                         }
                         else
                         {
@@ -385,7 +401,7 @@ int parse_cli_arguments(enum application_role *role, struct proxy_config *proxy_
                         if (separator == NULL)
                         {
                                 port_str = optarg;
-                                l2_gw_config->tunnel_ip = CONFIG_NET_IP_TUNNEL;
+                                // l2_gw_config->tunnel_ip = CONFIG_NET_IP_TUNNEL;
                         }
                         else
                         {
@@ -412,7 +428,7 @@ int parse_cli_arguments(enum application_role *role, struct proxy_config *proxy_
                         if (separator == NULL)
                         {
                                 port_str = optarg;
-                                l2_gw_config->tunnel_target_ip = CONFIG_NET_IP_TUNNEL_PEER;
+                                // l2_gw_config->tunnel_target_ip = CONFIG_NET_IP_TUNNEL_PEER;
                         }
                         else
                         {
@@ -456,6 +472,16 @@ int parse_cli_arguments(enum application_role *role, struct proxy_config *proxy_
 
                         break;
                 }
+
+                case 'I':
+                        certs.ca_CAcertLoc = optarg;
+                        break;
+                case 'J':
+                        certs.ca_servCertLoc = optarg;
+                        break;
+                case 'K':
+                        certs.ca_servKeyLoc = optarg;
+                        break;
 
                 case 'v':
 #if defined(__ZEPHYR__)
@@ -531,10 +557,18 @@ int parse_cli_arguments(enum application_role *role, struct proxy_config *proxy_
         proxy_config->tls_config.private_key.additional_key_size = certs.additional_key_buffer_size;
         proxy_config->tls_config.root_certificate.buffer = certs.root_buffer;
         proxy_config->tls_config.root_certificate.size = certs.root_buffer_size;
+        proxy_config->tls_config.server_cert_der.buffer = certs.server_cert;
+        proxy_config->tls_config.server_cert_der.size = certs.server_cert_size;
+        proxy_config->tls_config.server_key_der.buffer = certs.server_key;
+        proxy_config->tls_config.server_key_der.size = certs.server_key_size;
+        proxy_config->tls_config.client_cert_der.buffer = certs.client_cert;
+        proxy_config->tls_config.client_cert_der.size = certs.client_cert_size;
 
         l2_gw_config->dtls_config = proxy_config->tls_config;
 
         return 0;
+
+
 }
 
 static void print_help(const struct shell *sh, char const *name)
@@ -611,6 +645,18 @@ static int read_certificates(const struct shell *sh, struct certificates *certs,
         {
                 shell_error(sh, "no identity specified");
                 return -1;
+        }
+
+        else if (strcmp(certs->identity, "basic") == 0)
+        {
+                certs->server_cert = (uint8_t *)server_cert_der_2048;
+                certs->server_cert_size = sizeof(server_cert_der_2048);
+
+                certs->client_cert = (uint8_t *)client_cert_der_2048;
+                certs->client_cert_size = sizeof(client_cert_der_2048);
+
+                certs->server_key = (uint8_t *)server_key_der_2048;
+                certs->server_key_size = sizeof(server_key_der_2048);
         }
         else if (strcmp(certs->identity, "ecc2") == 0)
         {

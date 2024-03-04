@@ -37,11 +37,9 @@ static struct network_interfaces ifaces =
 
 #if defined(__ZEPHYR__)
 
-#if defined(CONFIG_NET_VLAN)
-int vlan_configure_tunnel();
-int vlan_configure_asset();
-int vlan_configure_management();
-#endif
+int configure_tunnel();
+int configure_asset();
+int configure_management();
 
 /* Callback to obtain the network interfaces */
 static void iface_cb(struct net_if *iface, void *user_data)
@@ -99,24 +97,21 @@ int initialize_network_interfaces()
 	ifaces.management = net_if_get_default();
 	net_if_foreach(iface_cb, &ifaces);
 
-#if defined(CONFIG_NET_VLAN)
-	ret = vlan_configure_management();
+	ret = configure_management();
 	if (ret < 0)
 	{
 		return ret;
 	}
-	ret = vlan_configure_asset();
+	ret = configure_asset();
 	if (ret < 0)
 	{
 		return ret;
 	}
-	ret = vlan_configure_tunnel();
+	ret = configure_tunnel();
 	if (ret < 0)
 	{
 		return ret;
 	}
-#endif
-
 	return 0;
 }
 
@@ -149,28 +144,9 @@ int remove_ipv4_address(void *iface, struct in_addr ipv4_addr)
 	return 0;
 }
 
-#if defined(CONFIG_NET_VLAN)
-
-int vlan_configure_tunnel()
+int configure_tunnel()
 {
 	int ret = -1;
-
-	ret = net_eth_vlan_enable(ifaces.tunnel, CONFIG_VLAN_TAG_TUNNEL);
-	if (ret < 0)
-	{
-		LOG_ERR("Cannot enable VLAN for tag %d: error %d", CONFIG_VLAN_TAG_TUNNEL, ret);
-		return ret;
-	}
-
-#if IS_ENABLED(CONFIG_NET_PROMISCUOUS_MODE)
-	// ret = net_eth_promisc_mode(network_interfaces()->lan, true);
-	net_if_set_promisc(ifaces.tunnel);
-	if (ret < 0)
-	{
-		LOG_ERR("Cannot set promiscuous mode for lan: error %d", ret);
-		return ret;
-	}
-#endif
 
 	struct in_addr helper_addr;
 
@@ -194,24 +170,9 @@ int vlan_configure_tunnel()
 	return ret;
 }
 
-int vlan_configure_asset()
+int configure_asset()
 {
 	int ret = -1;
-	ret = net_eth_vlan_enable(ifaces.asset, CONFIG_VLAN_TAG_ASSET);
-	if (ret < 0)
-	{
-		LOG_ERR("Cannot enable VLAN for tag %d: error %d", CONFIG_VLAN_TAG_ASSET, ret);
-		return ret;
-	}
-#if IS_ENABLED(CONFIG_NET_PROMISCUOUS_MODE)
-	// ret = net_eth_promisc_mode(network_interfaces()->lan, true);
-	net_if_set_promisc(ifaces.asset);
-	if (ret < 0)
-	{
-		LOG_ERR("Cannot set promiscuous mode for lan: error %d", ret);
-		return ret;
-	}
-#endif
 
 	struct in_addr helper_addr;
 
@@ -235,16 +196,9 @@ int vlan_configure_asset()
 	net_if_ipv4_set_gw(ifaces.asset, &helper_addr);
 	return ret;
 }
-int vlan_configure_management()
+int configure_management()
 {
 	int ret = -1;
-	ret = net_eth_vlan_enable(ifaces.management, CONFIG_VLAN_TAG_MANAGEMENT);
-	if (ret < 0)
-	{
-		LOG_ERR("Cannot enable VLAN for tag %d: error %d", CONFIG_VLAN_TAG_MANAGEMENT, ret);
-		return ret;
-	}
-
 	struct in_addr helper_addr;
 
 	/* Set netmask and gateway for lan interface */
@@ -263,15 +217,14 @@ int vlan_configure_management()
 		LOG_ERR("Invalid gateway address %s for the Asset interface: error %d", CONFIG_NET_IP_MANAGEMENT_GW, ret);
 		return ret;
 	}
+	
 
 	net_if_ipv4_set_gw(ifaces.management, &helper_addr);
 	return ret;
 }
 
 #endif
-
-#else // defined (__ZEPHYR__)
-
+#if !defined(__ZEPHYR__)
 /* Initialize the network interfaces */
 int initialize_network_interfaces()
 {

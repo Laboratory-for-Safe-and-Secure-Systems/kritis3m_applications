@@ -4,6 +4,7 @@
 
 #include <unistd.h> // Include the necessary header file for the 'close' function
 #include <sys/socket.h>
+#include <sys/ioctl.h>
 #include <errno.h>
 #include "networking.h"
 
@@ -15,6 +16,9 @@
 #include <arpa/inet.h>
 #include <linux/if_packet.h>
 #include <net/ethernet.h> /* the L2 protocols */ // inet_addr
+#include <net/if.h>
+
+#include <netinet/in.h>
 #endif
 
 #include "tcp_echo_server.h"
@@ -56,17 +60,27 @@ int init_packet_socket_gateway(PacketSocket *l2_gw, const l2_gateway_configg *co
         l2_gw->bridge.vlan_tag = config->tunnel_vlan_tag;
         break;
     }
+
+    l2_gw->addr.sll_ifindex = net_if_get_by_iface(t_iface);
     // get vlan tag of interface
 #else
     /* We have to get the mapping between interface name and index */
     struct ifreq ifr;
     memset(&ifr, 0, sizeof(ifr));
-    strncpy(ifr.ifr_name, (char const *)interface->interface, IFNAMSIZ);
-    ioctl(l2_gw->bridge.fd, SIOCGIFINDEX, &ifr);
+    switch (channel)
+    {
+    case ASSET:
+
+        strncpy(ifr.ifr_name, (char const *)network_interfaces()->asset, IFNAMSIZ);
+        ioctl(l2_gw->bridge.fd, SIOCGIFINDEX, &ifr);
+        break;
+    case TUNNEL:
+        strncpy(ifr.ifr_name, (char const *)network_interfaces()->tunnel, IFNAMSIZ);
+        ioctl(l2_gw->bridge.fd, SIOCGIFINDEX, &ifr);
+        break;
+    }
     l2_gw->addr.sll_ifindex = ifr.ifr_ifindex;
 #endif
-
-    l2_gw->addr.sll_ifindex = net_if_get_by_iface(t_iface);
 
     l2_gw->bridge.fd = socket(l2_gw->addr.sll_family, SOCK_RAW, l2_gw->addr.sll_protocol);
 
@@ -128,6 +142,10 @@ int init_packet_socket_bridge(PacketSocket *l2_gw, const interface_config *inter
 
         break;
     }
+
+    int tag = net_eth_get_vlan_tag(t_iface);
+    l2_gw->bridge.vlan_tag = tag;
+    l2_gw->addr.sll_ifindex = net_if_get_by_iface(t_iface);
     // get vlan tag of interface
 #else
     /* We have to get the mapping between interface name and index */
@@ -137,10 +155,6 @@ int init_packet_socket_bridge(PacketSocket *l2_gw, const interface_config *inter
     ioctl(l2_gw->bridge.fd, SIOCGIFINDEX, &ifr);
     l2_gw->addr.sll_ifindex = ifr.ifr_ifindex;
 #endif
-
-    int tag = net_eth_get_vlan_tag(t_iface);
-    l2_gw->bridge.vlan_tag = tag;
-    l2_gw->addr.sll_ifindex = net_if_get_by_iface(t_iface);
 
     l2_gw->bridge.fd = socket(l2_gw->addr.sll_family, SOCK_RAW, l2_gw->addr.sll_protocol);
 

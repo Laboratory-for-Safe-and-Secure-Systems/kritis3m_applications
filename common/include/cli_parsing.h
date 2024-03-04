@@ -13,6 +13,7 @@
 #include "tls_proxy.h"
 #include "l2_bridge.h"
 #include "l2_gateway.h"
+#include "wolfssl/certs_test.h"
 
 enum application_role
 {

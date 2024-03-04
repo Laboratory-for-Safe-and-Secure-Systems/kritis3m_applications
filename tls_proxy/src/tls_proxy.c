@@ -87,12 +87,13 @@ struct tls_proxy_management_message
 /* File global variables */
 static struct tls_proxy_backend_config proxy_backend;
 static struct proxy_connection proxy_connection_pool[MAX_CONNECTIONS_PER_PROXY];
+
 static struct proxy proxy_pool[MAX_PROXYS];
 
 
 #if defined(__ZEPHYR__)
 #define CONNECTION_HANDLER_STACK_SIZE 32*1024
-#define BACKEND_STACK_SIZE 127*1024
+#define BACKEND_STACK_SIZE 64*1024
 
 Z_KERNEL_STACK_ARRAY_DEFINE_IN(connection_handler_stack_pool, MAX_CONNECTIONS_PER_PROXY, \
 		CONNECTION_HANDLER_STACK_SIZE, __attribute__((section(CONFIG_RAM_SECTION_STACKS_1))));
@@ -595,13 +596,11 @@ void* tls_proxy_main_thread(void* ptr)
 	 				 * respective socket to the poll_set. */
 					if (proxy_connection->direction == REVERSE_PROXY)
 					{
-						ret = poll_set_add_fd(&config->poll_set, proxy_connection->listening_peer_sock,
-								      POLLIN);
+						ret = poll_set_add_fd(&config->poll_set, proxy_connection->listening_peer_sock, POLLIN);
 					}
 					else if (proxy_connection->direction == FORWARD_PROXY)
 					{
-						ret = poll_set_add_fd(&config->poll_set, proxy_connection->target_peer_sock,
-								      POLLOUT | POLLERR | POLLHUP);
+						ret = poll_set_add_fd(&config->poll_set, proxy_connection->target_peer_sock, POLLOUT | POLLERR | POLLHUP);
 					}
 					if (ret != 0)
 					{
@@ -632,17 +631,11 @@ void* tls_proxy_main_thread(void* ptr)
 						/* Handshake done, remove respective socket from the poll_set */
 						poll_set_remove_fd(&config->poll_set, fd);
 
-						/* Get handshake metrics (only for reverse proxys, as the metrics are not correct
-						 * on the TLS client endpoint). */
-						if (proxy_connection->direction == REVERSE_PROXY)
-						{
-							tls_handshake_metrics metrics; 
-							metrics = wolfssl_get_handshake_metrics(proxy_connection->tls_session);
+						/* Get handshake metrics */
+						tls_handshake_metrics metrics = wolfssl_get_handshake_metrics(proxy_connection->tls_session);
 
-							LOG_INF("Handshake done\r\n\tDuration: %.3f milliseconds\r\n\tTx bytes: "\
-								"%d\r\n\tRx bytes: %d", metrics.duration_us / 1000.0,
-								metrics.txBytes, metrics.rxBytes);
-						}
+						LOG_INF("Handshake done\r\n\tDuration: %.3f milliseconds\r\n\tTx bytes: %d\r\n\tRx bytes: %d",
+							metrics.duration_us / 1000.0, metrics.txBytes, metrics.rxBytes);
 
 						/* Start thread for connection handling */
 						ret = pthread_create(&proxy_connection->thread,
@@ -687,7 +680,6 @@ void* tls_proxy_main_thread(void* ptr)
 
 	return NULL;
 }
-
 
 static void* connection_handler_thread(void *ptr)
 {
@@ -752,7 +744,7 @@ static void* connection_handler_thread(void *ptr)
 						if ((ret == -1) && ((errno == EAGAIN) || (errno == EWOULDBLOCK)))
 						{	
 							/* We have to wait for the socket to be writable */
-							poll_set_update_events(&poll_set, fd, POLLOUT);
+							poll_set_update_events(&poll_set, destination_fd, POLLOUT);
 							ret = 0;
 						}
 					}
@@ -889,6 +881,15 @@ static void* connection_handler_thread(void *ptr)
 /* Start a new thread and run the main TLS proxy backend.
  * 
  * Returns 0 on success, -1 on failure (error message is printed to console).
+ */
+/**
+ * @brief Initializes the TLS proxy backend and starts the main thread.
+ *
+ * This function initializes the connection pool, server pool, and app config
+ * for the TLS proxy backend. It also creates a socket pair for external management
+ * and starts the main thread for the TLS proxy.
+ *
+ * @return 0 on success, -1 on failure.
  */
 int tls_proxy_backend_run(void)
 {

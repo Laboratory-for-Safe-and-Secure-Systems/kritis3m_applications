@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <sys/socket.h>
-
+#include <unistd.h>
 #include "logging.h"
 #include "networking.h"
 
@@ -15,6 +15,7 @@
 #include "wolfssl/wolfcrypt/asn.h"
 #include "wolfssl/wolfcrypt/wc_pkcs11.h"
 #include "wolfssl/error-ssl.h"
+#include "wolfssl/certs_test.h"
 
 LOG_MODULE_REGISTER(wolfssl);
 
@@ -52,6 +53,14 @@ struct wolfssl_session
 		uint32_t txBytes;
 		uint32_t rxBytes;
 	} handshake_metrics_priv;
+
+	struct sockaddr_in cliAddr; /* server sockaddr */
+	socklen_t cliSz;			/* length of servAddr */
+
+	struct sockaddr_in servAddr; /* server sockaddr */
+	socklen_t servSz;			 /* length of servAddr */
+	byte rxBuf[1600];
+	word32 rxSz;
 };
 
 /* PKCS#11 */
@@ -70,6 +79,12 @@ static pkcs11_secure_element pkcs11_secure_element_instance;
 static int errorOccured(int32_t ret);
 static int wolfssl_read_callback(WOLFSSL *session, char *buffer, int size, void *ctx);
 static int wolfssl_write_callback(WOLFSSL *session, char *buffer, int size, void *ctx);
+
+static int wolfssl_read_client_dtls_callback(WOLFSSL *session, char *buffer, int size, void *ctx);
+static int wolfssl_write_client_dtls_callback(WOLFSSL *session, char *buffer, int size, void *ctx);
+
+static int wolfssl_read_dtls_callback(WOLFSSL *session, char *buffer, int size, void *ctx);
+static int wolfssl_write_dtls_callback(WOLFSSL *session, char *buffer, int size, void *ctx);
 static void wolfssl_logging_callback(int level, const char *str);
 static int wolfssl_import_pem_key_into_secure_element(uint8_t const *pem_buffer,
 													  uint32_t pem_size, uint8_t const *id, int len);
@@ -93,11 +108,206 @@ static int errorOccured(int32_t ret)
 	return 0;
 }
 
+static int wolfssl_read_client_dtls_callback(WOLFSSL *wolfssl, char *buffer, int size, void *ctx)
+{
+	wolfssl_session *session = (wolfssl_session *)ctx;
+	int fd = wolfSSL_get_fd(wolfssl);
+	int recvd;
+	struct sockaddr addr;
+	socklen_t addrSz = sizeof(addr);
+
+	LOG_INF("my_IORecv fd %d, buf %d\n", fd, size);
+
+	/* Receive datagram */
+	recvd = recvfrom(fd, buffer, size, 0, &addr, &addrSz);
+	if (recvd == -1)
+	{
+		/* error encountered. Be responsible and report it in wolfSSL terms */
+
+		LOG_ERR("IO RECEIVE ERROR: %d\n", errno);
+		switch (errno)
+		{
+#if EAGAIN != EWOULDBLOCK
+		case EAGAIN: /* EAGAIN == EWOULDBLOCK on some systems, but not others */
+#endif
+		case EWOULDBLOCK:
+			if (!wolfSSL_dtls(wolfssl) || wolfSSL_get_using_nonblock(wolfssl))
+			{
+				LOG_ERR("would block\n");
+				return WOLFSSL_CBIO_ERR_WANT_READ;
+			}
+			else
+			{
+				LOG_ERR("socket timeout\n");
+				return WOLFSSL_CBIO_ERR_TIMEOUT;
+			}
+		case ECONNRESET:
+			LOG_ERR("connection reset\n");
+			return WOLFSSL_CBIO_ERR_CONN_RST;
+		case EINTR:
+			LOG_ERR("socket interrupted\n");
+			return WOLFSSL_CBIO_ERR_GENERAL;
+			/* NOTE: Don't return WOLFSSL_CBIO_ERR_ISR. It keeps trying to recv */
+		case ECONNREFUSED:
+			LOG_ERR("connection refused\n");
+			return WOLFSSL_CBIO_ERR_WANT_READ;
+		case ECONNABORTED:
+			LOG_ERR("connection aborted\n");
+			return WOLFSSL_CBIO_ERR_CONN_CLOSE;
+		default:
+			LOG_ERR("general error\n");
+			return WOLFSSL_CBIO_ERR_GENERAL;
+		}
+	}
+	else if (recvd == 0)
+	{
+		LOG_INF("Connection closed\n");
+		return WOLFSSL_CBIO_ERR_CONN_CLOSE;
+	}
+
+	/* successful receive */
+	LOG_INF("my_IORecv: received %d bytes from %d\n", recvd, fd);
+	return recvd;
+}
+static int wolfssl_write_client_dtls_callback(WOLFSSL *wolfssl, char *buffer, int size, void *ctx)
+{
+	wolfssl_session *session = (wolfssl_session *)ctx;
+	int fd = wolfSSL_get_fd(wolfssl);
+	int sent;
+	const struct sockaddr *addr = NULL;
+	socklen_t addrSz = 0;
+
+	if (session)
+	{
+		addr = (const struct sockaddr *)&session->servAddr;
+		addrSz = session->servSz;
+	}
+
+	LOG_INF("my_IOSend fd %d, buf %d\n", fd, size);
+
+	/* Send datagram */
+	sent = sendto(fd, buffer, size, 0, addr, addrSz);
+	if (sent == -1)
+	{
+		/* error encountered. Be responsible and report it in wolfSSL terms */
+
+		LOG_INF("IO SEND ERROR: %d\n", errno);
+		switch (errno)
+		{
+#if EAGAIN != EWOULDBLOCK
+		case EAGAIN: /* EAGAIN == EWOULDBLOCK on some systems, but not others */
+#endif
+		case EWOULDBLOCK:
+			LOG_ERR("would block\n");
+			return WOLFSSL_CBIO_ERR_WANT_READ;
+		case ECONNRESET:
+			LOG_ERR("connection reset\n");
+			return WOLFSSL_CBIO_ERR_CONN_RST;
+		case EINTR:
+			LOG_ERR("socket interrupted\n");
+			return WOLFSSL_CBIO_ERR_GENERAL;
+			/* NOTE: Don't return WOLFSSL_CBIO_ERR_ISR. It keeps trying to send */
+		case EPIPE:
+			LOG_ERR("socket EPIPE\n");
+			return WOLFSSL_CBIO_ERR_CONN_CLOSE;
+		default:
+			LOG_ERR("general error\n");
+			return WOLFSSL_CBIO_ERR_GENERAL;
+		}
+	}
+	else if (sent == 0)
+	{
+		LOG_INF("Connection closed\n");
+		return 0;
+	}
+
+	/* successful send */
+	LOG_INF("my_IOSend: sent %d bytes to %d\n", sent, fd);
+	return sent;
+}
+
+static int wolfssl_read_dtls_callback(WOLFSSL *wolfssl, char *buffer, int size, void *ctx)
+{
+	int socket = wolfSSL_get_fd(wolfssl);
+	wolfssl_session *session = (wolfssl_session *)ctx;
+	// memset(&session->cliAddr, 0, sizeof(session->cliAddr));
+	int ret = -1;
+
+	// first rx from recv from
+	if (session->rxSz > 0)
+	{
+		ret = session->rxSz;
+		if (ret > size)
+			ret = size;
+		memcpy(buffer, session->rxBuf, ret);
+		session->rxSz -= ret;
+		memcpy(session->rxBuf, &session->rxBuf[ret], session->rxSz);
+	}
+	else
+	{
+		ret = recvfrom(socket, buffer, size, 0, (struct sockaddr *)&session->cliAddr, &session->cliSz);
+	}
+	if (ret == 0)
+	{
+		return WOLFSSL_CBIO_ERR_CONN_CLOSE;
+	}
+	else if (ret < 0)
+	{
+		int error = errno;
+		// LOG_WRN("recv error: %d", error);
+		if ((error == EAGAIN) || (error == EWOULDBLOCK))
+			return WOLFSSL_CBIO_ERR_WANT_READ;
+		else
+			return WOLFSSL_CBIO_ERR_GENERAL;
+	}
+
+	/* Update handshake metrics */
+	if (session != NULL && session->state == CONNECTION_STATE_HANDSHAKE)
+	{
+		session->handshake_metrics_priv.rxBytes += ret;
+	}
+
+	return ret;
+}
+static int wolfssl_write_dtls_callback(WOLFSSL *wolfssl, char *buffer, int size, void *ctx)
+{
+
+	int socket = wolfSSL_get_fd(wolfssl);
+	wolfssl_session *session = (wolfssl_session *)ctx;
+	const struct sockaddr *addr = NULL;
+	socklen_t addrSz = 0;
+
+	if (session)
+	{
+		addr = (const struct sockaddr *)&session->cliAddr;
+		addrSz = session->cliSz;
+	}
+
+	int ret = sendto(socket, buffer, size, 0, addr, addrSz);
+
+	if (ret < 0)
+	{
+		int error = errno;
+		// LOG_WRN("send error: %d", error);
+		if ((error == EAGAIN) || (error == EWOULDBLOCK))
+			return WOLFSSL_CBIO_ERR_WANT_WRITE;
+		else
+			return WOLFSSL_CBIO_ERR_GENERAL;
+	}
+
+	/* Update handshake metrics */
+	if (session != NULL && session->state == CONNECTION_STATE_HANDSHAKE)
+	{
+		session->handshake_metrics_priv.txBytes += ret;
+	}
+
+	return ret;
+}
+
 static int wolfssl_read_callback(WOLFSSL *wolfssl, char *buffer, int size, void *ctx)
 {
 	int socket = wolfSSL_get_fd(wolfssl);
 	wolfssl_session *session = (wolfssl_session *)ctx;
-
 	int ret = recv(socket, buffer, size, 0);
 
 	if (ret == 0)
@@ -362,12 +572,15 @@ int wolfssl_init(struct wolfssl_library_configuration const *config)
 static int wolfssl_configure_dtls_context(WOLFSSL_CTX *context,
 										  wolfssl_endpoint_configuration const *config)
 {
+	int ret = wolfSSL_CTX_SetMinVersion(context, WOLFSSL_DTLSV1_3);
+	if (errorOccured(ret))
+		return -1;
 
 	/* Load root certificate */
-	int ret = wolfSSL_CTX_load_verify_buffer(context,
-											 config->root_certificate.buffer,
-											 config->root_certificate.size,
-											 WOLFSSL_FILETYPE_PEM);
+	ret = wolfSSL_CTX_load_verify_buffer(context,
+										 config->root_certificate.buffer,
+										 config->root_certificate.size,
+										 WOLFSSL_FILETYPE_PEM);
 	if (errorOccured(ret))
 		return -1;
 
@@ -389,29 +602,8 @@ static int wolfssl_configure_dtls_context(WOLFSSL_CTX *context,
 												config->private_key.buffer,
 												config->private_key.size,
 												WOLFSSL_FILETYPE_PEM);
-
-		bool privateKeyLoaded = false;
-		/* Load the additional private key from the buffer */
-		if (config->private_key.additional_key_buffer != NULL)
-		{
-			if (errorOccured(ret))
-				return -1;
-			ret = wolfSSL_CTX_use_AltPrivateKey_buffer(context,
-													   config->private_key.additional_key_buffer,
-													   config->private_key.additional_key_size,
-													   WOLFSSL_FILETYPE_PEM);
-		}
-
-		privateKeyLoaded = true;
 	}
-
-	if (errorOccured(ret))
-		return -1;
-
-	/* Set the IO callbacks for send and receive */
-	wolfSSL_CTX_SetIORecv(context, wolfssl_read_callback);
-	wolfSSL_CTX_SetIOSend(context, wolfssl_write_callback);
-	return 0;
+	return ret;
 }
 
 /* Configure the new context.
@@ -443,11 +635,11 @@ static int wolfssl_configure_context(WOLFSSL_CTX *context, struct wolfssl_endpoi
 		if (errorOccured(ret))
 			return -1;
 	}
-
 	/* Load the private key */
 	bool privateKeyLoaded = false;
 	if (pkcs11_secure_element_instance.initialized == true)
 	{
+#ifdef HAVE_LIBOQS
 		// wolfSSL_CTX_SetDevId(context, secure_element_device_id());
 
 		/* Import private key into secure element if present */
@@ -494,6 +686,7 @@ static int wolfssl_configure_context(WOLFSSL_CTX *context, struct wolfssl_endpoi
 		}
 
 		privateKeyLoaded = true;
+#endif
 	}
 	else if (config->private_key.buffer != NULL)
 	{
@@ -506,6 +699,7 @@ static int wolfssl_configure_context(WOLFSSL_CTX *context, struct wolfssl_endpoi
 		/* Load the additional private key from the buffer */
 		if (config->private_key.additional_key_buffer != NULL)
 		{
+#ifdef WOLFSSL_DUAL_ALG_CERTS
 			if (errorOccured(ret))
 				return -1;
 
@@ -513,6 +707,7 @@ static int wolfssl_configure_context(WOLFSSL_CTX *context, struct wolfssl_endpoi
 													   config->private_key.additional_key_buffer,
 													   config->private_key.additional_key_size,
 													   WOLFSSL_FILETYPE_PEM);
+#endif
 		}
 
 		privateKeyLoaded = true;
@@ -522,12 +717,12 @@ static int wolfssl_configure_context(WOLFSSL_CTX *context, struct wolfssl_endpoi
 		return -1;
 
 	/* Check if the private key and the device certificate match */
-	// if (privateKeyLoaded == true)
-	// {
-	// 	ret = wolfSSL_CTX_check_private_key(context);
-	// 	if (errorOccured(ret))
-	// 		return -1;
-	// }
+	if (privateKeyLoaded == true)
+	{
+		ret = wolfSSL_CTX_check_private_key(context);
+		if (errorOccured(ret))
+			return -1;
+	}
 
 	/* Configure the available cipher suites for TLS 1.3
 	 * We only support AES GCM with 256 bit key length and the
@@ -536,7 +731,7 @@ static int wolfssl_configure_context(WOLFSSL_CTX *context, struct wolfssl_endpoi
 	ret = wolfSSL_CTX_set_cipher_list(context, "TLS13-AES256-GCM-SHA384:TLS13-SHA384-SHA384");
 	if (errorOccured(ret))
 		return -1;
-
+#ifdef HAVE_LIBOQS
 	/* Configure the available curves for Key Exchange */
 	int wolfssl_key_exchange_curves[] = {
 		// WOLFSSL_KYBER_LEVEL1,
@@ -550,6 +745,8 @@ static int wolfssl_configure_context(WOLFSSL_CTX *context, struct wolfssl_endpoi
 								 sizeof(wolfssl_key_exchange_curves) / sizeof(int));
 	if (errorOccured(ret))
 		return -1;
+#endif
+#ifdef WOLFSSL_DUAL_ALG_CERTS
 
 	/* Set the preference for verfication of hybrid signatures to be for both the
 	 * native and alternative chains.
@@ -563,6 +760,8 @@ static int wolfssl_configure_context(WOLFSSL_CTX *context, struct wolfssl_endpoi
 	ret = wolfSSL_CTX_UseCKS(context, cks_order, sizeof(cks_order));
 	if (errorOccured(ret))
 		return -1;
+
+#endif
 
 	/* Set the IO callbacks for send and receive */
 	wolfSSL_CTX_SetIORecv(context, wolfssl_read_callback);
@@ -593,7 +792,7 @@ wolfssl_endpoint *wolfssl_setup_dtls_server_endpoint(wolfssl_endpoint_configurat
 		LOG_ERR("Configuration is NULL");
 		return NULL;
 	}
-
+	int ret = 0;
 	/* Create a new endpoint object */
 	wolfssl_endpoint *new_endpoint = malloc(sizeof(wolfssl_endpoint));
 	if (new_endpoint == NULL)
@@ -612,7 +811,7 @@ wolfssl_endpoint *wolfssl_setup_dtls_server_endpoint(wolfssl_endpoint_configurat
 	}
 
 	/* Configure the new context */
-	int ret = wolfssl_configure_dtls_context(new_endpoint->context, config);
+	ret = wolfssl_configure_dtls_context(new_endpoint->context, config);
 	if (ret == -1)
 	{
 		LOG_ERR("Failed to configure new DTLS server context\r\n");
@@ -620,6 +819,9 @@ wolfssl_endpoint *wolfssl_setup_dtls_server_endpoint(wolfssl_endpoint_configurat
 		free(new_endpoint);
 		return NULL;
 	}
+	/* Set the IO callbacks for send and receive */
+	wolfSSL_CTX_SetIORecv(new_endpoint->context, wolfssl_read_dtls_callback);
+	wolfSSL_CTX_SetIOSend(new_endpoint->context, wolfssl_write_dtls_callback);
 
 	return new_endpoint;
 }
@@ -704,6 +906,9 @@ wolfssl_endpoint *wolfssl_setup_dtls_client_endpoint(wolfssl_endpoint_configurat
 		return NULL;
 	}
 
+	/* Set the IO callbacks for send and receive */
+	wolfSSL_CTX_SetIORecv(new_endpoint->context, wolfssl_read_client_dtls_callback);
+	wolfSSL_CTX_SetIOSend(new_endpoint->context, wolfssl_write_client_dtls_callback);
 	return new_endpoint;
 }
 
@@ -752,38 +957,54 @@ wolfssl_endpoint *wolfssl_setup_client_endpoint(wolfssl_endpoint_configuration c
 	return new_endpoint;
 }
 
-int wolfssl_dtls_client_handshake(wolfssl_session *session, struct sockaddr_in* servAddr)
+int wolfssl_dtls_client_handshake(wolfssl_session *session, struct sockaddr_in *servAddr)
 {
-	int ret= 0;
-    if (wolfSSL_dtls_set_peer(session->session, &servAddr, sizeof(servAddr))
-            != WOLFSSL_SUCCESS) {
-				LOG_ERR("wolfSSL_dtls_set_peer failed\n");
-    }
+	session->servSz = sizeof(struct sockaddr_in);
+	memcpy(&session->servAddr, servAddr, session->servSz);
+	int ret = 0;
+	if (wolfSSL_dtls_set_peer(session->session, &servAddr, sizeof(servAddr)) != WOLFSSL_SUCCESS)
+	{
+		LOG_ERR("wolfSSL_dtls_set_peer failed\n");
+	}
 
-    /* Perform SSL connection */
-    if (wolfSSL_connect(session->session) != SSL_SUCCESS) {
-        ret = wolfSSL_get_error(session->session, 0);
+	/* Perform SSL connection */
+	ret = wolfSSL_connect(session->session);
+	if (ret != SSL_SUCCESS)
+	{
+		ret = wolfSSL_get_error(session->session, 0);
 		LOG_ERR("wolfSSL_connect failed: %d", ret);
-    }
+		ret = -1;
+	}
 
 	return ret;
 }
 
-
-
-int wolfssl_dtls_server_handshake(wolfssl_session *session, struct sockaddr_in* servAddr)
+int wolfssl_dtls_server_handshake(wolfssl_session *session, struct sockaddr_in *servAddr)
 {
-	int ret= 0;
-    if (wolfSSL_dtls_set_peer(session->session, &servAddr, sizeof(servAddr))
-            != WOLFSSL_SUCCESS) {
-				LOG_ERR("wolfSSL_dtls_set_peer failed\n");
-    }
+	int ret = 0;
+	int fd = wolfSSL_get_fd(session->session);
+	ret = (int)recvfrom(fd,
+						(char *)session->rxBuf,
+						sizeof(session->rxBuf),
+						0,
+						(struct sockaddr *)&session->cliAddr,
+						&session->cliSz);
+	if (ret > 0)
+	{
+		session->rxSz = ret;
+		LOG_INF("connected");
+	}
+	else
+	{
+		LOG_ERR("Recvfrom failed: %d", ret);
+	}
 
-    /* Perform SSL connection */
-    if (wolfSSL_accept(session->session) != SSL_SUCCESS) {
-        ret = wolfSSL_get_error(session->session, 0);
+	/* Perform SSL connection */
+	if (wolfSSL_accept(session->session) != SSL_SUCCESS)
+	{
+		ret = wolfSSL_get_error(session->session, 0);
 		LOG_ERR("wolfSSL_connect failed: %d", ret);
-    }
+	}
 
 	return ret;
 }
@@ -811,6 +1032,8 @@ wolfssl_session *wolfssl_create_session(wolfssl_endpoint *endpoint, int socket_f
 		LOG_ERR("Unable to allocate memory for new WolfSSL session");
 		return NULL;
 	}
+	memset(&new_session->cliAddr, 0, sizeof(new_session->cliAddr));
+	new_session->cliSz = sizeof(new_session->cliAddr);
 
 	/* Create a new TLS session */
 	new_session->session = wolfSSL_new(endpoint->context);
@@ -828,7 +1051,8 @@ wolfssl_session *wolfssl_create_session(wolfssl_endpoint *endpoint, int socket_f
 
 	/* Store the socket fd */
 	int ret = wolfSSL_set_fd(new_session->session, socket_fd);
-	if (ret< 0){
+	if (ret < 0)
+	{
 		LOG_ERR("Unable to set the socket fd for the WolfSSL session");
 		return NULL;
 	}

@@ -39,6 +39,7 @@ typedef struct l2_gateway
 	pthread_attr_t thread_attr;
 	L2_Gateway *asset;
 	L2_Gateway *tunnel;
+	l2_gateway_configg config;
 } l2_gateway;
 
 static l2_gateway theBridge = {
@@ -60,8 +61,6 @@ Z_KERNEL_STACK_DEFINE_IN(l2_gateway_stack, STACK_SIZE,
 
 void reset_l2_gateway()
 {
-	pthread_attr_init(&theBridge.thread_attr);
-	pthread_attr_setdetachstate(&theBridge.thread_attr, PTHREAD_CREATE_DETACHED);
 	poll_set_init(&theBridge.poll_set);
 	if (theBridge.asset != NULL)
 	{
@@ -135,24 +134,24 @@ int configure_interfaces(l2_gateway_configg const *config)
 #endif
 
 #else
-	if (config->asset_type == PACKET_SOCKET)
-	{
-		ret = set_promiscous_mode(network_interfaces()->asset, true);
-		if (ret < 0)
-		{
-			LOG_ERR("Cannot set promiscuous mode for asset: error %d", ret);
-			return ret;
-		}
-	}
-	if (config->tunnel_type == PACKET_SOCKET)
-	{
-		ret = set_promiscous_mode(network_interfaces()->tunnel, true);
-		if (ret < 0)
-		{
-			LOG_ERR("Cannot set promiscuous mode for tunnel: error %d", ret);
-			return ret;
-		}
-	}
+	// if (config->asset_type == PACKET_SOCKET)
+	// {
+	// 	ret = set_promiscous_mode(network_interfaces()->asset, true);
+	// 	if (ret < 0)
+	// 	{
+	// 		LOG_ERR("Cannot set promiscuous mode for asset: error %d", ret);
+	// 		return ret;
+	// 	}
+	// }
+	// if (config->tunnel_type == PACKET_SOCKET)
+	// {
+	// 	ret = set_promiscous_mode(network_interfaces()->tunnel, true);
+	// 	if (ret < 0)
+	// 	{
+	// 		LOG_ERR("Cannot set promiscuous mode for tunnel: error %d", ret);
+	// 		return ret;
+	// 	}
+	// }
 #endif
 
 	return ret;
@@ -160,105 +159,8 @@ int configure_interfaces(l2_gateway_configg const *config)
 
 int l2_gateway_start(l2_gateway_configg const *config)
 {
-	int ret = -1;
-	reset_l2_gateway();
-	ret = configure_interfaces(config);
-	L2_Gateway *asset = NULL;
-	L2_Gateway *tunnel = NULL;
-
-	switch (config->asset_type)
-	{
-	case PACKET_SOCKET:
-		asset = (L2_Gateway *)((PacketSocket *)malloc(sizeof(PacketSocket)));
-		memset(asset, 0, sizeof(PacketSocket));
-		ret = init_packet_socket_gateway((PacketSocket *)asset, config, ASSET);
-		if (ret < 0)
-		{
-			LOG_ERR("Failed to initialize packet socket gateway");
-			return -1;
-		}
-		break;
-	case DTLS_SERVER_SOCKET:
-		asset = (L2_Gateway *)((DtlsSocket *)malloc(sizeof(DtlsSocket)));
-		memset((DtlsSocket*)asset, 0, sizeof(DtlsSocket));
-
-		ret = init_dtls_server_socket_gateway((DtlsSocket *)asset, config, ASSET);
-		if (ret < 0)
-		{
-			LOG_ERR("Failed to initialize dtls server socket gateway");
-			return -1;
-		}
-		break;
-	case DTLS_CLIENT_SOCKET:
-		asset = (L2_Gateway *)((DtlsSocket *)malloc(sizeof(DtlsSocket)));
-		memset((DtlsSocket*)asset, 0, sizeof(DtlsSocket));
-		ret = init_dtls_client_socket_gateway((DtlsSocket *)asset, config, ASSET);
-		if (ret < 0)
-		{
-			LOG_ERR("Failed to initialize dtls client socket gateway");
-			return -1;
-		}
-		break;
-	case UDP_SOCKET:
-		LOG_INF("Not implemented yet");
-		break;
-	case TUN_INTERFACE:
-		LOG_INF("Not implemented yet");
-		break;
-	}
-
-	switch (config->tunnel_type)
-	{
-	case PACKET_SOCKET:
-		tunnel = (L2_Gateway *)((PacketSocket *)malloc(sizeof(PacketSocket)));
-		memset((PacketSocket*)tunnel, 0, sizeof(PacketSocket));
-		init_packet_socket_gateway((PacketSocket *)tunnel, config, TUNNEL);
-		break;
-	case DTLS_SERVER_SOCKET:
-		tunnel = (L2_Gateway *)((DtlsSocket *)malloc(sizeof(DtlsSocket)));
-		memset((DtlsSocket *)tunnel, 0, sizeof(DtlsSocket));
-		ret = init_dtls_server_socket_gateway((DtlsSocket *)tunnel, config, TUNNEL);
-		// ret = init_dt((PacketSocket*)tunnel ,config,TUNNEL);
-
-		break;
-	case DTLS_CLIENT_SOCKET:
-		tunnel = (L2_Gateway *)((DtlsSocket *)malloc(sizeof(DtlsSocket)));
-		memset((DtlsSocket *)tunnel, 0, sizeof(DtlsSocket));
-		ret = init_dtls_client_socket_gateway((DtlsSocket *)tunnel, config, TUNNEL);
-		break;
-	case UDP_SOCKET:
-		LOG_ERR("UDP_SOCKET not implemented yet");
-		break;
-	case TUN_INTERFACE:
-		LOG_INF("Not implemented yet");
-		break;
-	}
-	theBridge.asset = asset;
-	theBridge.tunnel = tunnel;
-	marry_bridges(theBridge.asset, theBridge.tunnel);
-
-	/* Set the new sockets to non-blocking */
-	setblocking(theBridge.asset->fd, false);
-	setblocking(theBridge.tunnel->fd, false);
-
-	/* Add sockets to the poll_set */
-	ret = poll_set_add_fd(&theBridge.poll_set, theBridge.asset->fd, POLLIN);
-	if (ret != 0)
-	{
-		LOG_ERR("Error adding ASSET socket to poll_set");
-		l2_gateway_close(theBridge.asset);
-		l2_gateway_close(theBridge.tunnel);
-		return -1;
-	}
-	ret = poll_set_add_fd(&theBridge.poll_set, theBridge.tunnel->fd, POLLIN);
-	if (ret != 0)
-	{
-		LOG_ERR("Error adding TUNNEL socket to poll_set");
-		l2_gateway_close(theBridge.asset);
-		l2_gateway_close(theBridge.tunnel);
-		return -1;
-	}
-
+	int ret;
+	theBridge.config = *config;
 	/* Init main backend */
 	pthread_attr_init(&theBridge.thread_attr);
 	pthread_attr_setdetachstate(&theBridge.thread_attr, PTHREAD_CREATE_DETACHED);
@@ -267,7 +169,6 @@ int l2_gateway_start(l2_gateway_configg const *config)
 	/* We have to properly set the attributes with the stack to use for Zephyr. */
 	pthread_attr_setstack(&theBridge.thread_attr, l2_gateway_stack, K_THREAD_STACK_SIZEOF(l2_gateway_stack));
 #endif
-
 	/* Create the new thread */
 	ret = pthread_create(&theBridge.thread, &theBridge.thread_attr, l2_gateway_main_thread, &theBridge);
 	if (ret == 0)
@@ -322,9 +223,107 @@ L2_Gateway *find_bridge_by_fd(int fd)
 
 static void *l2_gateway_main_thread(void *ptr)
 {
-	l2_gateway
-		*l2_gw_container = (l2_gateway
-								*)ptr;
+	l2_gateway *l2_gw_container = (l2_gateway *)ptr;
+	const l2_gateway_configg *config = &l2_gw_container->config;
+
+	int ret = -1;
+	reset_l2_gateway();
+	ret = configure_interfaces(config);
+	L2_Gateway *asset = NULL;
+	L2_Gateway *tunnel = NULL;
+
+	switch (config->asset_type)
+	{
+	case PACKET_SOCKET:
+		asset = (L2_Gateway *)((PacketSocket *)malloc(sizeof(PacketSocket)));
+		memset(asset, 0, sizeof(PacketSocket));
+		ret = init_packet_socket_gateway((PacketSocket *)asset, config, ASSET);
+		if (ret < 0)
+		{
+			LOG_ERR("Failed to initialize packet socket gateway");
+			return -1;
+		}
+		break;
+	case DTLS_SERVER_SOCKET:
+		asset = (L2_Gateway *)((DtlsSocket *)malloc(sizeof(DtlsSocket)));
+		memset((DtlsSocket *)asset, 0, sizeof(DtlsSocket));
+
+		ret = init_dtls_server_socket_gateway((DtlsSocket *)asset, config, ASSET);
+		if (ret < 0)
+		{
+			LOG_ERR("Failed to initialize dtls server socket gateway");
+			return -1;
+		}
+		break;
+	case DTLS_CLIENT_SOCKET:
+		asset = (L2_Gateway *)((DtlsSocket *)malloc(sizeof(DtlsSocket)));
+		memset((DtlsSocket *)asset, 0, sizeof(DtlsSocket));
+		ret = init_dtls_client_socket_gateway((DtlsSocket *)asset, config, ASSET);
+		if (ret < 0)
+		{
+			LOG_ERR("Failed to initialize dtls client socket gateway");
+			return -1;
+		}
+		break;
+	case UDP_SOCKET:
+		LOG_INF("Not implemented yet");
+		break;
+	case TUN_INTERFACE:
+		LOG_INF("Not implemented yet");
+		break;
+	}
+
+	switch (config->tunnel_type)
+	{
+	case PACKET_SOCKET:
+		tunnel = (L2_Gateway *)((PacketSocket *)malloc(sizeof(PacketSocket)));
+		memset((PacketSocket *)tunnel, 0, sizeof(PacketSocket));
+		init_packet_socket_gateway((PacketSocket *)tunnel, config, TUNNEL);
+		break;
+	case DTLS_SERVER_SOCKET:
+		tunnel = (L2_Gateway *)((DtlsSocket *)malloc(sizeof(DtlsSocket)));
+		memset((DtlsSocket *)tunnel, 0, sizeof(DtlsSocket));
+		ret = init_dtls_server_socket_gateway((DtlsSocket *)tunnel, config, TUNNEL);
+		// ret = init_dt((PacketSocket*)tunnel ,config,TUNNEL);
+
+		break;
+	case DTLS_CLIENT_SOCKET:
+		tunnel = (L2_Gateway *)((DtlsSocket *)malloc(sizeof(DtlsSocket)));
+		memset((DtlsSocket *)tunnel, 0, sizeof(DtlsSocket));
+		ret = init_dtls_client_socket_gateway((DtlsSocket *)tunnel, config, TUNNEL);
+		break;
+	case UDP_SOCKET:
+		LOG_ERR("UDP_SOCKET not implemented yet");
+		break;
+	case TUN_INTERFACE:
+		LOG_INF("Not implemented yet");
+		break;
+	}
+	theBridge.asset = asset;
+	theBridge.tunnel = tunnel;
+	marry_bridges(theBridge.asset, theBridge.tunnel);
+
+	/* Set the new sockets to non-blocking */
+	setblocking(theBridge.asset->fd, false);
+	setblocking(theBridge.tunnel->fd, false);
+
+	/* Add sockets to the poll_set */
+	ret = poll_set_add_fd(&theBridge.poll_set, theBridge.asset->fd, POLLIN);
+	if (ret != 0)
+	{
+		LOG_ERR("Error adding ASSET socket to poll_set");
+		l2_gateway_close(theBridge.asset);
+		l2_gateway_close(theBridge.tunnel);
+		return -1;
+	}
+	ret = poll_set_add_fd(&theBridge.poll_set, theBridge.tunnel->fd, POLLIN);
+	if (ret != 0)
+	{
+		LOG_ERR("Error adding TUNNEL socket to poll_set");
+		l2_gateway_close(theBridge.asset);
+		l2_gateway_close(theBridge.tunnel);
+		return -1;
+	}
 
 	while (1)
 	{

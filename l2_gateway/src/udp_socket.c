@@ -3,12 +3,10 @@
 
 #include "l2_util.h"
 
-#include <zephyr/kernel.h>
 #include <unistd.h> // Include the necessary header file for the 'close' function
 #include <sys/socket.h>
 #include <errno.h>
 #include "networking.h"
-#include <zephyr/net/ethernet.h>
 #include "logging.h"
 
 LOG_MODULE_REGISTER(udp_socket);
@@ -30,15 +28,15 @@ int init_udp_socket_bridge(UdpSocket *bridge, const interface_config *interface,
 
     struct net_if *t_iface = NULL;
 
-    switch (channel)
-    {
-    case ASSET:
-        net_addr_pton(AF_INET, CONFIG_NET_IP_ASSET, &bridge->addr.sin_addr);
-        break;
-    case TUNNEL:
-        net_addr_pton(AF_INET, CONFIG_NET_IP_TUNNEL, &bridge->addr.sin_addr);
-        break;
-    }
+    // switch (channel)
+    // {
+    // case ASSET:
+    //     net_addr_pton(AF_INET, CONFIG_NET_IP_ASSET, &bridge->addr.sin_addr);
+    //     break;
+    // case TUNNEL:
+    //     net_addr_pton(AF_INET, CONFIG_NET_IP_TUNNEL, &bridge->addr.sin_addr);
+    //     break;
+    // }
 
 #if defined(__ZEPHYR__)
     switch (channel)
@@ -60,9 +58,6 @@ int init_udp_socket_bridge(UdpSocket *bridge, const interface_config *interface,
     ioctl(bridge->bridge.fd, SIOCGIFINDEX, &ifr);
     // bridge->addr.sll_ifindex = ifr.ifr_ifindex;
 #endif
-
-    int tag = net_eth_get_vlan_tag(t_iface);
-    bridge->bridge.vlan_tag = tag;
 
     bridge->bridge.fd = socket(bridge->addr.sin_family, SOCK_DGRAM, proto);
 
