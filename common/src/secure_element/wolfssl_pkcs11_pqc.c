@@ -19,7 +19,7 @@ static char additional_private_key_id[] = "ENTITY_ALT_KEY";
 static size_t additional_private_key_id_size = sizeof(additional_private_key_id) - 1;
 
 
-
+#ifdef HAVE_PKCS11
 static dilithium_key* create_dilithium_key_from_buffer(int key_format, uint8_t const* der_buffer,
 						uint32_t der_size, uint8_t const* id, int len);
 static falcon_key* create_falcon_key_from_buffer(int key_format, uint8_t const* der_buffer,
@@ -28,6 +28,7 @@ static RsaKey* create_rsa_key_from_buffer(uint8_t const* der_buffer, uint32_t de
 				   uint8_t const* id, int len);
 static ecc_key* create_ecc_key_from_buffer(uint8_t const* der_buffer, uint32_t der_size,
 				    uint8_t const* id, int len);
+#endif /* HAVE_PKCS11 */
 
 
 /* Get the id of the static private key */
@@ -165,11 +166,20 @@ int pkcs11_import_pem_key(pkcs11_module* module, uint8_t const* pem_buffer, uint
 
 	return ret;
 #else
+	(void)module;
+	(void)pem_buffer;
+	(void)pem_size;
+	(void)id;
+	(void)len;
+
+	LOG_ERR("PKCS#11 support is not enabled");
+
 	return -1;
-#endif
+#endif /* HAVE_PKCS11 */
 }
 
 
+#ifdef HAVE_PKCS11
 /* Fill a new dilithium key with data from the provided DER buffer. The dilithium level is
  * encoded in the key_format parameter. The memory for the key is allocated by this method
  * and must be freed by the caller.
@@ -352,6 +362,7 @@ ecc_key* create_ecc_key_from_buffer(uint8_t const* der_buffer, uint32_t der_size
 
 	return key;
 }
+#endif /* HAVE_PKCS11 */
 
 
 #if defined(__ZEPHYR__) && defined(CONFIG_SECURE_ELEMENT_SUPPORT)

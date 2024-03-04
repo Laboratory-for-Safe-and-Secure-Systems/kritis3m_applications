@@ -401,8 +401,8 @@ static int wolfssl_configure_context(WOLFSSL_CTX* context, struct wolfssl_endpoi
 				ret = pkcs11_import_pem_key(&secure_element,
 							    config->private_key.additional_key_buffer,
 							    config->private_key.additional_key_size,
-							    secure_element_additional_private_key_id(),
-							    secure_element_additional_private_key_id_size());
+							    secure_element_private_key_id(),
+							    secure_element_private_key_id_size());
 				if (ret != 0)
 				{
 					LOG_ERR("Failed to import additional private key into secure element");
@@ -411,23 +411,11 @@ static int wolfssl_configure_context(WOLFSSL_CTX* context, struct wolfssl_endpoi
 			}
 		}
 
-		/* Load the private key from the secure element */
+		/* Use keys on the secure element (this also loads the id for the alt key) */
 		ret = wolfSSL_CTX_use_PrivateKey_Id(context,
 						    secure_element_private_key_id(),
 						    secure_element_private_key_id_size(),
 						    secure_element_device_id());
-
-		if (errorOccured(ret))
-			return -1;
-
-		/* Load the private key from the secure element */
-		if (config->private_key.additional_key_buffer != NULL)
-		{
-			ret = wolfSSL_CTX_use_AltPrivateKey_Id(context,
-						       secure_element_additional_private_key_id(),
-						       secure_element_additional_private_key_id_size(),
-						       secure_element_device_id());
-		}
 
 		privateKeyLoaded = true;
 	}
@@ -465,14 +453,6 @@ static int wolfssl_configure_context(WOLFSSL_CTX* context, struct wolfssl_endpoi
 		if (errorOccured(ret))
 			return -1;
 	}
-
-	/* Configure the available cipher suites for TLS 1.3
-	 * We only support AES GCM with 256 bit key length and the
-	 * integrity only cipher with SHA384.
-	 */
-	ret = wolfSSL_CTX_set_cipher_list(context, "TLS13-AES256-GCM-SHA384:TLS13-SHA384-SHA384");
-	if (errorOccured(ret))
-		return -1;
 
 	/* Configure the available curves for Key Exchange */
 	int wolfssl_key_exchange_curves[] = {
@@ -547,6 +527,20 @@ wolfssl_endpoint* wolfssl_setup_server_endpoint(wolfssl_endpoint_configuration c
 	        return NULL;
         }
 
+	/* Configure the available cipher suites for TLS 1.3
+	 * We only support AES GCM with 256 bit key length and the
+	 * integrity only cipher with SHA384.
+	 */
+	ret = wolfSSL_CTX_set_cipher_list(new_endpoint->context,
+				"TLS13-AES256-GCM-SHA384:TLS13-SHA384-SHA384");
+	if (errorOccured(ret))
+	{
+                LOG_ERR("Failed to set ciphersuites\r\n");
+                wolfSSL_CTX_free(new_endpoint->context);
+		free(new_endpoint);
+	        return NULL;
+        }
+
 	/* Set the preference for verfication of hybrid signatures to be for both the 
 	 * native and alternative chains.
 	 */
@@ -610,6 +604,24 @@ wolfssl_endpoint* wolfssl_setup_client_endpoint(wolfssl_endpoint_configuration c
         if (ret == -1)
         {
                 LOG_ERR("Failed to confiugre new TLS client context\r\n");
+                wolfSSL_CTX_free(new_endpoint->context);
+		free(new_endpoint);
+	        return NULL;
+        }
+
+	/* Configure the available cipher suites for TLS 1.3
+	 * We only support AES GCM with 256 bit key length and the
+	 * integrity only cipher with SHA384.
+	 */
+	char const* cipher_list = "TLS13-AES256-GCM-SHA384";
+	if (config->no_encryption)
+	{
+		cipher_list = "TLS13-SHA384-SHA384";
+	}
+	ret = wolfSSL_CTX_set_cipher_list(new_endpoint->context, cipher_list);
+	if (errorOccured(ret))
+	{
+                LOG_ERR("Failed to set ciphersuites\r\n");
                 wolfSSL_CTX_free(new_endpoint->context);
 		free(new_endpoint);
 	        return NULL;

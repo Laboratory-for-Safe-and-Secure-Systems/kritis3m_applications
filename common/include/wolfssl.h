@@ -103,9 +103,10 @@ tls_handshake_metrics;
 /* Data structure for a PKCS#11 module */
 typedef struct pkcs11_module
 {
+#ifdef HAVE_PKCS11
 	Pkcs11Dev device;
 	Pkcs11Token token;
-	
+#endif
 	bool initialized;
 }
 pkcs11_module;
