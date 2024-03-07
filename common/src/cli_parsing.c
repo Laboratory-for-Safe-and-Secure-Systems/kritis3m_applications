@@ -416,49 +416,27 @@ static int read_certificates(const struct shell *sh, struct certificates* certs,
                 shell_error(sh, "no identity specified");
                 return -1;
         }
-        else if (strcmp(certs->identity, "ecc2") == 0)
+        else if (strcmp(certs->identity, "classic") == 0)
         {
-                certs->chain_buffer = (uint8_t*) ecc2_server_cert_chain;
-                certs->chain_buffer_size = sizeof(ecc2_server_cert_chain);
+                certs->chain_buffer = (uint8_t*) classic_server_cert_chain;
+                certs->chain_buffer_size = sizeof(classic_server_cert_chain);
 
-                certs->key_buffer = (uint8_t*) ecc2_server_privateKey;
-                certs->key_buffer_size = sizeof(ecc2_server_privateKey);
+                certs->key_buffer = (uint8_t*) classic_server_privateKey;
+                certs->key_buffer_size = sizeof(classic_server_privateKey);
 
-                certs->root_buffer = (uint8_t*) ecc2_root_cert;
-                certs->root_buffer_size = sizeof(ecc2_root_cert);
+                certs->root_buffer = (uint8_t*) classic_root_cert;
+                certs->root_buffer_size = sizeof(classic_root_cert);
         }
-        else if (strcmp(certs->identity, "ecc3") == 0)
+        else if (strcmp(certs->identity, "pqc") == 0)
         {
-                certs->chain_buffer = (uint8_t*) ecc3_server_cert_chain;
-                certs->chain_buffer_size = sizeof(ecc3_server_cert_chain);
+                certs->chain_buffer = (uint8_t*) pqc_server_cert_chain;
+                certs->chain_buffer_size = sizeof(pqc_server_cert_chain);
 
-                certs->key_buffer = (uint8_t*) ecc3_server_privateKey;
-                certs->key_buffer_size = sizeof(ecc3_server_privateKey);
+                certs->key_buffer = (uint8_t*) pqc_server_privateKey;
+                certs->key_buffer_size = sizeof(pqc_server_privateKey);
 
-                certs->root_buffer = (uint8_t*) ecc3_root_cert;
-                certs->root_buffer_size = sizeof(ecc3_root_cert);
-        }
-        else if (strcmp(certs->identity, "dil2") == 0)
-        {
-                certs->chain_buffer = (uint8_t*) dil2_server_cert_chain;
-                certs->chain_buffer_size = sizeof(dil2_server_cert_chain);
-
-                certs->key_buffer = (uint8_t*) dil2_server_privateKey;
-                certs->key_buffer_size = sizeof(dil2_server_privateKey);
-
-                certs->root_buffer = (uint8_t*) dil2_root_cert;
-                certs->root_buffer_size = sizeof(dil2_root_cert);
-        }
-        else if (strcmp(certs->identity, "dil3") == 0)
-        {
-                certs->chain_buffer = (uint8_t*) dil3_server_cert_chain;
-                certs->chain_buffer_size = sizeof(dil3_server_cert_chain);
-
-                certs->key_buffer = (uint8_t*) dil3_server_privateKey;
-                certs->key_buffer_size = sizeof(dil3_server_privateKey);
-
-                certs->root_buffer = (uint8_t*) dil3_root_cert;
-                certs->root_buffer_size = sizeof(dil3_root_cert);
+                certs->root_buffer = (uint8_t*) pqc_root_cert;
+                certs->root_buffer_size = sizeof(pqc_root_cert);
         }
         else if (strcmp(certs->identity, "hybrid_classic") == 0)
         {
@@ -491,7 +469,7 @@ static int read_certificates(const struct shell *sh, struct certificates* certs,
         else 
         {
                 shell_error(sh, "no valid identity specified");
-                shell_error(sh, "valid options are: ecc2, ecc3, dil2, dil3, hybrid_classic and hybrid_pqc");
+                shell_error(sh, "valid options are: classic, pqc, hybrid_classic and hybrid_pqc");
                 return -1;
         }
 
