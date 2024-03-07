@@ -746,7 +746,9 @@ static void* connection_handler_thread(void *ptr)
 	poll_set poll_set;
 	bool shutdown = false;
 
-#if !defined(__ZEPHYR__)
+#if defined(__ZEPHYR__)
+	pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
+#else
 	LOG_INF("TLS proxy connection handler started for slot %d/%d",
 		connection->slot+1, MAX_CONNECTIONS_PER_PROXY);
 #endif
