@@ -24,6 +24,7 @@ typedef struct tcp_echo_server
 {
 	bool running;
         int tcp_server_socket;
+	uint16_t listening_port;
 	pthread_t thread;
 	pthread_attr_t thread_attr;
 	struct poll_set poll_set;
@@ -41,7 +42,11 @@ echo_client;
 
 
 /* File global variables */
-static tcp_echo_server echo_server;
+static tcp_echo_server echo_server = {
+	.running = false,
+	.tcp_server_socket = -1,
+	.listening_port = 0,
+};
 static echo_client client_pool[MAX_CLIENTS];
 
 #if defined(__ZEPHYR__)
@@ -261,6 +266,20 @@ static void client_cleanup(echo_client* client)
  */
 int tcp_echo_server_run(tcp_echo_server_config const* config)
 {
+	if (echo_server.running == true)
+	{
+		if (config->listening_port != echo_server.listening_port)
+		{
+			LOG_ERR("TCP echo server is already running on port %d, killing it", echo_server.listening_port);
+			tcp_echo_server_terminate();
+		}
+		else
+		{
+			LOG_INF("TCP echo server is already running on port %d", echo_server.listening_port);
+			return 0;
+		}
+	}
+
         /* Init client pool */
 	for (int i = 0; i < MAX_CLIENTS; i++)
 	{
@@ -287,6 +306,7 @@ int tcp_echo_server_run(tcp_echo_server_config const* config)
         }
 
 	/* Configure TCP server */
+	echo_server.listening_port = config->listening_port;
 	struct sockaddr_in bind_addr = {
 			.sin_family = AF_INET,
 			.sin_port = htons(config->listening_port)
