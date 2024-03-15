@@ -43,7 +43,7 @@ int init_packet_socket_gateway(PacketSocket *l2_gw, const l2_gateway_configg *co
 
     l2_gw->addr.sll_family = AF_PACKET;
     l2_gw->addr.sll_protocol = proto;
-    l2_gw->addr.sll_pkttype = (PACKET_BROADCAST | PACKET_MULTICAST | PACKET_OTHERHOST);
+    l2_gw->addr.sll_pkttype = (PACKET_OTHERHOST);
     l2_gw->bridge.type = PACKET_SOCKET;
     l2_gw->bridge.channel = channel;
 
@@ -223,6 +223,7 @@ int packet_socket_send(PacketSocket *l2_gw, uint8_t *buffer, int buffer_len, int
         }
         // get vlan tag from interface and apply it to the frame
         apply_vlan_tag(buffer, l2_gw->bridge.vlan_tag);
+        frame_start-VLAN_HEADER_SIZE;
     }
 
     // LOG to sending packet
@@ -243,7 +244,7 @@ int packet_socket_send(PacketSocket *l2_gw, uint8_t *buffer, int buffer_len, int
     // }
     // printf("\n");
     setblocking(l2_gw->bridge.fd, true);
-    int ret = sendto(l2_gw->bridge.fd, buffer, buffer_len, 0, (struct sockaddr *)&l2_gw->addr, sizeof(l2_gw->addr));
+    int ret = sendto(l2_gw->bridge.fd, buffer+frame_start, buffer_len, 0, (struct sockaddr *)&l2_gw->addr, sizeof(l2_gw->addr));
     setblocking(l2_gw->bridge.fd, false);
     if (ret < 0)
     {
@@ -284,7 +285,21 @@ int packet_socket_receive(PacketSocket *l2_gw)
     l2_gw->bridge.len = ret;
     return ret;
 }
+enum net_verdict filter_no_vlan_packet(uint8_t* packet, int offset, int len){
 
+    
+
+    return NET_OK;
+    // do not filter arp
+    //dont send arp
+    uint16_t eth_type = ntohs(*(uint16_t*)&packet[offset+12]);
+    printf("\neth_type: %x\n", eth_type);
+    if ( eth_type == NET_ETH_PTYPE_ARP )
+    {
+        return NET_DROP;
+    }
+    return NET_OK;
+}
 int packet_socket_pipe(PacketSocket *l2_gw)
 {
     if (l2_gw == NULL)
@@ -301,6 +316,8 @@ int packet_socket_pipe(PacketSocket *l2_gw)
     if (l2_gw->source.sll_pkttype & PACKET_HOST)
     {
         LOG_INF("upper layer will handle this pkt");
+        l2_gw->bridge.len = 0;
+        return 1;
     }
 
     // check if l2_gw_pipe esits
@@ -310,23 +327,25 @@ int packet_socket_pipe(PacketSocket *l2_gw)
         return -1;
     }
 
-    // prepare frame for piping
     int offset = 0;
-    if (l2_gw->bridge.vlan_tag > 0)
+    #if defined CONFIG_NET_VLAN
+    remove_vlan_tag(l2_gw->bridge.buf);
+    offset = VLAN_HEADER_SIZE;
+    #endif
+
+    switch (filter_no_vlan_packet(l2_gw->bridge.buf, offset, l2_gw->bridge.len))
     {
-        if (is_vlan_tagged(l2_gw->bridge.buf))
-        {
-            remove_vlan_tag(l2_gw->bridge.buf);
-            // remove_vlan tag moves dst- and src-mac 4 bytes to the right
-            // offset indicates that the frame starts after 4 bytes
-            offset = VLAN_HEADER_SIZE;
-        }
-        else
-        {
-            LOG_INF("VLAN Iface received frame without vlan tag");
-        }
+        case NET_DROP:
+            l2_gw->bridge.len = 0;
+            return 1;
+            case NET_OK:
+            break;
+            case NET_CONTINUE:
+            break;
     }
     /**
+     * 
+
      * here would be a good place to apply a filter on the frames
      */
     int ret = l2_gateway_send(l2_gw->bridge.l2_gw_pipe, l2_gw->bridge.buf, l2_gw->bridge.len, offset);

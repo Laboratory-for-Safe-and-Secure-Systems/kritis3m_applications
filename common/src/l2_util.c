@@ -1,5 +1,25 @@
 
 #include "l2_util.h"
+#include "logging.h"
+
+#include <unistd.h> // Include the necessary header file for the 'close' function
+#include <sys/socket.h>
+#include <sys/ioctl.h>
+#include <errno.h>
+#include "networking.h"
+
+#if defined(__ZEPHYR__)
+#include <zephyr/net/ethernet.h>
+#else
+#include <errno.h>      //For errno - the error number
+#include <netinet/ip.h> //Provides declarations for ip header
+#include <arpa/inet.h>
+#include <linux/if_packet.h>
+#include <net/ethernet.h> /* the L2 protocols */ // inet_addr
+#include <net/if.h>
+
+#include <netinet/in.h>
+#endif
 
 LOG_MODULE_REGISTER(l2_util);
 
@@ -73,13 +93,12 @@ uint8_t *apply_vlan_tag(uint8_t *packet, uint8_t tag)
     return packet;
 }
 
-
-//not tested
-void set_vlan_tag(uint8_t* packet, int packet_len, uint16_t tci, uint16_t tag){
+// not tested
+void set_vlan_tag(uint8_t *packet, int packet_len, uint16_t tci, uint16_t tag)
+{
     memmove(packet, packet + 4, MAC_SIZE * 2);
     uint8_t vlan_id[] = {0x81, 0x00};
     memcpy(packet + (MAC_SIZE * 2), vlan_id, sizeof(vlan_id));
     uint16_t val_tci = (tci & 0xf000) | (tag & 0x0fff);
-    memcpy(packet + (MAC_SIZE * 2)+sizeof(vlan_id), &val_tci, sizeof(uint16_t));
-
+    memcpy(packet + (MAC_SIZE * 2) + sizeof(vlan_id), &val_tci, sizeof(uint16_t));
 }

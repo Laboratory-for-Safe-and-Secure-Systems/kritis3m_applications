@@ -557,12 +557,6 @@ int parse_cli_arguments(enum application_role *role, struct proxy_config *proxy_
         proxy_config->tls_config.private_key.additional_key_size = certs.additional_key_buffer_size;
         proxy_config->tls_config.root_certificate.buffer = certs.root_buffer;
         proxy_config->tls_config.root_certificate.size = certs.root_buffer_size;
-        proxy_config->tls_config.server_cert_der.buffer = certs.server_cert;
-        proxy_config->tls_config.server_cert_der.size = certs.server_cert_size;
-        proxy_config->tls_config.server_key_der.buffer = certs.server_key;
-        proxy_config->tls_config.server_key_der.size = certs.server_key_size;
-        proxy_config->tls_config.client_cert_der.buffer = certs.client_cert;
-        proxy_config->tls_config.client_cert_der.size = certs.client_cert_size;
 
         l2_gw_config->dtls_config = proxy_config->tls_config;
 

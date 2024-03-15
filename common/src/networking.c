@@ -97,16 +97,16 @@ int initialize_network_interfaces()
 	ifaces.management = net_if_get_default();
 	net_if_foreach(iface_cb, &ifaces);
 
-	ret = configure_management();
-	if (ret < 0)
-	{
-		return ret;
-	}
-	ret = configure_asset();
-	if (ret < 0)
-	{
-		return ret;
-	}
+	// ret = configure_management();
+	// if (ret < 0)
+	// {
+	// 	return ret;
+	// }
+	// ret = configure_asset();
+	// if (ret < 0)
+	// {
+	// 	return ret;
+	// }
 	ret = configure_tunnel();
 	if (ret < 0)
 	{

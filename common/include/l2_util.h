@@ -3,20 +3,22 @@
 #ifndef _L2_UTIL_H_
 #define _L2_UTIL_H_
 
+#if defined(__ZEPHYR__)
 #include <zephyr/kernel.h>
 #include <zephyr/net/net_if.h>
 #include <zephyr/net/ethernet.h>
 #include <zephyr/net/net_mgmt.h>
-#include <zephyr/net/socket.h>
 #include "zephyr/net/net_ip.h"
+#endif
 
-
+#include <sys/socket.h>
+#include <stdint.h>
+#include <stdbool.h>
 #include <string.h>
 
 #define MAC_SIZE 6
 
 #define VLAN_HEADER_SIZE 4
-
 
 /**
  * @brief Structure representing a L2 address.
@@ -69,8 +71,6 @@ struct __attribute__((packed)) packet_header_in
     uint16_t ethertype;
 };
 
-
-
 uint16_t get_vlan_tag(uint8_t *packet);
 
 /**
@@ -100,6 +100,5 @@ uint8_t *remove_vlan_tag(uint8_t *header);
 
 // add tag to packet
 uint8_t *apply_vlan_tag(uint8_t *packet, uint8_t tag);
-
 
 #endif

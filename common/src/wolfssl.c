@@ -110,7 +110,7 @@ static int errorOccured(int32_t ret)
 
 static int wolfssl_read_client_dtls_callback(WOLFSSL *wolfssl, char *buffer, int size, void *ctx)
 {
-	wolfssl_session *session = (wolfssl_session *)ctx;
+	// wolfssl_session *session = (wolfssl_session *)ctx;
 	int fd = wolfSSL_get_fd(wolfssl);
 	int recvd;
 	struct sockaddr addr;
@@ -912,6 +912,19 @@ wolfssl_endpoint *wolfssl_setup_dtls_client_endpoint(wolfssl_endpoint_configurat
 	return new_endpoint;
 }
 
+
+int wolfssl_dtls_is_connected(wolfssl_session *session){
+	if (session == NULL)
+	{
+		LOG_ERR("Session is NULL");
+		return -1;
+	}else if (session->state == CONNECTION_STATE_CONNECTED)
+	{
+		return 1;
+	}
+	return 0;
+}
+
 /* Setup a TLS client endpoint.
  *
  * Parameter is a pointer to a filled endpoint_configuration structure.
@@ -975,11 +988,12 @@ int wolfssl_dtls_client_handshake(wolfssl_session *session, struct sockaddr_in *
 		LOG_ERR("wolfSSL_connect failed: %d", ret);
 		ret = -1;
 	}
+	session->state = CONNECTION_STATE_CONNECTED;
 
 	return ret;
 }
 
-int wolfssl_dtls_server_handshake(wolfssl_session *session, struct sockaddr_in *servAddr)
+int wolfssl_dtls_server_handshake(wolfssl_session *session)
 {
 	int ret = 0;
 	int fd = wolfSSL_get_fd(session->session);
@@ -1004,7 +1018,9 @@ int wolfssl_dtls_server_handshake(wolfssl_session *session, struct sockaddr_in *
 	{
 		ret = wolfSSL_get_error(session->session, 0);
 		LOG_ERR("wolfSSL_connect failed: %d", ret);
+		return ret;
 	}
+	session->state = CONNECTION_STATE_CONNECTED;
 
 	return ret;
 }

@@ -1,13 +1,19 @@
 #ifndef WOLFSSL_H
 #define WOLFSSL_H
 
-#include <stdint.h>
-#include <stdbool.h>
-#include <time.h>
-#include <sys/socket.h>
 #include "wolfssl/wolfcrypt/settings.h"
 #include "wolfssl/ssl.h"
+#if !(defined(__ZEPHYR__))
+#include <netinet/in.h>
+#include <arpa/inet.h>
 
+#endif
+
+#include <stdint.h>
+#include <time.h>
+#include <stdbool.h>
+#include <sys/types.h>
+#include <sys/socket.h>
 
 /* Data structure for the library configuration */
 typedef struct wolfssl_library_configuration
@@ -15,19 +21,16 @@ typedef struct wolfssl_library_configuration
         bool loggingEnabled;
 
         bool use_secure_element;
-        char const* secure_element_middleware_path;
+        char const *secure_element_middleware_path;
 
 #ifdef WOLFSSL_STATIC_MEMORY
-        struct 
+        struct
         {
-                uint8_t* buffer;
+                uint8_t *buffer;
                 size_t size;
-        }
-        staticMemoryBuffer;
+        } staticMemoryBuffer;
 #endif
-}
-wolfssl_library_configuration;
-
+} wolfssl_library_configuration;
 
 /* Data structure for the endpoint configuration */
 typedef struct wolfssl_endpoint_configuration
@@ -37,39 +40,33 @@ typedef struct wolfssl_endpoint_configuration
 
         struct
         {
-                uint8_t const* buffer;
+                uint8_t const *buffer;
                 size_t size;
-        }
-        device_certificate_chain;
+        } device_certificate_chain;
 
         struct
         {
-                uint8_t const* buffer;
+                uint8_t const *buffer;
                 size_t size;
 
                 /* Additional key in case of hybrid signatures */
-                uint8_t const* additional_key_buffer;
+                uint8_t const *additional_key_buffer;
                 size_t additional_key_size;
-        }
-        private_key;
+        } private_key;
 
         struct
         {
-                uint8_t const* buffer;
+                uint8_t const *buffer;
                 size_t size;
-        }
-        root_certificate;
-}
-wolfssl_endpoint_configuration;
+        } root_certificate;
 
+} wolfssl_endpoint_configuration;
 
 /* Data structure for an endpoint (definition is hidden in source file) */
 typedef struct wolfssl_endpoint wolfssl_endpoint;
 
-
 /* Data structure for an active session (definition is hidden in source file) */
 typedef struct wolfssl_session wolfssl_session;
-
 
 /* Data structure for TLS handshake metics */
 typedef struct tls_handshake_metrics
@@ -77,10 +74,7 @@ typedef struct tls_handshake_metrics
         uint32_t duration_us;
         uint32_t txBytes;
         uint32_t rxBytes;
-}
-tls_handshake_metrics;
-
-
+} tls_handshake_metrics;
 
 /* Initialize WolfSSL library.
  *
@@ -88,8 +82,7 @@ tls_handshake_metrics;
  *
  * Returns 0 on success, -1 in case of an error (error message is logged to the console).
  */
-int wolfssl_init(wolfssl_library_configuration const* config);
-
+int wolfssl_init(wolfssl_library_configuration const *config);
 
 /* Setup a TLS server endpoint.
  *
@@ -98,11 +91,12 @@ int wolfssl_init(wolfssl_library_configuration const* config);
  * Return value is a pointer to the newly created endpoint or NULL in case of an error
  * (error message is logged to the console).
  */
-wolfssl_endpoint* wolfssl_setup_dtls_server_endpoint(wolfssl_endpoint_configuration const* config);
-wolfssl_endpoint* wolfssl_setup_server_endpoint(wolfssl_endpoint_configuration const* config);
+wolfssl_endpoint *wolfssl_setup_dtls_server_endpoint(wolfssl_endpoint_configuration const *config);
+wolfssl_endpoint *wolfssl_setup_server_endpoint(wolfssl_endpoint_configuration const *config);
 
-int wolfssl_dtls_server_handshake(wolfssl_session *session, struct sockaddr_in* servAddr);
-int wolfssl_dtls_client_handshake(wolfssl_session *session, struct sockaddr_in* servAddr);
+int wolfssl_dtls_server_handshake(wolfssl_session *session);
+int wolfssl_dtls_client_handshake(wolfssl_session *session, struct sockaddr_in *servAddr);
+int wolfssl_dtls_is_connected(wolfssl_session *session);
 
 /* Setup a TLS client endpoint.
  *
@@ -111,20 +105,19 @@ int wolfssl_dtls_client_handshake(wolfssl_session *session, struct sockaddr_in* 
  * Return value is a pointer to the newly created endpoint or NULL in case of an error
  * (error message is logged to the console).
  */
-wolfssl_endpoint* wolfssl_setup_client_endpoint(wolfssl_endpoint_configuration const* config);
+wolfssl_endpoint *wolfssl_setup_client_endpoint(wolfssl_endpoint_configuration const *config);
 
-wolfssl_endpoint* wolfssl_setup_dtls_client_endpoint(wolfssl_endpoint_configuration const* config);
+wolfssl_endpoint *wolfssl_setup_dtls_client_endpoint(wolfssl_endpoint_configuration const *config);
 
 /* Create a new session for the endpoint.
  *
  * Parameters are a pointer to a configured endpoint and the socket fd of the underlying
  * network connection.
- * 
+ *
  * Return value is a pointer to the newly created session or NULL in case of an error
  * (error message is logged to the console).
  */
-wolfssl_session* wolfssl_create_session(wolfssl_endpoint* endpoint, int socket_fd);
-
+wolfssl_session *wolfssl_create_session(wolfssl_endpoint *endpoint, int socket_fd);
 
 /* Perform the TLS handshake for a newly created session.
  *
@@ -133,40 +126,33 @@ wolfssl_session* wolfssl_create_session(wolfssl_endpoint* endpoint, int socket_f
  * data from the peer is present). The return code is then either WOLFSSL_ERROR_WANT_READ or
  * WOLFSSL_ERROR_WANT_WRITE.
  */
-int wolfssl_handshake(wolfssl_session* session);
-
+int wolfssl_handshake(wolfssl_session *session);
 
 /* Receive new data from the TLS peer.
  *
  * Returns the number of received bytes on success, -1 on failure (error message is logged
  * to the console).
  */
-int wolfssl_receive(wolfssl_session* session, uint8_t* buffer, int max_size);
-
+int wolfssl_receive(wolfssl_session *session, uint8_t *buffer, int max_size);
 
 /* Send data to the TLS remote peer.
  *
- * Returns 0 on success, -1 on failure (error message is logged to the console). In case 
+ * Returns 0 on success, -1 on failure (error message is logged to the console). In case
  * we cannot write the data in one call, WOLFSSL_ERROR_WANT_WRITE is returned, indicating
  * that you have to call the method again (with the same data!) once the socket is writable.
  */
-int wolfssl_send(wolfssl_session* session, uint8_t const* buffer, int size);
-
+int wolfssl_send(wolfssl_session *session, uint8_t const *buffer, int size);
 
 /* Get metics of the handshake. */
-tls_handshake_metrics wolfssl_get_handshake_metrics(wolfssl_session* session);
-
+tls_handshake_metrics wolfssl_get_handshake_metrics(wolfssl_session *session);
 
 /* Close the connection of the active session */
-void wolfssl_close_session(wolfssl_session* session);
-
+void wolfssl_close_session(wolfssl_session *session);
 
 /* Free ressources of a session. */
-void wolfssl_free_session(wolfssl_session* session);
-
+void wolfssl_free_session(wolfssl_session *session);
 
 /* Free ressources of an endpoint. */
-void wolfssl_free_endpoint(wolfssl_endpoint* endpoint);
-
+void wolfssl_free_endpoint(wolfssl_endpoint *endpoint);
 
 #endif

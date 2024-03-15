@@ -1,5 +1,4 @@
 
-#include "l2_gateway.h"
 #include <errno.h>
 #include <pthread.h>
 #include <sys/socket.h>
@@ -53,7 +52,7 @@ void marry_bridges(L2_Gateway *bridge1, L2_Gateway *bridge2);
 /* File global variables */
 
 #if defined(__ZEPHYR__)
-#define STACK_SIZE 50 * 1024
+#define STACK_SIZE 60 * 1024
 
 Z_KERNEL_STACK_DEFINE_IN(l2_gateway_stack, STACK_SIZE,
 						 __attribute__((section(CONFIG_RAM_SECTION_STACKS_2))));
@@ -113,45 +112,45 @@ int configure_interfaces(l2_gateway_configg const *config)
 #if defined(__ZEPHYR__)
 
 #if IS_ENABLED(CONFIG_NET_PROMISCUOUS_MODE)
-	// if (config->asset_type == PACKET_SOCKET)
-	// {
-	// 	ret = net_if_set_promisc(network_interfaces()->asset);
-	// 	if (ret < 0)
-	// 	{
-	// 		LOG_ERR("Cannot set promiscuous mode for asset: error %d", ret);
-	// 		return ret;
-	// 	}
-	// }
-	// if (config->tunnel_type == PACKET_SOCKET)
-	// {
-	// 	ret = net_if_set_promisc(network_interfaces()->tunnel);
-	// 	if (ret < 0)
-	// 	{
-	// 		LOG_ERR("Cannot set promiscuous mode for tunnel: error %d", ret);
-	// 		return ret;
-	// 	}
-	// }
+	if (config->asset_type == PACKET_SOCKET)
+	{
+		ret = net_if_set_promisc(network_interfaces()->asset);
+		if (ret < 0)
+		{
+			LOG_ERR("Cannot set promiscuous mode for asset: error %d", ret);
+			return ret;
+		}
+	}
+	if (config->tunnel_type == PACKET_SOCKET)
+	{
+		ret = net_if_set_promisc(network_interfaces()->tunnel);
+		if (ret < 0)
+		{
+			LOG_ERR("Cannot set promiscuous mode for tunnel: error %d", ret);
+			return ret;
+		}
+	}
 #endif
 
-#else
-	// if (config->asset_type == PACKET_SOCKET)
-	// {
-	// 	ret = set_promiscous_mode(network_interfaces()->asset, true);
-	// 	if (ret < 0)
-	// 	{
-	// 		LOG_ERR("Cannot set promiscuous mode for asset: error %d", ret);
-	// 		return ret;
-	// 	}
-	// }
-	// if (config->tunnel_type == PACKET_SOCKET)
-	// {
-	// 	ret = set_promiscous_mode(network_interfaces()->tunnel, true);
-	// 	if (ret < 0)
-	// 	{
-	// 		LOG_ERR("Cannot set promiscuous mode for tunnel: error %d", ret);
-	// 		return ret;
-	// 	}
-	// }
+// #else
+// 	if (config->asset_type == PACKET_SOCKET)
+// 	{
+// 		ret = set_promiscous_mode(network_interfaces()->asset, true);
+// 		if (ret < 0)
+// 		{
+// 			LOG_ERR("Cannot set promiscuous mode for asset: error %d", ret);
+// 			return ret;
+// 		}
+// 	}
+// 	if (config->tunnel_type == PACKET_SOCKET)
+// 	{
+// 		ret = set_promiscous_mode(network_interfaces()->tunnel, true);
+// 		if (ret < 0)
+// 		{
+// 			LOG_ERR("Cannot set promiscuous mode for tunnel: error %d", ret);
+// 			return ret;
+// 		}
+// 	}
 #endif
 
 	return ret;
@@ -241,28 +240,28 @@ static void *l2_gateway_main_thread(void *ptr)
 		if (ret < 0)
 		{
 			LOG_ERR("Failed to initialize packet socket gateway");
-			return -1;
+			return NULL;
 		}
 		break;
 	case DTLS_SERVER_SOCKET:
 		asset = (L2_Gateway *)((DtlsSocket *)malloc(sizeof(DtlsSocket)));
 		memset((DtlsSocket *)asset, 0, sizeof(DtlsSocket));
 
-		ret = init_dtls_server_socket_gateway((DtlsSocket *)asset, config, ASSET);
+		ret = init_dtls_socket_gateway((DtlsSocket *)asset, config, ASSET);
 		if (ret < 0)
 		{
 			LOG_ERR("Failed to initialize dtls server socket gateway");
-			return -1;
+			return NULL;
 		}
 		break;
 	case DTLS_CLIENT_SOCKET:
 		asset = (L2_Gateway *)((DtlsSocket *)malloc(sizeof(DtlsSocket)));
 		memset((DtlsSocket *)asset, 0, sizeof(DtlsSocket));
-		ret = init_dtls_client_socket_gateway((DtlsSocket *)asset, config, ASSET);
+		ret = init_dtls_socket_gateway((DtlsSocket *)asset, config, ASSET);
 		if (ret < 0)
 		{
 			LOG_ERR("Failed to initialize dtls client socket gateway");
-			return -1;
+			return NULL;
 		}
 		break;
 	case UDP_SOCKET:
@@ -283,14 +282,14 @@ static void *l2_gateway_main_thread(void *ptr)
 	case DTLS_SERVER_SOCKET:
 		tunnel = (L2_Gateway *)((DtlsSocket *)malloc(sizeof(DtlsSocket)));
 		memset((DtlsSocket *)tunnel, 0, sizeof(DtlsSocket));
-		ret = init_dtls_server_socket_gateway((DtlsSocket *)tunnel, config, TUNNEL);
+		ret = init_dtls_socket_gateway((DtlsSocket *)tunnel, config, TUNNEL);
 		// ret = init_dt((PacketSocket*)tunnel ,config,TUNNEL);
 
 		break;
 	case DTLS_CLIENT_SOCKET:
 		tunnel = (L2_Gateway *)((DtlsSocket *)malloc(sizeof(DtlsSocket)));
 		memset((DtlsSocket *)tunnel, 0, sizeof(DtlsSocket));
-		ret = init_dtls_client_socket_gateway((DtlsSocket *)tunnel, config, TUNNEL);
+		ret = init_dtls_socket_gateway((DtlsSocket *)tunnel, config, TUNNEL);
 		break;
 	case UDP_SOCKET:
 		LOG_ERR("UDP_SOCKET not implemented yet");
@@ -305,7 +304,7 @@ static void *l2_gateway_main_thread(void *ptr)
 
 	/* Set the new sockets to non-blocking */
 	setblocking(theBridge.asset->fd, false);
-	setblocking(theBridge.tunnel->fd, false);
+	// setblocking(theBridge.tunnel->fd, false);
 
 	/* Add sockets to the poll_set */
 	ret = poll_set_add_fd(&theBridge.poll_set, theBridge.asset->fd, POLLIN);
@@ -314,7 +313,7 @@ static void *l2_gateway_main_thread(void *ptr)
 		LOG_ERR("Error adding ASSET socket to poll_set");
 		l2_gateway_close(theBridge.asset);
 		l2_gateway_close(theBridge.tunnel);
-		return -1;
+		return NULL;
 	}
 	ret = poll_set_add_fd(&theBridge.poll_set, theBridge.tunnel->fd, POLLIN);
 	if (ret != 0)
@@ -322,15 +321,14 @@ static void *l2_gateway_main_thread(void *ptr)
 		LOG_ERR("Error adding TUNNEL socket to poll_set");
 		l2_gateway_close(theBridge.asset);
 		l2_gateway_close(theBridge.tunnel);
-		return -1;
+		return NULL;
 	}
 
 	while (1)
 	{
 		/* Block and wait for incoming packets */
 		int ret = poll(l2_gw_container->poll_set.fds, l2_gw_container->poll_set.num_fds, -1);
-
-		if (ret == -1)
+		if (ret < 0)
 		{
 			LOG_ERR("poll error: %d", errno);
 			continue;
@@ -377,6 +375,11 @@ static void *l2_gateway_main_thread(void *ptr)
 					default:
 						break;
 					}
+				}
+
+				if (ret == 0)
+				{
+					LOG_INF("Received 0 bytes, closing session");
 				}
 				l2_gateway_pipe(t_bridge);
 			}
