@@ -52,7 +52,7 @@ typedef struct proxy_connection
 
 	uint8_t tun2ass_buffer[RECV_BUFFER_SIZE];
 	size_t num_of_bytes_in_tun2ass_buffer;
-	
+
 	uint8_t ass2tun_buffer[RECV_BUFFER_SIZE];
 	size_t num_of_bytes_in_ass2tun_buffer;
 }
@@ -89,14 +89,14 @@ enum tls_proxy_management_message_type
 typedef struct tls_proxy_management_message
 {
 	enum tls_proxy_management_message_type type;
-	
+
 	union tls_proxy_management_message_payload
 	{
 		proxy_config reverse_proxy_config;	/* REVERSE_PROXY_START_REQUEST */
 		proxy_config forward_proxy_config; 	/* FORWARD_PROXY_START_REQUEST */
 		int proxy_id;					/* PROXY_STOP_REQUEST */
 		int response_code; 				/* RESPONSE */
-	} 
+	}
 	payload;
 }
 tls_proxy_management_message;
@@ -109,8 +109,8 @@ static proxy proxy_pool[MAX_PROXYS];
 
 
 #if defined(__ZEPHYR__)
-#define CONNECTION_HANDLER_STACK_SIZE 32*1024
-#define BACKEND_STACK_SIZE 127*1024
+#define CONNECTION_HANDLER_STACK_SIZE (32*1024)
+#define BACKEND_STACK_SIZE (127*1024)
 
 Z_KERNEL_STACK_ARRAY_DEFINE_IN(connection_handler_stack_pool, MAX_CONNECTIONS_PER_PROXY, \
 		CONNECTION_HANDLER_STACK_SIZE, __attribute__((section(CONFIG_RAM_SECTION_STACKS_1))));
@@ -167,7 +167,7 @@ static int read_management_message(int socket, tls_proxy_management_message* msg
 		LOG_ERR("Received invalid response");
 		return -1;
 	}
-	
+
 	return 0;
 }
 
@@ -253,7 +253,7 @@ static int add_new_proxy(enum tls_proxy_direction direction, proxy_config const*
 
 	if (direction == REVERSE_PROXY)
 	{
-		LOG_INF("Starting new reverse proxy on port %d using slot %d/%d", 
+		LOG_INF("Starting new reverse proxy on port %d using slot %d/%d",
 			config->listening_port, freeSlot+1, MAX_PROXYS);
 
 		/* Create the TLS endpoint */
@@ -261,7 +261,7 @@ static int add_new_proxy(enum tls_proxy_direction direction, proxy_config const*
 	}
 	else if (direction == FORWARD_PROXY)
 	{
-		LOG_INF("Starting new forward proxy to %s:%d using slot %d/%d", 
+		LOG_INF("Starting new forward proxy to %s:%d using slot %d/%d",
 		config->target_ip_address, config->target_port, freeSlot+1, MAX_PROXYS);
 
 		/* Create the TLS endpoint */
@@ -274,7 +274,7 @@ static int add_new_proxy(enum tls_proxy_direction direction, proxy_config const*
 		kill_proxy(proxy);
 		return -1;
 	}
-	
+
 	/* Create the TCP socket for the incoming connection */
 	proxy->incoming_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 	if (proxy->incoming_sock == -1)
@@ -299,7 +299,7 @@ static int add_new_proxy(enum tls_proxy_direction direction, proxy_config const*
 	net_addr_pton(bind_addr.sin_family, config->own_ip_address, &bind_addr.sin_addr);
 
 	/* Bind server socket to its destined IPv4 address */
-	if (bind(proxy->incoming_sock, (struct sockaddr*) &bind_addr, sizeof(bind_addr)) == -1) 
+	if (bind(proxy->incoming_sock, (struct sockaddr*) &bind_addr, sizeof(bind_addr)) == -1)
 	{
 		LOG_ERR("Cannot bind socket %d to %s:%d: errer %d\n",
 			proxy->incoming_sock, config->own_ip_address, config->listening_port, errno);
@@ -337,7 +337,7 @@ static int add_new_proxy(enum tls_proxy_direction direction, proxy_config const*
 static void kill_proxy(proxy* proxy)
 {
 	/* Stop the listening socket and clear it from the poll_set */
-	if (proxy->incoming_sock >= 0) 
+	if (proxy->incoming_sock >= 0)
 	{
 		poll_set_remove_fd(&proxy_backend.poll_set, proxy->incoming_sock);
 		close(proxy->incoming_sock);
@@ -345,14 +345,14 @@ static void kill_proxy(proxy* proxy)
 	}
 
 	/* Kill all connections */
-	for (int i = 0; i < MAX_CONNECTIONS_PER_PROXY; i++) 
+	for (int i = 0; i < MAX_CONNECTIONS_PER_PROXY; i++)
 	{
 		if (proxy->connections[i] != NULL)
 		{
 			/* Kill the running thread. This is very ungracefully, but necessary here,
-			 * as the thread is probably blocked. 
+			 * as the thread is probably blocked.
 			 */
-			if (proxy->connections[i]->in_use == true) 
+			if (proxy->connections[i]->in_use == true)
 			{
 				pthread_cancel(proxy->connections[i]->thread);
 			}
@@ -527,7 +527,7 @@ static proxy_connection* add_new_connection_to_proxy(proxy* proxy,
 	struct sockaddr_in* client_data = (struct sockaddr_in*) client_addr;
 	char peer_ip[20];
 	net_addr_ntop(AF_INET, &client_data->sin_addr, peer_ip, sizeof(peer_ip));
-	LOG_INF("New connection from %s:%d, using slot %d/%d", 
+	LOG_INF("New connection from %s:%d, using slot %d/%d",
 		peer_ip, ntohs(client_data->sin_port),
 		freeSlotConnectionPool+1, MAX_CONNECTIONS_PER_PROXY);
 
@@ -538,19 +538,19 @@ static proxy_connection* add_new_connection_to_proxy(proxy* proxy,
 static void proxy_connection_cleanup(proxy_connection* connection)
 {
 	/* Kill the network connections */
-	if (connection->tunnel_sock >= 0) 
+	if (connection->tunnel_sock >= 0)
 	{
 		close(connection->tunnel_sock);
 		connection->tunnel_sock = -1;
 	}
-	if (connection->asset_sock >= 0) 
+	if (connection->asset_sock >= 0)
 	{
 		close(connection->asset_sock);
 		connection->asset_sock = -1;
 	}
 
 	/* Cleanup the TLS session */
-	if (connection->tls_session != NULL) 
+	if (connection->tls_session != NULL)
 	{
 		wolfssl_free_session(connection->tls_session);
 		connection->tls_session = NULL;
@@ -559,7 +559,7 @@ static void proxy_connection_cleanup(proxy_connection* connection)
 	connection->num_of_bytes_in_tun2ass_buffer = 0;
 	connection->num_of_bytes_in_ass2tun_buffer = 0;
 	connection->slot = -1;
-	
+
 	connection->in_use = false;
 }
 
@@ -576,7 +576,7 @@ void* tls_proxy_main_thread(void* ptr)
 	/* Set the management socket to non-blocking and add it to the poll_set */
 	setblocking(config->management_socket_pair[1], false);
 	poll_set_add_fd(&config->poll_set, config->management_socket_pair[1], POLLIN);
-	
+
 	while (1)
 	{
 		struct sockaddr client_addr;
@@ -591,7 +591,7 @@ void* tls_proxy_main_thread(void* ptr)
 		}
 
 		/* Check which fds created an event */
-		for (int i = 0; i < config->poll_set.num_fds; i++) 
+		for (int i = 0; i < config->poll_set.num_fds; i++)
 		{
 			int fd = config->poll_set.fds[i].fd;
 			short event = config->poll_set.fds[i].revents;
@@ -625,7 +625,7 @@ void* tls_proxy_main_thread(void* ptr)
 				{
 					/* New client connection, try to handle it */
 					int client_socket = accept(proxy->incoming_sock, &client_addr, &client_addr_len);
-					if (client_socket < 0) 
+					if (client_socket < 0)
 					{
 						int error = errno;
 						if (error != EAGAIN)
@@ -643,7 +643,7 @@ void* tls_proxy_main_thread(void* ptr)
 						continue;
 					}
 
-					/* As we perform the TLS handshake from within the main thread, we have to add 
+					/* As we perform the TLS handshake from within the main thread, we have to add
 	 				 * the socket to the poll_set. In case of a reverse proxy, the TCP connection
 					 * is already established, hence we can wait for incoming data. In case of a
 					 * forward proxy, we first have to wait for successful connection establishment.
@@ -671,7 +671,7 @@ void* tls_proxy_main_thread(void* ptr)
 			else if ((proxy_connection = find_proxy_connection_by_fd(fd)) != NULL)
 			{
 				if ((event & POLLIN) || (event & POLLOUT))
-				{	
+				{
 					/* Continue with the handshake */
 					ret = wolfssl_handshake(proxy_connection->tls_session);
 
@@ -691,7 +691,7 @@ void* tls_proxy_main_thread(void* ptr)
 						 * on the TLS client endpoint). */
 						if (proxy_connection->direction == REVERSE_PROXY)
 						{
-							tls_handshake_metrics metrics; 
+							tls_handshake_metrics metrics;
 							metrics = wolfssl_get_handshake_metrics(proxy_connection->tls_session);
 
 							LOG_INF("Handshake done\r\n\tDuration: %.3f milliseconds\r\n\tTx bytes: "\
@@ -758,7 +758,7 @@ static void* connection_handler_thread(void *ptr)
 
 	poll_set_add_fd(&poll_set, connection->tunnel_sock, POLLIN);
 	poll_set_add_fd(&poll_set, connection->asset_sock, POLLOUT | POLLIN);
-	
+
 	while (!shutdown)
 	{
 		/* Block and wait for incoming events (new connections, received data, ...) */
@@ -770,7 +770,7 @@ static void* connection_handler_thread(void *ptr)
 		}
 
 		/* Check which fds created an event */
-		for (int i = 0; i < poll_set.num_fds; i++) 
+		for (int i = 0; i < poll_set.num_fds; i++)
 		{
 			int fd = poll_set.fds[i].fd;
 			short event = poll_set.fds[i].revents;
@@ -840,10 +840,10 @@ static void* connection_handler_thread(void *ptr)
 				{
 					/* We can send data on the tunnel connection now. Send remaining
 					 * data from the asset. */
-					ret = wolfssl_send(connection->tls_session, 
-							   connection->ass2tun_buffer, 
+					ret = wolfssl_send(connection->tls_session,
+							   connection->ass2tun_buffer,
 							   connection->num_of_bytes_in_ass2tun_buffer);
-					
+
 					if (ret == 0)
 					{
 						/* Wait again for incoming data on the asset socket and remove
@@ -971,7 +971,7 @@ static void* connection_handler_thread(void *ptr)
 
 
 /* Start a new thread and run the main TLS proxy backend.
- * 
+ *
  * Returns 0 on success, -1 on failure (error message is printed to console).
  */
 int tls_proxy_backend_run(void)
@@ -1016,7 +1016,7 @@ int tls_proxy_backend_run(void)
 
 #if defined(__ZEPHYR__)
 	/* We have to properly set the attributes with the stack to use for Zephyr. */
-	pthread_attr_setstack(&proxy_backend.thread_attr, backend_stack, K_THREAD_STACK_SIZEOF(backend_stack));
+	pthread_attr_setstack(&proxy_backend.thread_attr, &backend_stack, K_THREAD_STACK_SIZEOF(backend_stack));
 #endif
 
 	/* Create the socket pair for external management */
@@ -1056,7 +1056,7 @@ int tls_proxy_start_helper(tls_proxy_management_message const* request)
 	/* Wait for response */
 	ret = read_management_message(proxy_backend.management_socket_pair[0], &response);
 	if (ret < 0)
-	{	
+	{
 		return -1;
 	}
 	else if (response.type != PROXY_RESPONSE)
@@ -1069,14 +1069,14 @@ int tls_proxy_start_helper(tls_proxy_management_message const* request)
 		LOG_ERR("Error starting new TLS proxy (error %d)", response.payload.response_code);
 		return -1;
 	}
-	
+
 	/* Response code is the id of the new server */
 	return response.payload.response_code;
 }
 
 
 /* Start a new reverse proxy with given config.
- * 
+ *
  * Returns the id of the new proxy instance on success (positive integer) or -1
  * on failure (error message is printed to console).
  */
@@ -1093,7 +1093,7 @@ int tls_reverse_proxy_start(proxy_config const* config)
 
 
 /* Start a new forward proxy with given config.
- * 
+ *
  * Returns the id of the new proxy instance on success (positive integer) or -1
  * on failure (error message is printed to console).
  */
@@ -1133,7 +1133,7 @@ int tls_proxy_stop(int id)
 	/* Wait for response */
 	ret = read_management_message(proxy_backend.management_socket_pair[0], &response);
 	if (ret < 0)
-	{	
+	{
 		return -1;
 	}
 	else if (response.type != PROXY_RESPONSE)
@@ -1146,7 +1146,7 @@ int tls_proxy_stop(int id)
 		LOG_ERR("Error stopping TLS proxy (error %d)", response.payload.response_code);
 		return -1;
 	}
-	
+
 	return 0;
 }
 
