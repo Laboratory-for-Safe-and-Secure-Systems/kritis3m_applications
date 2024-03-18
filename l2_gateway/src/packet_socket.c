@@ -223,7 +223,7 @@ int packet_socket_send(PacketSocket *l2_gw, uint8_t *buffer, int buffer_len, int
         }
         // get vlan tag from interface and apply it to the frame
         apply_vlan_tag(buffer, l2_gw->bridge.vlan_tag);
-        frame_start-VLAN_HEADER_SIZE;
+        frame_start-=VLAN_HEADER_SIZE;
     }
 
     // LOG to sending packet
@@ -287,9 +287,8 @@ int packet_socket_receive(PacketSocket *l2_gw)
 }
 enum net_verdict filter_no_vlan_packet(uint8_t* packet, int offset, int len){
 
-    
+   return NET_OK; 
 
-    return NET_OK;
     // do not filter arp
     //dont send arp
     uint16_t eth_type = ntohs(*(uint16_t*)&packet[offset+12]);
