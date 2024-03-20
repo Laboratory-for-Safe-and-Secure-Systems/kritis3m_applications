@@ -223,28 +223,11 @@ int packet_socket_send(PacketSocket *l2_gw, uint8_t *buffer, int buffer_len, int
         }
         // get vlan tag from interface and apply it to the frame
         apply_vlan_tag(buffer, l2_gw->bridge.vlan_tag);
-        frame_start-=VLAN_HEADER_SIZE;
+        frame_start -= VLAN_HEADER_SIZE;
     }
 
-    // LOG to sending packet
-    // switch (bridge->bridge.channel)
-    // {
-    // case (TUNNEL):
-    //     printf("Interface: Tunnel\n");
-    //     break;
-
-    // case (ASSET):
-    //     printf("Interface: Asset\n");
-    //     break;
-    // }
-    // for (int i = 0; i < buffer_len; i++)
-    // {
-    //     // print hex val of buffer
-    //     printf("%02x", buffer[i]);
-    // }
-    // printf("\n");
     setblocking(l2_gw->bridge.fd, true);
-    int ret = sendto(l2_gw->bridge.fd, buffer+frame_start, buffer_len, 0, (struct sockaddr *)&l2_gw->addr, sizeof(l2_gw->addr));
+    int ret = sendto(l2_gw->bridge.fd, buffer + frame_start, buffer_len, 0, (struct sockaddr *)&l2_gw->addr, sizeof(l2_gw->addr));
     setblocking(l2_gw->bridge.fd, false);
     if (ret < 0)
     {
@@ -262,7 +245,7 @@ int packet_socket_send(PacketSocket *l2_gw, uint8_t *buffer, int buffer_len, int
     return ret;
 }
 
-int packet_socket_receive(PacketSocket *l2_gw)
+int packet_socket_receive(PacketSocket *l2_gw,int fd)
 {
     if (l2_gw == NULL)
     {
@@ -280,20 +263,29 @@ int packet_socket_receive(PacketSocket *l2_gw)
     if (ret < 0)
     {
         LOG_ERR("Failed to receive data on packet socket: %s", strerror(errno));
+        l2_gw->bridge.len = 0;
         return ret;
     }
+    if (ret > 1200)
+    {
+        LOG_ERR("Received packet with %d bytes, which is too large for buffer. Throwing packet", ret);
+        l2_gw->bridge.len = 0;
+        return 1;
+    }
+
     l2_gw->bridge.len = ret;
     return ret;
 }
-enum net_verdict filter_no_vlan_packet(uint8_t* packet, int offset, int len){
+enum net_verdict filter_no_vlan_packet(uint8_t *packet, int offset, int len)
+{
 
-   return NET_OK; 
+    return NET_OK;
 
     // do not filter arp
-    //dont send arp
-    uint16_t eth_type = ntohs(*(uint16_t*)&packet[offset+12]);
+    // dont send arp
+    uint16_t eth_type = ntohs(*(uint16_t *)&packet[offset + 12]);
     printf("\neth_type: %x\n", eth_type);
-    if ( eth_type == NET_ETH_PTYPE_ARP )
+    if (eth_type == NET_ETH_PTYPE_ARP)
     {
         return NET_DROP;
     }
@@ -304,12 +296,14 @@ int packet_socket_pipe(PacketSocket *l2_gw)
     if (l2_gw == NULL)
     {
         LOG_ERR("L2_Gateway is NULL");
+        l2_gw->bridge.len = 0;
         return -1;
     }
     // check if data available
     if (l2_gw->bridge.len <= 0)
     {
         LOG_ERR("No data available to l2_gw_pipe");
+        l2_gw->bridge.len = 0;
         return -1;
     }
     if (l2_gw->source.sll_pkttype & PACKET_HOST)
@@ -323,28 +317,25 @@ int packet_socket_pipe(PacketSocket *l2_gw)
     if (l2_gw->bridge.l2_gw_pipe == NULL)
     {
         LOG_ERR("No l2_gw_pipe available to send data to");
+        l2_gw->bridge.len = 0;
         return -1;
     }
 
     int offset = 0;
-    #if defined CONFIG_NET_VLAN
+#if defined CONFIG_NET_VLAN
     remove_vlan_tag(l2_gw->bridge.buf);
     offset = VLAN_HEADER_SIZE;
-    #endif
+#endif
 
-    switch (filter_no_vlan_packet(l2_gw->bridge.buf, offset, l2_gw->bridge.len))
+    if (l2_gw->bridge.len > 1200)
     {
-        case NET_DROP:
-            l2_gw->bridge.len = 0;
-            return 1;
-            case NET_OK:
-            break;
-            case NET_CONTINUE:
-            break;
+        LOG_ERR("hmm:");
+        l2_gw->bridge.len = 0;
+        return 1;
     }
-    /**
-     * 
 
+
+    /**
      * here would be a good place to apply a filter on the frames
      */
     int ret = l2_gateway_send(l2_gw->bridge.l2_gw_pipe, l2_gw->bridge.buf, l2_gw->bridge.len, offset);

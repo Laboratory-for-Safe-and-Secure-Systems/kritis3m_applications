@@ -29,12 +29,12 @@ int init_dtls_socket_gateway(DtlsSocket* gateway, const l2_gateway_configg* conf
 
 
 
-int dtls_socket_send(DtlsSocket *bridge, uint8_t *buffer, int buffer_len, int frame_start);
+// int dtls_socket_client_send(DtlsSocket *gateway, uint8_t *buffer, int buffer_len, int frame_start);
 
-int dtls_socket_receive(DtlsSocket *bridge);
+// int dtls_socket_server_receive(DtlsSocket *gateway, int fd);
 
-int dtls_socket_pipe(DtlsSocket *bridge);
+// int dtls_socket_pipe(DtlsSocket *bridge);
 
-int dtls_socket_close(DtlsSocket *bridge);
+// int dtls_socket_close(DtlsSocket *bridge);
 
 #endif // _DTLS_SOCKET_H_

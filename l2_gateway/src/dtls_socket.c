@@ -14,13 +14,16 @@
 #define RECV_BUFFER_SIZE 2048
 
 LOG_MODULE_REGISTER(dtls_gateway);
-int dtls_socket_server_receive(DtlsSocket *gateway);
-int dtls_socket_client_receive(DtlsSocket *gateway);
+
+// register functions
+int dtls_socket_server_receive(DtlsSocket *gateway,int fd);
 int dtls_socket_client_send(DtlsSocket *gateway, uint8_t *buffer, int buffer_len, int frame_start);
-int dtls_socket_server_send(DtlsSocket *gateway, uint8_t *buffer, int buffer_len, int frame_start);
+int dtls_socket_close(DtlsSocket *bridge);
+int dtls_socket_pipe(DtlsSocket *gateway);
+//
+
 int init_dtls_client_socket_gateway(DtlsSocket *gateway);
 int init_dtls_server_socket_gateway(DtlsSocket *gateway);
-int dtls_socket_close(DtlsSocket *bridge);
 
 int init_dtls_socket_gateway(DtlsSocket *gateway, const l2_gateway_configg *config, connected_channel channel)
 {
@@ -178,6 +181,7 @@ int dtls_socket_client_send(DtlsSocket *gateway, uint8_t *buffer, int buffer_len
         return -1;
     }
 
+    // handshake routine
     if (wolfssl_dtls_is_connected(gateway->dtls_client_session) == 0)
     {
 
@@ -199,11 +203,22 @@ int dtls_socket_client_send(DtlsSocket *gateway, uint8_t *buffer, int buffer_len
         }
         LOG_INF("DTLS CLIENT:\tConnected to server");
     }
+
+    // is data available
     if (buffer_len - frame_start <= 0)
     {
         LOG_ERR("DTLS CLIENT no data available for sending");
+        return 1;
     }
 
+    // Packets close to the MTU are thrown, since the overhead of the DTLS header is not considered
+    if ((buffer_len - frame_start) > 1200)
+    {
+        LOG_ERR("DTLS CLIENT: Packet too large: %d", buffer_len - frame_start);
+        return 1;
+    }
+
+    // send packet
     ret = wolfssl_send(gateway->dtls_client_session, buffer + frame_start, buffer_len - frame_start);
     if (ret < 0)
     {
@@ -215,13 +230,7 @@ int dtls_socket_client_send(DtlsSocket *gateway, uint8_t *buffer, int buffer_len
 }
 
 // in case of server, we create a new connection
-int dtls_socket_client_receive(DtlsSocket *gateway)
-{
-    return 0;
-}
-
-// in case of server, we create a new connection
-int dtls_socket_server_receive(DtlsSocket *gateway)
+int dtls_socket_server_receive(DtlsSocket *gateway, int fd)
 {
     int ret = -1;
     if (gateway->dtls_server_session == NULL)
@@ -230,6 +239,7 @@ int dtls_socket_server_receive(DtlsSocket *gateway)
         dtls_socket_close(gateway);
         return -1;
     }
+
     if (wolfssl_dtls_is_connected(gateway->dtls_server_session) == 0)
     {
 
@@ -266,13 +276,9 @@ int dtls_socket_server_receive(DtlsSocket *gateway)
         // init_dtls_server_socket_gateway(gateway);
         return 0;
     }
-    gateway->bridge.len = ret+offset;
+    gateway->bridge.len = ret + offset;
     LOG_INF("DTLS SERVER:\tReceived %d bytes", ret);
     return ret;
-}
-int dtls_socket_server_send(DtlsSocket *gateway, uint8_t *buffer, int buffer_len, int frame_start)
-{
-    return 0;
 }
 
 int dtls_socket_pipe(DtlsSocket *gateway)

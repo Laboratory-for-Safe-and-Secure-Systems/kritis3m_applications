@@ -183,7 +183,6 @@ int configure_asset()
 		LOG_ERR("Invalid netmask %s for the Asset interface: error %d", CONFIG_NET_IP_ASSET_NM, ret);
 		return ret;
 	}
-
 	net_if_ipv4_set_netmask(ifaces.asset, &helper_addr);
 
 	ret = net_addr_pton(AF_INET, CONFIG_NET_IP_ASSET_GW, &helper_addr);

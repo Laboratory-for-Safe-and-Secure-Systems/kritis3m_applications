@@ -86,7 +86,7 @@ typedef struct L2_Gateway L2_Gateway;
 struct L2_Gateway
 {
 	int (*vtable[4])();
-	uint8_t buf[2048];
+	uint8_t buf[1600];
 	uint32_t len;
 	interface_type type;
 	connected_channel channel;
@@ -94,6 +94,9 @@ struct L2_Gateway
 	L2_Gateway *l2_gw_pipe;
 	int fd;
 };
+
+int l2_gatewaay_register_fd(int  fd);
+
 
 /**
  * @brief Define a function pointer type for sending data through the l2_gateway.
@@ -121,7 +124,10 @@ typedef int (*sendFunc)(L2_Gateway *l2_gateway, uint8_t *buffer, int buffer_len,
  * @param self Pointer to the L2_Gateway object.
  * @return Integer indicating the status of the receive or l2_gw_pipe operation.
  */
-typedef int (*receiveOrPipeFunc)(L2_Gateway *self);
+typedef int (*receiveFunc)(L2_Gateway *self, int fd);
+
+
+typedef int (*PipeFunc)(L2_Gateway *self);
 
 /**
  * @brief Enumeration of call types.
@@ -161,7 +167,7 @@ int l2_gateway_send(L2_Gateway *l2_gateway, uint8_t *buffer, int buffer_len, int
  * @param l2_gateway The l2_gateway object.
  * @return Returns the received data, or a negative error code on failure.
  */
-int l2_gateway_receive(L2_Gateway *l2_gateway);
+int l2_gateway_receive(L2_Gateway *l2_gateway, int fd);
 
 /**
  * @brief Sends received data via the conencted pipePipes data through the l2_gateway.

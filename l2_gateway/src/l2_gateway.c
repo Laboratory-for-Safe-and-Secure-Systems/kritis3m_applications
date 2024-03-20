@@ -188,15 +188,15 @@ int l2_gateway_send(L2_Gateway *bridge, uint8_t *buffer, int buffer_len, int buf
 	return send(bridge, buffer, buffer_len, buffer_start);
 }
 
-int l2_gateway_receive(L2_Gateway *bridge)
+int l2_gateway_receive(L2_Gateway *bridge, int fd)
 {
-	receiveOrPipeFunc receive = (receiveOrPipeFunc)bridge->vtable[call_receive];
-	return receive(bridge);
+	receiveFunc receive = (receiveFunc)bridge->vtable[call_receive];
+	return receive(bridge, fd);
 }
 
 int l2_gateway_pipe(L2_Gateway *bridge)
 {
-	receiveOrPipeFunc pipe = (receiveOrPipeFunc)bridge->vtable[call_pipe];
+	PipeFunc pipe = (PipeFunc)bridge->vtable[call_pipe];
 	return pipe(bridge);
 }
 int l2_gateway_close(L2_Gateway *l2_gateway)
@@ -214,10 +214,11 @@ L2_Gateway *find_bridge_by_fd(int fd)
 	{
 		return theBridge.tunnel;
 	}
-	else
-	{
-		return NULL;
+	// workaround sicne this design is just for testing puposes
+	if (fd > 0){
+		return theBridge.tunnel;
 	}
+
 }
 
 static void *l2_gateway_main_thread(void *ptr)
@@ -236,6 +237,7 @@ static void *l2_gateway_main_thread(void *ptr)
 	case PACKET_SOCKET:
 		asset = (L2_Gateway *)((PacketSocket *)malloc(sizeof(PacketSocket)));
 		memset(asset, 0, sizeof(PacketSocket));
+		memset((uint8_t*) asset->buf, 0, sizeof(asset->buf));
 		ret = init_packet_socket_gateway((PacketSocket *)asset, config, ASSET);
 		if (ret < 0)
 		{
@@ -277,11 +279,13 @@ static void *l2_gateway_main_thread(void *ptr)
 	case PACKET_SOCKET:
 		tunnel = (L2_Gateway *)((PacketSocket *)malloc(sizeof(PacketSocket)));
 		memset((PacketSocket *)tunnel, 0, sizeof(PacketSocket));
+		memset((uint8_t*) tunnel->buf, 0, sizeof(tunnel->buf));
 		init_packet_socket_gateway((PacketSocket *)tunnel, config, TUNNEL);
 		break;
 	case DTLS_SERVER_SOCKET:
 		tunnel = (L2_Gateway *)((DtlsSocket *)malloc(sizeof(DtlsSocket)));
 		memset((DtlsSocket *)tunnel, 0, sizeof(DtlsSocket));
+		memset((uint8_t*) tunnel->buf, 0, sizeof(tunnel->buf));
 		ret = init_dtls_socket_gateway((DtlsSocket *)tunnel, config, TUNNEL);
 		// ret = init_dt((PacketSocket*)tunnel ,config,TUNNEL);
 
@@ -350,7 +354,7 @@ static void *l2_gateway_main_thread(void *ptr)
 			}
 			if (event == POLLIN)
 			{
-				int ret = l2_gateway_receive(t_bridge);
+				int ret = l2_gateway_receive(t_bridge,fd);
 				if (ret < 0)
 				{
 					LOG_ERR("Failed to receive data on bridge %d, errno %d ", fd, errno);

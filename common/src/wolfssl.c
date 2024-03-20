@@ -603,6 +603,15 @@ static int wolfssl_configure_dtls_context(WOLFSSL_CTX *context,
 												config->private_key.size,
 												WOLFSSL_FILETYPE_PEM);
 	}
+	/* Configure peer authentification */
+	int verify_mode = WOLFSSL_VERIFY_NONE;
+	if (config->mutual_authentication == true)
+	{
+		verify_mode = WOLFSSL_VERIFY_PEER | WOLFSSL_VERIFY_FAIL_IF_NO_PEER_CERT;
+	}
+
+	wolfSSL_CTX_set_verify(context, verify_mode, NULL);
+
 	return ret;
 }
 
