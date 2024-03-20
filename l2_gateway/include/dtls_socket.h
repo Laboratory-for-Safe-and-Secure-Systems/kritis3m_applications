@@ -6,7 +6,6 @@
 #include "wolfssl.h"
 
 
-
 typedef struct DtlsSocket
 {
     L2_Gateway bridge; /**< The bridge associated with the packet socket. */
@@ -22,19 +21,11 @@ typedef struct DtlsSocket
     wolfssl_endpoint *dtls_client_endpoint;
     wolfssl_session *dtls_server_session;
     wolfssl_session *dtls_client_session; // holds its own file descripor since it is handled blocking
+
+    wolfssl_session* connection_session[5];
+
 }DtlsSocket;
 
 int init_dtls_socket_gateway(DtlsSocket* gateway, const l2_gateway_configg* config, connected_channel channel);
-
-
-
-
-// int dtls_socket_client_send(DtlsSocket *gateway, uint8_t *buffer, int buffer_len, int frame_start);
-
-// int dtls_socket_server_receive(DtlsSocket *gateway, int fd);
-
-// int dtls_socket_pipe(DtlsSocket *bridge);
-
-// int dtls_socket_close(DtlsSocket *bridge);
 
 #endif // _DTLS_SOCKET_H_

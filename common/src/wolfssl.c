@@ -59,7 +59,7 @@ struct wolfssl_session
 
 	struct sockaddr_in servAddr; /* server sockaddr */
 	socklen_t servSz;			 /* length of servAddr */
-	byte rxBuf[1600];
+	byte* rxBuf;
 	word32 rxSz;
 };
 
@@ -1338,4 +1338,9 @@ void wolfssl_free_endpoint(wolfssl_endpoint *endpoint)
 
 		free(endpoint);
 	}
+}
+
+
+int get_fd(wolfssl_session *session){
+	return wolfSSL_get_fd(session->session);
 }

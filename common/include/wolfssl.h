@@ -155,4 +155,6 @@ void wolfssl_free_session(wolfssl_session *session);
 /* Free ressources of an endpoint. */
 void wolfssl_free_endpoint(wolfssl_endpoint *endpoint);
 
+int get_fd(wolfssl_session *session);
+
 #endif
