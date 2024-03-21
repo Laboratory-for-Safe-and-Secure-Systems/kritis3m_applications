@@ -58,6 +58,21 @@ Z_KERNEL_STACK_DEFINE_IN(l2_gateway_stack, STACK_SIZE,
 						 __attribute__((section(CONFIG_RAM_SECTION_STACKS_2))));
 #endif
 
+int l2_gateway_register_fd(int fd, short events)
+{
+	return poll_set_add_fd(&theBridge.poll_set, fd, POLLIN);
+}
+
+void l2_gateway_update_events(int fd, short events)
+{
+	poll_set_update_events(&theBridge.poll_set, fd, events);
+}
+
+void l2_gateway_remove_fd(int fd)
+{
+	poll_set_remove_fd(&theBridge.poll_set, fd);
+}
+
 void reset_l2_gateway()
 {
 	poll_set_init(&theBridge.poll_set);
@@ -191,7 +206,7 @@ int l2_gateway_send(L2_Gateway *bridge, uint8_t *buffer, int buffer_len, int buf
 int l2_gateway_receive(L2_Gateway *bridge, int fd)
 {
 	receiveFunc receive = (receiveFunc)bridge->vtable[call_receive];
-	return receive(bridge, fd);
+	return receive(bridge, fd, NULL);
 }
 
 int l2_gateway_pipe(L2_Gateway *bridge)
@@ -210,15 +225,7 @@ L2_Gateway *find_bridge_by_fd(int fd)
 	{
 		return theBridge.asset;
 	}
-	else if (theBridge.tunnel->fd == fd)
-	{
-		return theBridge.tunnel;
-	}
-	// workaround sicne this design is just for testing puposes
-	if (fd > 0){
-		return theBridge.tunnel;
-	}
-
+	return theBridge.tunnel;
 }
 
 static void *l2_gateway_main_thread(void *ptr)
@@ -237,7 +244,7 @@ static void *l2_gateway_main_thread(void *ptr)
 	case PACKET_SOCKET:
 		asset = (L2_Gateway *)((PacketSocket *)malloc(sizeof(PacketSocket)));
 		memset(asset, 0, sizeof(PacketSocket));
-		memset((uint8_t*) asset->buf, 0, sizeof(asset->buf));
+		memset((uint8_t *)asset->buf, 0, sizeof(asset->buf));
 		ret = init_packet_socket_gateway((PacketSocket *)asset, config, ASSET);
 		if (ret < 0)
 		{
@@ -279,13 +286,13 @@ static void *l2_gateway_main_thread(void *ptr)
 	case PACKET_SOCKET:
 		tunnel = (L2_Gateway *)((PacketSocket *)malloc(sizeof(PacketSocket)));
 		memset((PacketSocket *)tunnel, 0, sizeof(PacketSocket));
-		memset((uint8_t*) tunnel->buf, 0, sizeof(tunnel->buf));
+		memset((uint8_t *)tunnel->buf, 0, sizeof(tunnel->buf));
 		init_packet_socket_gateway((PacketSocket *)tunnel, config, TUNNEL);
 		break;
 	case DTLS_SERVER_SOCKET:
 		tunnel = (L2_Gateway *)((DtlsSocket *)malloc(sizeof(DtlsSocket)));
 		memset((DtlsSocket *)tunnel, 0, sizeof(DtlsSocket));
-		memset((uint8_t*) tunnel->buf, 0, sizeof(tunnel->buf));
+		memset((uint8_t *)tunnel->buf, 0, sizeof(tunnel->buf));
 		ret = init_dtls_socket_gateway((DtlsSocket *)tunnel, config, TUNNEL);
 		// ret = init_dt((PacketSocket*)tunnel ,config,TUNNEL);
 
@@ -309,24 +316,6 @@ static void *l2_gateway_main_thread(void *ptr)
 	/* Set the new sockets to non-blocking */
 	setblocking(theBridge.asset->fd, false);
 	// setblocking(theBridge.tunnel->fd, false);
-
-	/* Add sockets to the poll_set */
-	ret = poll_set_add_fd(&theBridge.poll_set, theBridge.asset->fd, POLLIN);
-	if (ret != 0)
-	{
-		LOG_ERR("Error adding ASSET socket to poll_set");
-		l2_gateway_close(theBridge.asset);
-		l2_gateway_close(theBridge.tunnel);
-		return NULL;
-	}
-	ret = poll_set_add_fd(&theBridge.poll_set, theBridge.tunnel->fd, POLLIN);
-	if (ret != 0)
-	{
-		LOG_ERR("Error adding TUNNEL socket to poll_set");
-		l2_gateway_close(theBridge.asset);
-		l2_gateway_close(theBridge.tunnel);
-		return NULL;
-	}
 
 	while (1)
 	{
@@ -354,7 +343,7 @@ static void *l2_gateway_main_thread(void *ptr)
 			}
 			if (event == POLLIN)
 			{
-				int ret = l2_gateway_receive(t_bridge,fd);
+				int ret = l2_gateway_receive(t_bridge, fd);
 				if (ret < 0)
 				{
 					LOG_ERR("Failed to receive data on bridge %d, errno %d ", fd, errno);

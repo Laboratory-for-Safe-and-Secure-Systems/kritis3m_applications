@@ -97,6 +97,7 @@ int init_packet_socket_gateway(PacketSocket *l2_gw, const l2_gateway_configg *co
         return -1;
     }
 
+	l2_gateway_register_fd(l2_gw->bridge.fd, POLLIN);
 #if !defined(__ZEPHYR__)
     if (setsockopt(l2_gw->bridge.fd, SOL_PACKET, PACKET_IGNORE_OUTGOING, &(int){1}, sizeof(int)) < 0)
     {
@@ -245,7 +246,7 @@ int packet_socket_send(PacketSocket *l2_gw, uint8_t *buffer, int buffer_len, int
     return ret;
 }
 
-int packet_socket_receive(PacketSocket *l2_gw,int fd)
+int packet_socket_receive(PacketSocket *l2_gw,int fd, int (*_not_used_cb)(int fd))
 {
     if (l2_gw == NULL)
     {

@@ -95,7 +95,9 @@ struct L2_Gateway
 	int fd;
 };
 
-int l2_gatewaay_register_fd(int  fd);
+int l2_gateway_register_fd(int  fd, short events);
+void l2_gateway_update_events(int fd, short events);
+void l2_gateway_remove_fd(int fd);
 
 
 /**
@@ -124,7 +126,7 @@ typedef int (*sendFunc)(L2_Gateway *l2_gateway, uint8_t *buffer, int buffer_len,
  * @param self Pointer to the L2_Gateway object.
  * @return Integer indicating the status of the receive or l2_gw_pipe operation.
  */
-typedef int (*receiveFunc)(L2_Gateway *self, int fd);
+typedef int (*receiveFunc)(L2_Gateway *self, int fd, int (*callback)(int fd));
 
 
 typedef int (*PipeFunc)(L2_Gateway *self);

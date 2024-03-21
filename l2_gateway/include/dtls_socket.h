@@ -23,6 +23,7 @@ typedef struct DtlsSocket
     wolfssl_session *dtls_client_session; // holds its own file descripor since it is handled blocking
 
     wolfssl_session* connection_session[5];
+    wolfssl_session* client_sessions[5];
 
 }DtlsSocket;
 

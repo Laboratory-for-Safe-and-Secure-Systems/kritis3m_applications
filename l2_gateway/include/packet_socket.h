@@ -25,7 +25,7 @@ int init_packet_socket_bridge(PacketSocket *bridge,
 
 int packet_socket_send(PacketSocket *l2_gateway, uint8_t *buffer, int buffer_len, int frame_start);
 
-int packet_socket_receive(PacketSocket *l2_gateway, int fd);
+int packet_socket_receive(PacketSocket *l2_gateway, int fd, int (*regiser_cb) (int fd));
 
 int packet_socket_pipe(PacketSocket *l2_gateway);
 

@@ -94,7 +94,7 @@ int wolfssl_init(wolfssl_library_configuration const *config);
 wolfssl_endpoint *wolfssl_setup_dtls_server_endpoint(wolfssl_endpoint_configuration const *config);
 wolfssl_endpoint *wolfssl_setup_server_endpoint(wolfssl_endpoint_configuration const *config);
 
-int wolfssl_dtls_server_handshake(wolfssl_session *session);
+int wolfssl_dtls_server_handshake(wolfssl_session *session, uint8_t*buffer, int len);
 int wolfssl_dtls_client_handshake(wolfssl_session *session, struct sockaddr_in *servAddr);
 int wolfssl_dtls_is_connected(wolfssl_session *session);
 
