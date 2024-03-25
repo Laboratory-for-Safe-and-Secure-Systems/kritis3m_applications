@@ -5,6 +5,16 @@
 #include "l2_gateway.h"
 #include "wolfssl.h"
 
+enum dtls_type
+{
+    DTLS_SERVER,
+    DTLS_CLIENT
+};
+typedef struct dtls_session
+{
+    wolfssl_session *session;
+    enum dtls_type type;
+}dtls_session;
 
 typedef struct DtlsSocket
 {
@@ -19,14 +29,11 @@ typedef struct DtlsSocket
     uint16_t target_port;
     wolfssl_endpoint *dtls_server_endpoint;
     wolfssl_endpoint *dtls_client_endpoint;
-    wolfssl_session *dtls_server_session;
-    wolfssl_session *dtls_client_session; // holds its own file descripor since it is handled blocking
+    dtls_session dtls_sessions[5];
 
-    wolfssl_session* connection_session[5];
-    wolfssl_session* client_sessions[5];
 
-}DtlsSocket;
+} DtlsSocket;
 
-int init_dtls_socket_gateway(DtlsSocket* gateway, const l2_gateway_configg* config, connected_channel channel);
+int init_dtls_socket_gateway(DtlsSocket *gateway, const l2_gateway_configg *config, connected_channel channel);
 
 #endif // _DTLS_SOCKET_H_

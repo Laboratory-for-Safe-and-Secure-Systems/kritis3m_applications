@@ -18,6 +18,8 @@ LOG_MODULE_REGISTER(dtls_gateway);
 int dtls_socket_receive(DtlsSocket *gateway, int fd, int (*register_cb)(int fd));
 int dtls_socket_send(DtlsSocket *gateway, int fd, uint8_t *buffer, int buffer_len, int frame_start);
 
+int dlts_socket_create_connection(DtlsSocket *gateway, int fd);
+int dtls_socket_connect(DtlsSocket *gateway);
 int dtls_socket_close(DtlsSocket *bridge);
 int dtls_socket_pipe(DtlsSocket *gateway);
 
@@ -31,12 +33,12 @@ int dtls_socket_server_send(wolfssl_session *session);
 int init_dtls_client_socket_gateway(DtlsSocket *gateway);
 int init_dtls_server_socket_gateway(DtlsSocket *gateway);
 
-int add_session(wolfssl_session *sessions[], int sessions_len, wolfssl_session *session)
+int add_session(dtls_session *sessions, int sessions_len, dtls_session session)
 {
     int ret = -1;
     for (int i = 0; i < sessions_len; i++)
     {
-        if (sessions[i] == NULL)
+        if (sessions[i].session == NULL)
         {
             sessions[i] = session;
             ret = 1;
@@ -45,21 +47,22 @@ int add_session(wolfssl_session *sessions[], int sessions_len, wolfssl_session *
     }
     return ret;
 }
-int remove_session(wolfssl_session *sessions[], int sessions_len, wolfssl_session *session)
+
+int remove_session(dtls_session *sessions, int sessions_len, dtls_session session)
 {
     int ret = -1;
     for (int i = 0; i < sessions_len; i++)
     {
-        if (sessions[i] == session)
+        if (sessions[i].session == session.session)
         {
             // session found
             ret = 1;
             // check if next session is null, if so, we are done
-            if (i < (sessions_len - 1) && sessions[i + 1] == NULL)
+            if (i < (sessions_len - 1) && sessions[i + 1].session == NULL)
             {
-                sessions[i] = NULL;
+                sessions[i].session = NULL;
             }
-            else if (i < (sessions_len - 1) && sessions[i + 1] != NULL)
+            else if (i < (sessions_len - 1) && sessions[i + 1].session != NULL)
             {
                 for (int j = i; j < (sessions_len - 1); j++)
                 {
@@ -68,7 +71,7 @@ int remove_session(wolfssl_session *sessions[], int sessions_len, wolfssl_sessio
             }
             else if (i == (sessions_len - 1))
             {
-                sessions[i] = NULL;
+                sessions[i].session = NULL;
             }
             else
             {
@@ -79,16 +82,17 @@ int remove_session(wolfssl_session *sessions[], int sessions_len, wolfssl_sessio
     }
     return ret;
 }
-wolfssl_session *find_session_by_fd(int fd, wolfssl_session *sessions[], int sessions_len)
+
+dtls_session find_session_by_fd(int fd, dtls_session *sessions, int sessions_len)
 {
-    wolfssl_session *ret = NULL;
+    dtls_session ret = {0};
     for (int i = 0; i < sessions_len; i++)
     {
-        if (sessions[i] == NULL)
+        if (sessions[i].session == NULL)
         {
             break;
         }
-        wolfssl_session *session = sessions[i];
+        wolfssl_session *session = sessions[i].session;
         if (get_fd(session) == fd)
         {
             ret = sessions[i];
@@ -116,9 +120,9 @@ int init_dtls_socket_gateway(DtlsSocket *gateway, const l2_gateway_configg *conf
     gateway->bridge.type = DTLS_SERVER_SOCKET;
     gateway->config = config;
 
-    for (int i = 0; i < sizeof(gateway->connection_session) / sizeof(gateway->connection_session[0]); i++)
+    for (int i = 0; i < sizeof(gateway->dtls_sessions) / sizeof(gateway->dtls_sessions[0]); i++)
     {
-        gateway->connection_session[i] = NULL;
+        gateway->dtls_sessions[i].session = NULL;
     }
 
     // interface configuration
@@ -157,16 +161,81 @@ int init_dtls_socket_gateway(DtlsSocket *gateway, const l2_gateway_configg *conf
         dtls_socket_close(gateway);
     }
 
+    gateway->bridge.vtable[call_connect] = dtls_socket_connect;
+
+    return 1;
+}
+
+int dtls_socket_connect(DtlsSocket *gateway)
+{
+    // when is the tunnel connected: when one client is connected and an other server is connected
+
+    /** 1. create poll set where clients and servers can register
+     * then, regarding the fd, client or server handshake is called
+     * after 10 seconds of handshake the connection is closed
+     **/
+
+    int ret = -1;
+    int timeout = 10000;
+
+    poll_set poll_set;
+    poll_set_init(&poll_set);
+    for (int i = 0;
+         i < sizeof(gateway->dtls_sessions) / sizeof(gateway->dtls_sessions[0]);
+         i++)
+    {
+        // register all clients
+        if (gateway->dtls_sessions[i].session != NULL && gateway->dtls_sessions[i].type == DTLS_CLIENT)
+        {
+            poll_set_add_fd(&poll_set, get_fd(gateway->dtls_sessions[i].session), POLLIN | POLLOUT | POLLHUP);
+        }
+    }
+    poll_set_add_fd(&poll_set, gateway->bridge.fd, POLLIN | POLLOUT | POLLHUP);
+
+    while (1)
+    {
+        int ret = poll(poll_set.fds, poll_set.num_fds, -1);
+
+        if (ret < 0)
+        {
+            LOG_ERR("poll error: %d", errno);
+            continue;
+        }
+
+        for (int i = 0; i < poll_set.num_fds; i++)
+        {
+            int fd = poll_set.fds[i].fd;
+            int event = poll_set.fds[i].revents;
+            if (fd == gateway->bridge.fd && event & POLLIN)
+            {
+                int connection_fd = dlts_socket_create_connection(gateway, fd);
+                poll_set_add_fd(&poll_set, connection_fd, POLLIN | POLLOUT | POLLHUP);
+                continue;
+            }
+            else
+            {
+                // find dtls session
+                dtls_session session = find_session_by_fd(fd, gateway->dtls_sessions, sizeof(gateway->dtls_sessions) / sizeof(dtls_session));
+                if (session.session != NULL)
+                {
+                    wolfssl_handshake(session.session);
+                }
+            }
+        }
+    }
+
+one_client_and_one_server_conn:
     gateway->bridge.vtable[call_receive] = dtls_socket_receive;
     gateway->bridge.vtable[call_send] = dtls_socket_send;
     gateway->bridge.vtable[call_pipe] = dtls_socket_pipe;
-    return 1;
+    gateway->bridge.vtable[call_close] = dtls_socket_close;
 }
 
 int init_dtls_client_socket_gateway(DtlsSocket *gateway)
 {
     int ret = -1;
     struct sockaddr_in helper_addr;
+    wolfssl_session *session = NULL;
     int helper_addr_len = sizeof(helper_addr);
 
     gateway->dtls_client_endpoint = wolfssl_setup_dtls_client_endpoint(&gateway->config->dtls_config);
@@ -222,14 +291,19 @@ int init_dtls_client_socket_gateway(DtlsSocket *gateway)
     }
 
     setblocking(sockfd, false);
-    l2_gateway_register_fd(sockfd, POLLIN | POLLOUT | POLLHUP);
-    gateway->dtls_client_session = wolfssl_create_session(gateway->dtls_client_endpoint, sockfd);
-    if (gateway->dtls_client_session == NULL)
+    session = wolfssl_create_session(gateway->dtls_client_endpoint, sockfd);
+
+    if (session == NULL)
     {
         LOG_ERR("failed to create a wolfSSL session ");
         return -1;
     }
-    wolfssl_handshake(gateway->dtls_client_session);
+
+    dtls_session dtls_session = {.session = session, .type = DTLS_CLIENT};
+    add_session(gateway->dtls_sessions,
+                sizeof(gateway->dtls_sessions) / sizeof(dtls_session),
+                dtls_session);
+
     return 1;
 }
 
@@ -282,13 +356,6 @@ int init_dtls_server_socket_gateway(DtlsSocket *gateway)
         LOG_ERR("bind");
         return -1;
     }
-    gateway->dtls_server_session = wolfssl_create_session(gateway->dtls_server_endpoint, server_fd);
-    if (gateway->dtls_server_session == NULL)
-    {
-        LOG_ERR("failed to create a wolfSSL session ");
-        return -1;
-    }
-    setblocking(gateway->bridge.fd, true);
 
     // register functions
     return 1;
@@ -365,7 +432,6 @@ int dlts_socket_create_connection(DtlsSocket *gateway, int fd)
     }
 
     setblocking(server_connection_fd, false);
-    l2_gateway_register_fd(server_connection_fd, POLLIN | POLLOUT | POLLHUP);
 
     wolfssl_session *new_session = wolfssl_create_session(gateway->dtls_server_endpoint, server_connection_fd);
     if (new_session == NULL)
@@ -373,13 +439,14 @@ int dlts_socket_create_connection(DtlsSocket *gateway, int fd)
         LOG_ERR("failed to create new session");
         return -1;
     }
-
-    ret = add_session(gateway->connection_session,
-                sizeof(gateway->connection_session) / sizeof(gateway->connection_session[0]),
-                new_session);
-    if (ret < 0){
+    dtls_session dtls_session_t = {.session = new_session, .type = DTLS_SERVER};
+    ret = add_session(gateway->dtls_sessions,
+                      sizeof(gateway->dtls_sessions) / sizeof(dtls_session),
+                      dtls_session_t);
+    if (ret < 0)
+    {
         LOG_ERR("failed to add session to list");
-        return -1; 
+        return -1;
     }
 
     // pass handshake data to session. Note! that the bufer is a local variable and only valid for the current scope
@@ -391,31 +458,35 @@ int dlts_socket_create_connection(DtlsSocket *gateway, int fd)
         return -1;
     }
 
-    // add session to connections
-    int sessions_len = sizeof(gateway->connection_session) / sizeof(gateway->connection_session[0]);
-    ret = add_session(gateway->connection_session, sessions_len, new_session);
-    if (ret == -1)
-    {
-        LOG_ERR("failed to add session to list");
-        wolfssl_free_session(new_session);
-        return -1;
-    }
-
     return server_connection_fd;
 }
 
 int dtls_socket_send(DtlsSocket *gateway, int fd, uint8_t *buffer, int buffer_len, int frame_start)
 {
     int ret = -1;
+    wolfssl_session *session = NULL;
     if (fd == gateway->bridge.fd)
     {
         // there is no need to send anything....
         LOG_ERR("DTLS_SOCKET: Sending data on server socket is not supported");
     }
+    else if (fd < 0)
+    {
+        // from packet socket pipe for testing purposes:
+        session = gateway->client_sessions[0];
+        if (session != NULL)
+        {
+            ret = wolfssl_handshake(session);
+            ret = dtls_socket_client_send(session, buffer, buffer_len, frame_start);
+            if (ret < 0)
+            {
+                LOG_ERR("error");
+            }
+        }
+    }
     else
     {
 
-        wolfssl_session *session = NULL;
         session = find_session_by_fd(fd,
                                      gateway->client_sessions,
                                      sizeof(gateway->client_sessions) / sizeof(wolfssl_session *));
@@ -525,7 +596,7 @@ int dtls_socket_pipe(DtlsSocket *gateway)
         LOG_ERR("DTLS_PIPE: No data to pipe");
         return -1;
     }
-    int ret = l2_gateway_send(gateway->bridge.l2_gw_pipe, gateway->bridge.buf, gateway->bridge.len, offset);
+    int ret = l2_gateway_send(gateway->bridge.l2_gw_pipe, -1, gateway->bridge.buf, gateway->bridge.len, offset);
     if (ret < 0)
     {
         LOG_ERR("Failed to l2_gw_pipe data to other bridge: %d", ret);

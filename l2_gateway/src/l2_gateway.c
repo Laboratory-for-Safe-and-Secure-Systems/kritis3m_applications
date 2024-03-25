@@ -85,6 +85,7 @@ void reset_l2_gateway()
 		l2_gateway_close(theBridge.tunnel);
 	}
 }
+
 int configure_interfaces(l2_gateway_configg const *config)
 {
 	int ret = -1;
@@ -197,10 +198,10 @@ int l2_gateway_start(l2_gateway_configg const *config)
 	return 1;
 }
 
-int l2_gateway_send(L2_Gateway *bridge, uint8_t *buffer, int buffer_len, int buffer_start)
+int l2_gateway_send(L2_Gateway *bridge, int fd, uint8_t *buffer, int buffer_len, int buffer_start)
 {
 	sendFunc send = (sendFunc)bridge->vtable[call_send];
-	return send(bridge, buffer, buffer_len, buffer_start);
+	return send(bridge, fd, buffer, buffer_len, buffer_start);
 }
 
 int l2_gateway_receive(L2_Gateway *bridge, int fd)
@@ -228,98 +229,11 @@ L2_Gateway *find_bridge_by_fd(int fd)
 	return theBridge.tunnel;
 }
 
-static void *l2_gateway_main_thread(void *ptr)
+int standard_transfer(l2_gateway *l2_gw_container)
 {
-	l2_gateway *l2_gw_container = (l2_gateway *)ptr;
-	const l2_gateway_configg *config = &l2_gw_container->config;
-
-	int ret = -1;
-	reset_l2_gateway();
-	ret = configure_interfaces(config);
-	L2_Gateway *asset = NULL;
-	L2_Gateway *tunnel = NULL;
-
-	switch (config->asset_type)
-	{
-	case PACKET_SOCKET:
-		asset = (L2_Gateway *)((PacketSocket *)malloc(sizeof(PacketSocket)));
-		memset(asset, 0, sizeof(PacketSocket));
-		memset((uint8_t *)asset->buf, 0, sizeof(asset->buf));
-		ret = init_packet_socket_gateway((PacketSocket *)asset, config, ASSET);
-		if (ret < 0)
-		{
-			LOG_ERR("Failed to initialize packet socket gateway");
-			return NULL;
-		}
-		break;
-	case DTLS_SERVER_SOCKET:
-		asset = (L2_Gateway *)((DtlsSocket *)malloc(sizeof(DtlsSocket)));
-		memset((DtlsSocket *)asset, 0, sizeof(DtlsSocket));
-
-		ret = init_dtls_socket_gateway((DtlsSocket *)asset, config, ASSET);
-		if (ret < 0)
-		{
-			LOG_ERR("Failed to initialize dtls server socket gateway");
-			return NULL;
-		}
-		break;
-	case DTLS_CLIENT_SOCKET:
-		asset = (L2_Gateway *)((DtlsSocket *)malloc(sizeof(DtlsSocket)));
-		memset((DtlsSocket *)asset, 0, sizeof(DtlsSocket));
-		ret = init_dtls_socket_gateway((DtlsSocket *)asset, config, ASSET);
-		if (ret < 0)
-		{
-			LOG_ERR("Failed to initialize dtls client socket gateway");
-			return NULL;
-		}
-		break;
-	case UDP_SOCKET:
-		LOG_INF("Not implemented yet");
-		break;
-	case TUN_INTERFACE:
-		LOG_INF("Not implemented yet");
-		break;
-	}
-
-	switch (config->tunnel_type)
-	{
-	case PACKET_SOCKET:
-		tunnel = (L2_Gateway *)((PacketSocket *)malloc(sizeof(PacketSocket)));
-		memset((PacketSocket *)tunnel, 0, sizeof(PacketSocket));
-		memset((uint8_t *)tunnel->buf, 0, sizeof(tunnel->buf));
-		init_packet_socket_gateway((PacketSocket *)tunnel, config, TUNNEL);
-		break;
-	case DTLS_SERVER_SOCKET:
-		tunnel = (L2_Gateway *)((DtlsSocket *)malloc(sizeof(DtlsSocket)));
-		memset((DtlsSocket *)tunnel, 0, sizeof(DtlsSocket));
-		memset((uint8_t *)tunnel->buf, 0, sizeof(tunnel->buf));
-		ret = init_dtls_socket_gateway((DtlsSocket *)tunnel, config, TUNNEL);
-		// ret = init_dt((PacketSocket*)tunnel ,config,TUNNEL);
-
-		break;
-	case DTLS_CLIENT_SOCKET:
-		tunnel = (L2_Gateway *)((DtlsSocket *)malloc(sizeof(DtlsSocket)));
-		memset((DtlsSocket *)tunnel, 0, sizeof(DtlsSocket));
-		ret = init_dtls_socket_gateway((DtlsSocket *)tunnel, config, TUNNEL);
-		break;
-	case UDP_SOCKET:
-		LOG_ERR("UDP_SOCKET not implemented yet");
-		break;
-	case TUN_INTERFACE:
-		LOG_INF("Not implemented yet");
-		break;
-	}
-	theBridge.asset = asset;
-	theBridge.tunnel = tunnel;
-	marry_bridges(theBridge.asset, theBridge.tunnel);
-
-	/* Set the new sockets to non-blocking */
-	setblocking(theBridge.asset->fd, false);
-	// setblocking(theBridge.tunnel->fd, false);
 
 	while (1)
 	{
-		/* Block and wait for incoming packets */
 		int ret = poll(l2_gw_container->poll_set.fds, l2_gw_container->poll_set.num_fds, -1);
 		if (ret < 0)
 		{
@@ -347,49 +261,195 @@ static void *l2_gateway_main_thread(void *ptr)
 				if (ret < 0)
 				{
 					LOG_ERR("Failed to receive data on bridge %d, errno %d ", fd, errno);
-				}
-				else if ((ret > 0) && (ret < 20))
-				{
-					switch (ret)
-					{
-					case 2: // WOLFSSL_WANT_READ
-						LOG_INF("WOLFSSL_WANT_READ");
-						break;
-					case 3: // WOLFSSL_WANT_WRITE
-						LOG_INF("WOLFSSL_WANT_WRITE");
-
-						break;
-					case 7: // WOLFSSL_ERROR_WANT_CONNECT
-						LOG_INF("WOLFSSL_ERROR_WANT_CONNECT");
-						break;
-					case 8: // WOLFSSL_ERROR_WANT_ACCEPT
-						LOG_INF("WOLFSSL_ERROR_WANT_ACCEPT");
-						break;
-					default:
-						break;
-					}
+					goto return_standard_transfer;
 				}
 
 				if (ret == 0)
 				{
 					LOG_INF("Received 0 bytes, closing session");
 				}
-				l2_gateway_pipe(t_bridge);
+				ret = l2_gateway_pipe(t_bridge);
+				if (ret < 0)
+				{
+					LOG_ERR("Failed to pipe data on bridge %d", fd);
+					goto return_standard_transfer;
+				}
 			}
+
 			if (event == POLLOUT)
 			{
 				LOG_INF("POLLOUT event for fd %d", fd);
 			}
+
 			if (event & POLLERR)
 			{
 				LOG_ERR("Received error event for fd %d", fd);
 			}
 		}
-
-		/* Check lan fd */
 	}
 
-	return NULL;
+return_standard_transfer:
+	return -1;
+}
+int init_asset(const l2_gateway_configg *config, l2_gateway *gw)
+{
+	L2_Gateway *asset = NULL;
+	int ret = -1;
+	switch (config->asset_type)
+	{
+	case PACKET_SOCKET:
+		asset = (L2_Gateway *)((PacketSocket *)malloc(sizeof(PacketSocket)));
+		memset(asset, 0, sizeof(PacketSocket));
+		memset((uint8_t *)asset->buf, 0, sizeof(asset->buf));
+		ret = init_packet_socket_gateway((PacketSocket *)asset, config, ASSET);
+		if (ret < 0)
+		{
+			LOG_ERR("Failed to initialize packet socket gateway");
+			return -1;
+		}
+		break;
+	case DTLS_SERVER_SOCKET:
+		asset = (L2_Gateway *)((DtlsSocket *)malloc(sizeof(DtlsSocket)));
+		memset((DtlsSocket *)asset, 0, sizeof(DtlsSocket));
+
+		ret = init_dtls_socket_gateway((DtlsSocket *)asset, config, ASSET);
+		if (ret < 0)
+		{
+			LOG_ERR("Failed to initialize dtls server socket gateway");
+			return -1;
+		}
+		break;
+	case DTLS_CLIENT_SOCKET:
+		asset = (L2_Gateway *)((DtlsSocket *)malloc(sizeof(DtlsSocket)));
+		memset((DtlsSocket *)asset, 0, sizeof(DtlsSocket));
+		ret = init_dtls_socket_gateway((DtlsSocket *)asset, config, ASSET);
+		if (ret < 0)
+		{
+			LOG_ERR("Failed to initialize dtls client socket gateway");
+			return -1;
+		}
+		break;
+	case UDP_SOCKET:
+		LOG_INF("Not implemented yet");
+		break;
+	case TUN_INTERFACE:
+		LOG_INF("Not implemented yet");
+		break;
+	}
+
+	if (ret < 0)
+	{
+		LOG_ERR("Failed to initialize tunnel");
+		asset = asset;
+	}
+	gw->asset = asset;
+	return ret;
+}
+
+int init_tunnel(const l2_gateway_configg *config, l2_gateway *gw)
+{
+	L2_Gateway *tunnel = NULL;
+	int ret = -1;
+	switch (config->tunnel_type)
+	{
+	case PACKET_SOCKET:
+		tunnel = (L2_Gateway *)((PacketSocket *)malloc(sizeof(PacketSocket)));
+		memset((PacketSocket *)tunnel, 0, sizeof(PacketSocket));
+		memset((uint8_t *)tunnel->buf, 0, sizeof(tunnel->buf));
+		ret = init_packet_socket_gateway((PacketSocket *)tunnel, config, TUNNEL);
+		break;
+	case DTLS_SERVER_SOCKET:
+		tunnel = (L2_Gateway *)((DtlsSocket *)malloc(sizeof(DtlsSocket)));
+		memset((DtlsSocket *)tunnel, 0, sizeof(DtlsSocket));
+		memset((uint8_t *)tunnel->buf, 0, sizeof(tunnel->buf));
+		ret = init_dtls_socket_gateway((DtlsSocket *)tunnel, config, TUNNEL);
+		// ret = init_dt((PacketSocket*)tunnel ,config,TUNNEL);
+
+		break;
+	case DTLS_CLIENT_SOCKET:
+		tunnel = (L2_Gateway *)((DtlsSocket *)malloc(sizeof(DtlsSocket)));
+		memset((DtlsSocket *)tunnel, 0, sizeof(DtlsSocket));
+		ret = init_dtls_socket_gateway((DtlsSocket *)tunnel, config, TUNNEL);
+		break;
+	case UDP_SOCKET:
+		LOG_ERR("UDP_SOCKET not implemented yet");
+		break;
+	case TUN_INTERFACE:
+		LOG_INF("Not implemented yet");
+		break;
+	}
+	if (ret < 0)
+	{
+		LOG_ERR("Failed to initialize tunnel");
+		free(tunnel);
+		tunnel = NULL;
+	}
+	gw->tunnel = tunnel;
+	return ret;
+}
+
+static void *l2_gateway_main_thread(void *ptr)
+{
+	l2_gateway *l2_gw_container = (l2_gateway *)ptr;
+	const l2_gateway_configg *config = &l2_gw_container->config;
+
+	int ret = -1;
+	reset_l2_gateway();
+	ret = configure_interfaces(config);
+
+	/* Set the new sockets to non-blocking */
+	bool connected = false;
+	// delay for 20 sec
+	while (1)
+	{
+		if (connected)
+		{
+			// set asset link up
+			ret = standard_transfer(l2_gw_container);
+			if (ret < 0)
+			{
+				connected = false;
+				if (l2_gw_container->asset != NULL)
+				{
+					l2_gateway_close(l2_gw_container->asset);
+				}
+				if (l2_gw_container->tunnel != NULL)
+				{
+					l2_gateway_close(l2_gw_container->tunnel);
+				}
+			}
+		}
+		else
+		{
+			ret = init_tunnel(config, l2_gw_container);
+			if (ret < 0)
+			{
+				LOG_ERR("Failed to initialize tunnel");
+				return NULL;
+			}
+
+			ret = l2_gw_container->tunnel->vtable[call_connect](l2_gw_container->tunnel);
+			if (ret >= 0)
+			{
+				ret = init_asset(config, l2_gw_container);
+				if (ret < 0)
+				{
+					LOG_ERR("Failed to initialize tunnel");
+					return NULL;
+				}
+				marry_bridges(theBridge.asset, theBridge.tunnel);
+				connected = true;
+			}
+			else
+			{
+				// is this part of logic or part of dtls?
+				// l2_gateway_close(l2_gw_container->asset);
+				// l2_gateway_close(l2_gw_container->tunnel);
+			}
+		}
+
+		return NULL;
+	}
 }
 
 void marry_bridges(L2_Gateway *bridge1, L2_Gateway *bridge2)

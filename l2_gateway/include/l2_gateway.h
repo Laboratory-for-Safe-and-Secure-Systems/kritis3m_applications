@@ -85,7 +85,7 @@ typedef enum connected_channel
 typedef struct L2_Gateway L2_Gateway;
 struct L2_Gateway
 {
-	int (*vtable[4])();
+	int (*vtable[5])();
 	uint8_t buf[1600];
 	uint32_t len;
 	interface_type type;
@@ -114,7 +114,15 @@ void l2_gateway_remove_fd(int fd);
  * @param frame_start Flag indicating whether the frame is the start of a new frame.
  * @return Integer indicating the status of the send operation.
  */
-typedef int (*sendFunc)(L2_Gateway *l2_gateway, uint8_t *buffer, int buffer_len, int frame_start);
+typedef int (*sendFunc)(L2_Gateway *l2_gateway, int fd,  uint8_t *buffer, int buffer_len, int frame_start);
+
+
+typedef int (*periodic_callback)(L2_Gateway* l2_gateway);
+
+int add_cb(periodic_callback cb);
+int remove_cb(periodic_callback cb);
+
+
 
 /**
  * @brief Define a function pointer type for receiving or piping data through the l2_gateway.
@@ -145,7 +153,8 @@ enum
 	call_send,
 	call_receive,
 	call_pipe,
-	call_close
+	call_close,
+	call_connect
 };
 
 /**
@@ -159,7 +168,7 @@ enum
  * @param buffer_start Starting index of the data buffer.
  * @return Returns the number of bytes sent, or a negative error code on failure.
  */
-int l2_gateway_send(L2_Gateway *l2_gateway, uint8_t *buffer, int buffer_len, int buffer_start);
+int l2_gateway_send(L2_Gateway *l2_gateway,int fd, uint8_t *buffer, int buffer_len, int buffer_start);
 
 /**
  * @brief Receives data from the l2_gateway.

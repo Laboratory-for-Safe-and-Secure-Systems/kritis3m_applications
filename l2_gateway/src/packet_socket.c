@@ -339,7 +339,7 @@ int packet_socket_pipe(PacketSocket *l2_gw)
     /**
      * here would be a good place to apply a filter on the frames
      */
-    int ret = l2_gateway_send(l2_gw->bridge.l2_gw_pipe, l2_gw->bridge.buf, l2_gw->bridge.len, offset);
+    int ret = l2_gateway_send(l2_gw->bridge.l2_gw_pipe,-1, l2_gw->bridge.buf, l2_gw->bridge.len, offset);
     if (ret < 0)
     {
         LOG_ERR("Failed to l2_gw_pipe data to other bridge: %d", ret);
