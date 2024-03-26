@@ -18,11 +18,6 @@ typedef enum interface_type
 	DTLS_SERVER_SOCKET,
 } interface_type;
 
-typedef enum dtls_type
-{
-	DTLS_CLIENT,
-	DTLS_SERVER
-} dtls_type;
 
 typedef struct interface_config
 {

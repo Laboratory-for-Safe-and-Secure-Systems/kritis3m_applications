@@ -439,13 +439,10 @@ static void *l2_gateway_main_thread(void *ptr)
 				}
 				marry_bridges(theBridge.asset, theBridge.tunnel);
 				connected = true;
+			}else{
+				l2_gateway_close(l2_gw_container->tunnel);
 			}
-			else
-			{
-				// is this part of logic or part of dtls?
-				// l2_gateway_close(l2_gw_container->asset);
-				// l2_gateway_close(l2_gw_container->tunnel);
-			}
+
 		}
 
 		return NULL;
