@@ -102,7 +102,7 @@ dtls_session find_session_by_fd(int fd, dtls_session *sessions, int sessions_len
     return ret;
 }
 
-int init_dtls_socket_gateway(DtlsSocket *gateway, const l2_gateway_configg *config, connected_channel channel)
+int init_dtls_socket_gateway(DtlsSocket *gateway, const l2_gateway_config *config, connected_channel channel)
 {
     int ret = -1;
 
@@ -180,7 +180,7 @@ int register_fds(DtlsSocket *gateway)
             }
             else if (gateway->dtls_sessions[i].type == DTLS_CLIENT)
             {
-                ret = l2_gateway_register_fd(get_fd(gateway->dtls_sessions[i].session), POLLOUT | POLLHUP);
+                ret = l2_gateway_register_fd(get_fd(gateway->dtls_sessions[i].session), POLLHUP);
             }
         }
     }
@@ -343,7 +343,7 @@ int dtls_socket_connect(DtlsSocket *gateway)
         {
             int fd = poll_set.fds[i].fd;
             int event = poll_set.fds[i].revents;
-            if (fd == gateway->bridge.fd && event & POLLIN)
+            if ((fd == gateway->bridge.fd) && (event & POLLIN))
             {
                 int connection_fd = dlts_socket_create_connection(gateway, fd);
                 poll_set_add_fd(&poll_set, connection_fd, POLLIN | POLLHUP);
@@ -572,6 +572,12 @@ int dlts_socket_create_connection(DtlsSocket *gateway, int fd)
     return server_connection_fd;
 }
 
+/***
+ * Return 0 on success
+ * WOLFSSL_WANT_WRITE if not all bytes were sent 
+ * -1 on error
+ * */
+
 int dtls_socket_send(DtlsSocket *gateway, int fd, uint8_t *buffer, int buffer_len, int frame_start)
 {
     int ret = -1;
@@ -616,6 +622,10 @@ int dtls_socket_send(DtlsSocket *gateway, int fd, uint8_t *buffer, int buffer_le
     return ret;
 }
 
+/**
+ * returns the number of bytes received
+ * -1 on error
+ * **/
 int dtls_socket_receive(DtlsSocket *gateway, int fd, int (*register_cb)(int fd))
 {
     int ret = -1;
@@ -631,22 +641,16 @@ int dtls_socket_receive(DtlsSocket *gateway, int fd, int (*register_cb)(int fd))
         session = find_session_by_fd(fd,
                                      gateway->dtls_sessions,
                                      sizeof(gateway->dtls_sessions) / sizeof(dtls_session));
-
-        if (session.type == DTLS_SERVER)
-        {
-            ret = dtls_socket_server_receive(session.session, gateway);
-        }
-        else if (session.type == DTLS_CLIENT)
-        {
-            ret = dtls_socket_client_receive(session.session);
-        }
         if (session.session != NULL)
         {
-            ret = dtls_socket_server_receive(session.session, gateway);
-        }
-        else
-        {
-            LOG_INF("DTLS_SOCKET receive: No session found for fd: %d", fd);
+            if (session.type == DTLS_SERVER)
+            {
+                ret = dtls_socket_server_receive(session.session, gateway);
+            }
+            else if (session.type == DTLS_CLIENT)
+            {
+                ret = dtls_socket_client_receive(session.session);
+            }
         }
     }
     return ret;
@@ -670,7 +674,26 @@ int dtls_socket_server_receive(wolfssl_session *session, DtlsSocket *gateway)
 int dtls_socket_client_receive(wolfssl_session *session)
 {
     int ret = wolfssl_handshake(session);
-    LOG_INF("DTLS CLIENT: Handshake status: %d", ret);
+    if (ret < 0)
+    {
+        int fd = get_fd(session);
+        wolfssl_close_session(session);
+        close(fd);
+        l2_gateway_remove_fd(fd);
+        wolfssl_free_session(session);
+    }
+    // init buffer, receive on dtls socket and print out received bytes:
+    uint8_t buffer[1700];
+    int len = wolfssl_receive(session, buffer, sizeof(buffer));
+    if (len > 0)
+    {
+        LOG_INF("DTLS_CLIENT: Received %d bytes", len);
+        for (int i = 0; i < len; i++)
+        {
+            LOG_INF("0x%02x ", buffer[i]);
+        }
+    }
+
     return 0;
 }
 
@@ -715,13 +738,15 @@ int dtls_socket_pipe(DtlsSocket *gateway)
 int dtls_socket_close(DtlsSocket *bridge)
 {
     bridge->bridge.l2_gw_pipe = NULL;
-    close(bridge->bridge.fd);
 
     for (int i = 0; i < sizeof(bridge->dtls_sessions) / sizeof(dtls_session); i++)
     {
         if (bridge->dtls_sessions[i].session != NULL)
         {
+            int fd = get_fd(bridge->dtls_sessions[i].session);
+            wolfssl_close_session(bridge->dtls_sessions[i].session);
             wolfssl_free_session(bridge->dtls_sessions[i].session);
+            close(fd);
             bridge->dtls_sessions[i].session = NULL;
         }
     }
@@ -729,6 +754,7 @@ int dtls_socket_close(DtlsSocket *bridge)
     wolfssl_free_endpoint(bridge->dtls_server_endpoint);
     wolfssl_free_endpoint(bridge->dtls_client_endpoint);
 
+    close(bridge->bridge.fd);
     free(bridge);
 
     return 0;

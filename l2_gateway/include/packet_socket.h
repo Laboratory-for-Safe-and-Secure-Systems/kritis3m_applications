@@ -17,13 +17,13 @@ struct PacketSocket
     struct sockaddr_ll source; /**< The source address, which is used by the recieve function. */
 };
 
-int init_packet_socket_gateway(PacketSocket *l2_gw, const l2_gateway_configg *config, connected_channel channel);
+int init_packet_socket_gateway(PacketSocket *l2_gw, const l2_gateway_config *config, connected_channel channel);
 
 int init_packet_socket_bridge(PacketSocket *bridge,
                               const interface_config *interface,
                               connected_channel channel);
 
-int packet_socket_send(PacketSocket *l2_gateway, uint8_t *buffer, int buffer_len, int frame_start);
+int packet_socket_send(PacketSocket *l2_gateway, int fd, uint8_t *buffer, int buffer_len, int frame_start);
 
 int packet_socket_receive(PacketSocket *l2_gateway, int fd, int (*regiser_cb) (int fd));
 

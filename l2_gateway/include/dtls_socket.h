@@ -23,7 +23,7 @@ typedef struct DtlsSocket
     char const *own_ip_address;
     uint16_t client_port;
     uint16_t server_port;
-    l2_gateway_configg *config;
+    l2_gateway_config *config;
 
     char const *target_ip_address;
     uint16_t target_port;
@@ -34,6 +34,6 @@ typedef struct DtlsSocket
 
 } DtlsSocket;
 
-int init_dtls_socket_gateway(DtlsSocket *gateway, const l2_gateway_configg *config, connected_channel channel);
+int init_dtls_socket_gateway(DtlsSocket *gateway, const l2_gateway_config *config, connected_channel channel);
 
 #endif // _DTLS_SOCKET_H_

@@ -30,7 +30,7 @@
 
 LOG_MODULE_REGISTER(packet_socket_l2_gw);
 
-int init_packet_socket_gateway(PacketSocket *l2_gw, const l2_gateway_configg *config, connected_channel channel)
+int init_packet_socket_gateway(PacketSocket *l2_gw, const l2_gateway_config *config, connected_channel channel)
 {
 
     int proto = ETH_P_ALL;
@@ -97,7 +97,6 @@ int init_packet_socket_gateway(PacketSocket *l2_gw, const l2_gateway_configg *co
         return -1;
     }
 
-	l2_gateway_register_fd(l2_gw->bridge.fd, POLLIN);
 #if !defined(__ZEPHYR__)
     if (setsockopt(l2_gw->bridge.fd, SOL_PACKET, PACKET_IGNORE_OUTGOING, &(int){1}, sizeof(int)) < 0)
     {
@@ -105,6 +104,8 @@ int init_packet_socket_gateway(PacketSocket *l2_gw, const l2_gateway_configg *co
         return -1;
     }
 #endif
+
+    l2_gateway_register_fd(l2_gw->bridge.fd, POLLIN);
 
     l2_gw->bridge.vtable[call_send] = (int (*)())packet_socket_send;
     l2_gw->bridge.vtable[call_receive] = (int (*)())packet_socket_receive;
@@ -205,7 +206,8 @@ int packet_socket_close(PacketSocket *l2_gw)
     free(l2_gw);
     return 1;
 }
-int packet_socket_send(PacketSocket *l2_gw, uint8_t *buffer, int buffer_len, int frame_start)
+// fd is not used in this function
+int packet_socket_send(PacketSocket *l2_gw, int _fd, uint8_t *buffer, int buffer_len, int frame_start)
 {
     if (l2_gw == NULL)
     {
@@ -246,7 +248,7 @@ int packet_socket_send(PacketSocket *l2_gw, uint8_t *buffer, int buffer_len, int
     return ret;
 }
 
-int packet_socket_receive(PacketSocket *l2_gw,int fd, int (*_not_used_cb)(int fd))
+int packet_socket_receive(PacketSocket *l2_gw, int fd, int (*_not_used_cb)(int fd))
 {
     if (l2_gw == NULL)
     {
@@ -271,6 +273,10 @@ int packet_socket_receive(PacketSocket *l2_gw,int fd, int (*_not_used_cb)(int fd
     {
         LOG_ERR("Received packet with %d bytes, which is too large for buffer. Throwing packet", ret);
         l2_gw->bridge.len = 0;
+        // sending back packet too big
+        uint8_t new_src_mac[6];
+        memcpy(new_src_mac, &l2_gw->bridge.buf[0], 6);
+        
         return 1;
     }
 
@@ -335,11 +341,10 @@ int packet_socket_pipe(PacketSocket *l2_gw)
         return 1;
     }
 
-
     /**
      * here would be a good place to apply a filter on the frames
      */
-    int ret = l2_gateway_send(l2_gw->bridge.l2_gw_pipe,-1, l2_gw->bridge.buf, l2_gw->bridge.len, offset);
+    int ret = l2_gateway_send(l2_gw->bridge.l2_gw_pipe, -1, l2_gw->bridge.buf, l2_gw->bridge.len, offset);
     if (ret < 0)
     {
         LOG_ERR("Failed to l2_gw_pipe data to other bridge: %d", ret);

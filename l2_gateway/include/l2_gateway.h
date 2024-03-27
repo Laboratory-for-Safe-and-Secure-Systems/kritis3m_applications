@@ -26,13 +26,8 @@ typedef struct interface_config
 	void *interface;
 } interface_config;
 
-typedef struct l2_gateway_config
-{
-	interface_config asset_interface;
-	interface_config tunnel_interface;
-} l2_gateway_config;
 
-typedef struct l2_gateway_configg
+typedef struct l2_gateway_config
 {
 	interface_type asset_type;
 	const char *asset_ip;
@@ -50,7 +45,7 @@ typedef struct l2_gateway_configg
 	int tunnel_vlan_tag;
 	struct wolfssl_endpoint_configuration dtls_config;
 
-} l2_gateway_configg;
+} l2_gateway_config;
 
 struct dtls_config
 {
@@ -81,7 +76,7 @@ typedef struct L2_Gateway L2_Gateway;
 struct L2_Gateway
 {
 	int (*vtable[5])();
-	uint8_t buf[1600];
+	uint8_t buf[1700];
 	uint32_t len;
 	interface_type type;
 	connected_channel channel;
@@ -199,7 +194,6 @@ int l2_gateway_close(L2_Gateway *l2_gateway);
  *
  * Returns 0 on success, -1 on failure (error message is printed to console).
  */
-int l2_gateway_run(l2_gateway_config const *config);
 
 
 int l2_gateway_start(l2_gateway_configg const *config);

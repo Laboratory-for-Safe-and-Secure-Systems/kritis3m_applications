@@ -12,6 +12,12 @@
 #if defined(__ZEPHYR__)
 
 #include <zephyr/net/ethernet.h>
+#include <zephyr/net/virtual.h>
+#include <zephyr/net/virtual_mgmt.h>
+
+#include <zephyr/kernel.h>
+
+#include <zephyr/net/conn_mgr_monitor.h>
 
 #else
 
@@ -28,6 +34,7 @@
 #include "logging.h"
 #include "poll_set.h"
 #include "networking.h"
+#include <zephyr/net/net_mgmt.h>
 
 LOG_MODULE_REGISTER(l2_gateway);
 
@@ -38,7 +45,7 @@ typedef struct l2_gateway
 	pthread_attr_t thread_attr;
 	L2_Gateway *asset;
 	L2_Gateway *tunnel;
-	l2_gateway_configg config;
+	l2_gateway_config config;
 } l2_gateway;
 
 static l2_gateway theBridge = {
@@ -60,7 +67,7 @@ Z_KERNEL_STACK_DEFINE_IN(l2_gateway_stack, STACK_SIZE,
 
 int l2_gateway_register_fd(int fd, short events)
 {
-	return poll_set_add_fd(&theBridge.poll_set, fd, POLLIN);
+	return poll_set_add_fd(&theBridge.poll_set, fd, events);
 }
 
 void l2_gateway_update_events(int fd, short events)
@@ -86,7 +93,7 @@ void reset_l2_gateway()
 	}
 }
 
-int configure_interfaces(l2_gateway_configg const *config)
+int configure_interfaces(l2_gateway_config const *config)
 {
 	int ret = -1;
 
@@ -96,7 +103,7 @@ int configure_interfaces(l2_gateway_configg const *config)
 	// set tunnel vlan tag
 	if (config->tunnel_vlan_tag > 0)
 	{
-
+		net_if_set_promisc(network_interfaces()->tunnel);
 		ret = net_eth_vlan_enable(network_interfaces()->tunnel, config->tunnel_vlan_tag);
 		if (ret < 0)
 		{
@@ -114,6 +121,8 @@ int configure_interfaces(l2_gateway_configg const *config)
 			LOG_ERR("Cannot enable VLAN for tag %d: error %d", config->asset_vlan_tag, ret);
 			return ret;
 		}
+		// net_virtual_set_flags(network_interfaces()->asset, NET_IF_PROMISC);
+
 	}
 
 #else
@@ -124,55 +133,54 @@ int configure_interfaces(l2_gateway_configg const *config)
 	}
 #endif
 
-// ***********Promisous MODE AREA ***********
-#if defined(__ZEPHYR__)
+	// ***********Promisous MODE AREA ***********
+	// #if defined(__ZEPHYR__)
 
-#if IS_ENABLED(CONFIG_NET_PROMISCUOUS_MODE)
-	if (config->asset_type == PACKET_SOCKET)
-	{
-		ret = net_if_set_promisc(network_interfaces()->asset);
-		if (ret < 0)
-		{
-			LOG_ERR("Cannot set promiscuous mode for asset: error %d", ret);
-			return ret;
-		}
-	}
-	if (config->tunnel_type == PACKET_SOCKET)
-	{
-		ret = net_if_set_promisc(network_interfaces()->tunnel);
-		if (ret < 0)
-		{
-			LOG_ERR("Cannot set promiscuous mode for tunnel: error %d", ret);
-			return ret;
-		}
-	}
-#endif
+	// #if IS_ENABLED(CONFIG_NET_PROMISCUOUS_MODE)
+	// 	if (config->asset_type == PACKET_SOCKET)
+	// 	{
+	// 		ret = net_if_set_promisc(network_interfaces()->asset);
+	// 		if (ret < 0)
+	// 		{
+	// 			LOG_ERR("Cannot set promiscuous mode for asset: error %d", ret);
+	// 			return ret;
+	// 		}
+	// 	}
+	// 	if (config->tunnel_type == PACKET_SOCKET)
+	// 	{
+	// 		ret = net_if_set_promisc(network_interfaces()->tunnel);
+	// 		if (ret < 0)
+	// 		{
+	// 			LOG_ERR("Cannot set promiscuous mode for tunnel: error %d", ret);
+	// 			return ret;
+	// 		}
+	// 	}
+	// #endif
 
-// #else
-// 	if (config->asset_type == PACKET_SOCKET)
-// 	{
-// 		ret = set_promiscous_mode(network_interfaces()->asset, true);
-// 		if (ret < 0)
-// 		{
-// 			LOG_ERR("Cannot set promiscuous mode for asset: error %d", ret);
-// 			return ret;
-// 		}
-// 	}
-// 	if (config->tunnel_type == PACKET_SOCKET)
-// 	{
-// 		ret = set_promiscous_mode(network_interfaces()->tunnel, true);
-// 		if (ret < 0)
-// 		{
-// 			LOG_ERR("Cannot set promiscuous mode for tunnel: error %d", ret);
-// 			return ret;
-// 		}
-// 	}
-#endif
+	// #else
+	// 	if (config->asset_type == PACKET_SOCKET)
+	// 	{
+	// 		ret = set_promiscous_mode(network_interfaces()->asset, true);
+	// 		if (ret < 0)
+	// 		{
+	// 			LOG_ERR("Cannot set promiscuous mode for asset: error %d", ret);
+	// 			return ret;
+	// 		}
+	// 	}
+	// 	if (config->tunnel_type == PACKET_SOCKET)
+	// 	{
+	// 		ret = set_promiscous_mode(network_interfaces()->tunnel, true);
+	// 		if (ret < 0)
+	// 		{
+	// 			LOG_ERR("Cannot set promiscuous mode for tunnel: error %d", ret);
+	// 			return ret;
+	// 		}
+	// 	}
 
 	return ret;
 }
 
-int l2_gateway_start(l2_gateway_configg const *config)
+int l2_gateway_start(l2_gateway_config const *config)
 {
 	int ret;
 	theBridge.config = *config;
@@ -255,7 +263,7 @@ int standard_transfer(l2_gateway *l2_gw_container)
 				LOG_ERR("Received event for unknown fd %d", fd);
 				continue;
 			}
-			if (event == POLLIN)
+			if (event & POLLIN)
 			{
 				int ret = l2_gateway_receive(t_bridge, fd);
 				if (ret < 0)
@@ -263,20 +271,20 @@ int standard_transfer(l2_gateway *l2_gw_container)
 					LOG_ERR("Failed to receive data on bridge %d, errno %d ", fd, errno);
 					goto return_standard_transfer;
 				}
-
 				if (ret == 0)
 				{
-					LOG_INF("Received 0 bytes, closing session");
+					continue;
 				}
+
 				ret = l2_gateway_pipe(t_bridge);
 				if (ret < 0)
 				{
 					LOG_ERR("Failed to pipe data on bridge %d", fd);
-					goto return_standard_transfer;
+					// goto return_standard_transfer;
 				}
 			}
 
-			if (event == POLLOUT)
+			if (event & POLLOUT)
 			{
 				LOG_INF("POLLOUT event for fd %d", fd);
 			}
@@ -285,13 +293,18 @@ int standard_transfer(l2_gateway *l2_gw_container)
 			{
 				LOG_ERR("Received error event for fd %d", fd);
 			}
+			if (event & POLLHUP)
+			{
+				LOG_ERR("Received HUP event for fd %d", fd);
+			}
 		}
 	}
 
 return_standard_transfer:
+	LOG_INF("Standard transfer exiting");
 	return -1;
 }
-int init_asset(const l2_gateway_configg *config, l2_gateway *gw)
+int init_asset(const l2_gateway_config *config, l2_gateway *gw)
 {
 	L2_Gateway *asset = NULL;
 	int ret = -1;
@@ -346,7 +359,7 @@ int init_asset(const l2_gateway_configg *config, l2_gateway *gw)
 	return ret;
 }
 
-int init_tunnel(const l2_gateway_configg *config, l2_gateway *gw)
+int init_tunnel(const l2_gateway_config *config, l2_gateway *gw)
 {
 	L2_Gateway *tunnel = NULL;
 	int ret = -1;
@@ -391,7 +404,7 @@ int init_tunnel(const l2_gateway_configg *config, l2_gateway *gw)
 static void *l2_gateway_main_thread(void *ptr)
 {
 	l2_gateway *l2_gw_container = (l2_gateway *)ptr;
-	const l2_gateway_configg *config = &l2_gw_container->config;
+	const l2_gateway_config *config = &l2_gw_container->config;
 
 	int ret = -1;
 	reset_l2_gateway();
@@ -439,14 +452,16 @@ static void *l2_gateway_main_thread(void *ptr)
 				}
 				marry_bridges(theBridge.asset, theBridge.tunnel);
 				connected = true;
-			}else{
+			}
+			else
+			{
 				l2_gateway_close(l2_gw_container->tunnel);
 			}
-
 		}
-
-		return NULL;
 	}
+
+	return NULL;
+	LOG_INF("L2 bridge main thread exiting");
 }
 
 void marry_bridges(L2_Gateway *bridge1, L2_Gateway *bridge2)
