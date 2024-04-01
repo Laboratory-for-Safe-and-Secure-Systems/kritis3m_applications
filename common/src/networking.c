@@ -96,6 +96,7 @@ int initialize_network_interfaces()
 
 	ifaces.management = net_if_get_default();
 	net_if_foreach(iface_cb, &ifaces);
+	net_virtual_set_flags(network_interfaces()->asset, NET_IF_PROMISC);
 
 	// ret = configure_management();
 	// if (ret < 0)
@@ -216,7 +217,6 @@ int configure_management()
 		LOG_ERR("Invalid gateway address %s for the Asset interface: error %d", CONFIG_NET_IP_MANAGEMENT_GW, ret);
 		return ret;
 	}
-	
 
 	net_if_ipv4_set_gw(ifaces.management, &helper_addr);
 	return ret;
@@ -227,9 +227,9 @@ int configure_management()
 /* Initialize the network interfaces */
 int initialize_network_interfaces()
 {
-	ifaces.management = "eth0";
-	ifaces.tunnel = "vlan400";
-	ifaces.asset = "vlan300";
+	ifaces.management = "wlp0s20f3";
+	ifaces.tunnel = "wlp0s20f3";
+	ifaces.asset = "wlp0s20f3";
 
 	return 0;
 }

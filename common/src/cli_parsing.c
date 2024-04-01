@@ -53,7 +53,7 @@ static const struct option cli_options[] =
         {"forward_proxy", no_argument, 0, 'x'},
         {"echo_server", no_argument, 0, 'y'},
         {"echo_client", no_argument, 0, 'z'},
-        {"l2_gateway", no_argument, 0, 'u'},
+        {"l2_gateway", no_argument, 0, 'U'},
         {"incoming", required_argument, 0, 'a'},
         {"outgoing", required_argument, 0, 'b'},
         {"tunnel_mode", required_argument, 0, 'A'},
@@ -64,9 +64,6 @@ static const struct option cli_options[] =
         {"tunnel_target_ip", required_argument, 0, 'F'},
         {"asset_vlan_tag", required_argument, 0, 'G'},
         {"tunnel_vlan_tag", required_argument, 0, 'H'},
-        {"ca_cert", required_argument, 0, 'I'},
-        {"serv_cert", required_argument, 0, 'J'},
-        {"serv_key", required_argument, 0, 'K'},
         {"identity", required_argument, 0, 'v'},
         {"cert", required_argument, 0, 'c'},
         {"key", required_argument, 0, 'k'},
@@ -93,7 +90,7 @@ static void print_help(const struct shell *sh, char const *name);
  * on console).
  */
 int parse_cli_arguments(enum application_role *role, struct proxy_config *proxy_config,
-                        wolfssl_library_configuration *wolfssl_config, l2_bridge_config *bridge_config, l2_gateway_configg *l2_gw_config,
+                        wolfssl_library_configuration *wolfssl_config, l2_bridge_config *bridge_config, l2_gateway_config *l2_gw_config,
                         struct shell const *sh, size_t argc, char **argv)
 {
         if ((role == NULL) || (proxy_config == NULL))
@@ -194,7 +191,7 @@ int parse_cli_arguments(enum application_role *role, struct proxy_config *proxy_
 #endif
         while (true)
         {
-                int result = getopt_long(argc, argv, "wxyzua:b:B:V:C:D:E:F:G:H:v:c:k:i:r:sm:de:f:h", cli_options, &index);
+                int result = getopt_long(argc, argv, "wxyzUa:b:B:V:C:D:E:F:G:H:v:c:k:i:r:sm:de:f:h", cli_options, &index);
 
                 if (result == -1)
                         break; /* end of list */
@@ -233,14 +230,14 @@ int parse_cli_arguments(enum application_role *role, struct proxy_config *proxy_
                         }
                         *role = ROLE_ECHO_CLIENT;
                         break;
-                case 'u':
+                case 'U':
                         if (*role != NOT_SET)
                         {
                                 shell_error(sh, "you can only specify one role at a time");
                                 return -1;
                         }
                         LOG_INF("L2 Gateway selected");
-                        *role = L2_GATEWAY;
+                        *role = ROLE_L2_GATEWAY;
                         break;
                 case 'a':
                 {
@@ -295,13 +292,9 @@ int parse_cli_arguments(enum application_role *role, struct proxy_config *proxy_
                         {
                                 l2_gw_config->asset_type = UDP_SOCKET;
                         }
-                        else if (strcmp(optarg, "dtls_client_socket") == 0)
+                        else if (strcmp(optarg, "dtls_socket") == 0)
                         {
-                                l2_gw_config->asset_type = DTLS_CLIENT_SOCKET;
-                        }
-                        else if (strcmp(optarg, "dtls_server_socket") == 0)
-                        {
-                                l2_gw_config->asset_type = DTLS_SERVER_SOCKET;
+                                l2_gw_config->asset_type = DTLS_SOCKET;
                         }
                         else
                         {
@@ -321,13 +314,9 @@ int parse_cli_arguments(enum application_role *role, struct proxy_config *proxy_
                         {
                                 l2_gw_config->tunnel_type = UDP_SOCKET;
                         }
-                        else if (strcmp(optarg, "dtls_client_socket") == 0)
+                        else if (strcmp(optarg, "dtls_socket") == 0)
                         {
-                                l2_gw_config->tunnel_type = DTLS_CLIENT_SOCKET;
-                        }
-                        else if (strcmp(optarg, "dtls_server_socket") == 0)
-                        {
-                                l2_gw_config->tunnel_type = DTLS_SERVER_SOCKET;
+                                l2_gw_config->tunnel_type = DTLS_SOCKET;
                         }
                         else
                         {
@@ -473,15 +462,6 @@ int parse_cli_arguments(enum application_role *role, struct proxy_config *proxy_
                         break;
                 }
 
-                case 'I':
-                        certs.ca_CAcertLoc = optarg;
-                        break;
-                case 'J':
-                        certs.ca_servCertLoc = optarg;
-                        break;
-                case 'K':
-                        certs.ca_servKeyLoc = optarg;
-                        break;
 
                 case 'v':
 #if defined(__ZEPHYR__)
@@ -585,8 +565,8 @@ static void print_help(const struct shell *sh, char const *name)
 #if defined(__ZEPHYR__)
         shell_print(sh, "  -v, --identity name              use stored certificates for given identity");
 #endif
-        shell_print(sh, "  --asset_mode                     !just for l2_gateway! \"packet_socket\" | \"udp_socket\" | \"dtls_client_socket\" | \"dtls_server_socket\"");
-        shell_print(sh, "  --tunnel_mode                    !just for l2_gateway! \"packet_socket\" | \"udp_socket\" | \"dtls_client_socket\" | \"dtls_server_socket\"");
+        shell_print(sh, "  --asset_mode                     !just for l2_gateway! \"packet_socket\" | \"udp_socket\" | \"dtls_socket\" ");
+        shell_print(sh, "  --tunnel_mode                    !just for l2_gateway! \"packet_socket\" | \"udp_socket\" | \"dtls_socket\" ");
         shell_print(sh, "  --tunnel_vlan_tag                vlan tag for tunnel iface");
         shell_print(sh, "  --asset_vlan_tag                vlan tag for tunnel iface");
         shell_print(sh, "  -c, --cert file_path             path to the certificate file");

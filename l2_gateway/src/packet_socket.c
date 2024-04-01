@@ -283,21 +283,6 @@ int packet_socket_receive(PacketSocket *l2_gw, int fd, int (*_not_used_cb)(int f
     l2_gw->bridge.len = ret;
     return ret;
 }
-enum net_verdict filter_no_vlan_packet(uint8_t *packet, int offset, int len)
-{
-
-    return NET_OK;
-
-    // do not filter arp
-    // dont send arp
-    uint16_t eth_type = ntohs(*(uint16_t *)&packet[offset + 12]);
-    printf("\neth_type: %x\n", eth_type);
-    if (eth_type == NET_ETH_PTYPE_ARP)
-    {
-        return NET_DROP;
-    }
-    return NET_OK;
-}
 int packet_socket_pipe(PacketSocket *l2_gw)
 {
     if (l2_gw == NULL)

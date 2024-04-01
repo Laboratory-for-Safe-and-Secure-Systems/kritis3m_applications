@@ -14,8 +14,7 @@ typedef enum interface_type
 	TUN_INTERFACE, /**< TUN interface type. */
 	PACKET_SOCKET, /**< Packet socket interface type. */
 	UDP_SOCKET,
-	DTLS_CLIENT_SOCKET,
-	DTLS_SERVER_SOCKET,
+	DTLS_SOCKET,
 } interface_type;
 
 
@@ -41,6 +40,9 @@ typedef struct l2_gateway_config
 	int tunnel_port;
 	const char *tunnel_target_ip;
 	int tunnel_target_port;
+
+	int asset_client_port;
+	int tunnel_client_port;
 
 	int tunnel_vlan_tag;
 	struct wolfssl_endpoint_configuration dtls_config;
@@ -108,10 +110,6 @@ typedef int (*sendFunc)(L2_Gateway *l2_gateway, int fd,  uint8_t *buffer, int bu
 
 
 typedef int (*periodic_callback)(L2_Gateway* l2_gateway);
-
-int add_cb(periodic_callback cb);
-int remove_cb(periodic_callback cb);
-
 
 
 /**
@@ -196,7 +194,7 @@ int l2_gateway_close(L2_Gateway *l2_gateway);
  */
 
 
-int l2_gateway_start(l2_gateway_configg const *config);
+int l2_gateway_start(l2_gateway_config const *config);
 
 /* Terminate the Layer 2 l2_gateway.
  *

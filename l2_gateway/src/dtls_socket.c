@@ -107,8 +107,12 @@ int init_dtls_socket_gateway(DtlsSocket *gateway, const l2_gateway_config *confi
     int ret = -1;
 
     gateway->bridge.vtable[call_close] = dtls_socket_close;
-    // initialisation
+// initialisation
+#if defined(__ZEPHYR__)
     gateway->client_port = (channel == ASSET) ? CONFIG_NET_IP_ASSET_CLIENT_PORT : CONFIG_NET_IP_TUNNEL_CLIENT_PORT; // we dont care about the port
+#else
+    gateway->client_port = 43422; // (channel == ASSET) ? config->asset_client_port: config->tunnel_client_port;
+#endif
     gateway->server_port = (channel == ASSET) ? config->asset_port : config->tunnel_port;
 
     gateway->target_port = (channel == ASSET) ? config->asset_target_port : config->tunnel_target_port;
@@ -117,7 +121,7 @@ int init_dtls_socket_gateway(DtlsSocket *gateway, const l2_gateway_config *confi
     gateway->target_ip_address = (channel == ASSET) ? config->asset_target_ip : config->tunnel_target_ip;
 
     gateway->bridge.channel = channel;
-    gateway->bridge.type = DTLS_SERVER_SOCKET;
+    gateway->bridge.type = DTLS_SOCKET;
     gateway->config = config;
 
     for (int i = 0; i < sizeof(gateway->dtls_sessions) / sizeof(gateway->dtls_sessions[0]); i++)
@@ -144,7 +148,6 @@ int init_dtls_socket_gateway(DtlsSocket *gateway, const l2_gateway_config *confi
     if (ret < 0)
     {
         LOG_ERR("couldn't assign ip addr to iface, errno: %d ", errno);
-        return -1;
     }
 
     ret = init_dtls_server_socket_gateway(gateway);
@@ -487,7 +490,7 @@ int dlts_socket_create_connection(DtlsSocket *gateway, int fd)
 
     // Log the client address
     uint8_t addrp[120];
-    if (net_addr_ntop(AF_INET, &client_addr.sin_addr, addrp, sizeof(client_addr.sin_addr)) == NULL)
+    if (net_addr_ntop(AF_INET, &client_addr.sin_addr, addrp, sizeof(addrp)) == NULL)
     {
         LOG_ERR("Failed to convert client address to string");
         return -1;
@@ -574,7 +577,7 @@ int dlts_socket_create_connection(DtlsSocket *gateway, int fd)
 
 /***
  * Return 0 on success
- * WOLFSSL_WANT_WRITE if not all bytes were sent 
+ * WOLFSSL_WANT_WRITE if not all bytes were sent
  * -1 on error
  * */
 

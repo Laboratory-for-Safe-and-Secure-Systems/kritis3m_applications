@@ -22,7 +22,7 @@ enum application_role
     ROLE_FORWARD_PROXY,
     ROLE_ECHO_SERVER,
     ROLE_ECHO_CLIENT,
-    L2_GATEWAY,
+    ROLE_L2_GATEWAY,
 };
 
 /* Parse the provided argv array and store the information in the provided config variables.
@@ -31,7 +31,7 @@ enum application_role
  * on console).
  */
 int parse_cli_arguments(enum application_role *role, struct proxy_config *proxy_config,
-                        wolfssl_library_configuration *wolfssl_config, l2_bridge_config *bridge_config, l2_gateway_configg *l2_gateway_config,
+                        wolfssl_library_configuration *wolfssl_config, l2_bridge_config *bridge_config, l2_gateway_config *l2_gateway_config,
                         struct shell const *sh, size_t argc, char **argv);
 
 #endif // CLI_PARSING_H

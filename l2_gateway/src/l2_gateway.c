@@ -34,7 +34,6 @@
 #include "logging.h"
 #include "poll_set.h"
 #include "networking.h"
-#include <zephyr/net/net_mgmt.h>
 
 LOG_MODULE_REGISTER(l2_gateway);
 
@@ -122,60 +121,18 @@ int configure_interfaces(l2_gateway_config const *config)
 			return ret;
 		}
 		// net_virtual_set_flags(network_interfaces()->asset, NET_IF_PROMISC);
-
 	}
 
 #else
-	if (config->asset_vlan_tag < 0 || config->tunnel_vlan_tag < 0)
+	if (config->asset_vlan_tag > 0 || config->tunnel_vlan_tag > 0)
 	{
 		LOG_ERR("VLAN is not supported in LINUX");
 		return -1;
 	}
+
+	// linux set iface into promiscous mode
+
 #endif
-
-	// ***********Promisous MODE AREA ***********
-	// #if defined(__ZEPHYR__)
-
-	// #if IS_ENABLED(CONFIG_NET_PROMISCUOUS_MODE)
-	// 	if (config->asset_type == PACKET_SOCKET)
-	// 	{
-	// 		ret = net_if_set_promisc(network_interfaces()->asset);
-	// 		if (ret < 0)
-	// 		{
-	// 			LOG_ERR("Cannot set promiscuous mode for asset: error %d", ret);
-	// 			return ret;
-	// 		}
-	// 	}
-	// 	if (config->tunnel_type == PACKET_SOCKET)
-	// 	{
-	// 		ret = net_if_set_promisc(network_interfaces()->tunnel);
-	// 		if (ret < 0)
-	// 		{
-	// 			LOG_ERR("Cannot set promiscuous mode for tunnel: error %d", ret);
-	// 			return ret;
-	// 		}
-	// 	}
-	// #endif
-
-	// #else
-	// 	if (config->asset_type == PACKET_SOCKET)
-	// 	{
-	// 		ret = set_promiscous_mode(network_interfaces()->asset, true);
-	// 		if (ret < 0)
-	// 		{
-	// 			LOG_ERR("Cannot set promiscuous mode for asset: error %d", ret);
-	// 			return ret;
-	// 		}
-	// 	}
-	// 	if (config->tunnel_type == PACKET_SOCKET)
-	// 	{
-	// 		ret = set_promiscous_mode(network_interfaces()->tunnel, true);
-	// 		if (ret < 0)
-	// 		{
-	// 			LOG_ERR("Cannot set promiscuous mode for tunnel: error %d", ret);
-	// 			return ret;
-	// 		}
-	// 	}
 
 	return ret;
 }
@@ -193,10 +150,16 @@ int l2_gateway_start(l2_gateway_config const *config)
 	pthread_attr_setstack(&theBridge.thread_attr, l2_gateway_stack, K_THREAD_STACK_SIZEOF(l2_gateway_stack));
 #endif
 	/* Create the new thread */
-	ret = pthread_create(&theBridge.thread, &theBridge.thread_attr, l2_gateway_main_thread, &theBridge);
+	ret = pthread_create(&theBridge.thread,
+						 &theBridge.thread_attr,
+						 l2_gateway_main_thread,
+						 &theBridge);
 	if (ret == 0)
 	{
 		LOG_INF("L2 bridge main thread started");
+		while(1){
+			sleep(1);
+		}
 	}
 	else
 	{
@@ -321,7 +284,7 @@ int init_asset(const l2_gateway_config *config, l2_gateway *gw)
 			return -1;
 		}
 		break;
-	case DTLS_SERVER_SOCKET:
+	case DTLS_SOCKET:
 		asset = (L2_Gateway *)((DtlsSocket *)malloc(sizeof(DtlsSocket)));
 		memset((DtlsSocket *)asset, 0, sizeof(DtlsSocket));
 
@@ -329,16 +292,6 @@ int init_asset(const l2_gateway_config *config, l2_gateway *gw)
 		if (ret < 0)
 		{
 			LOG_ERR("Failed to initialize dtls server socket gateway");
-			return -1;
-		}
-		break;
-	case DTLS_CLIENT_SOCKET:
-		asset = (L2_Gateway *)((DtlsSocket *)malloc(sizeof(DtlsSocket)));
-		memset((DtlsSocket *)asset, 0, sizeof(DtlsSocket));
-		ret = init_dtls_socket_gateway((DtlsSocket *)asset, config, ASSET);
-		if (ret < 0)
-		{
-			LOG_ERR("Failed to initialize dtls client socket gateway");
 			return -1;
 		}
 		break;
@@ -371,18 +324,13 @@ int init_tunnel(const l2_gateway_config *config, l2_gateway *gw)
 		memset((uint8_t *)tunnel->buf, 0, sizeof(tunnel->buf));
 		ret = init_packet_socket_gateway((PacketSocket *)tunnel, config, TUNNEL);
 		break;
-	case DTLS_SERVER_SOCKET:
+	case DTLS_SOCKET:
 		tunnel = (L2_Gateway *)((DtlsSocket *)malloc(sizeof(DtlsSocket)));
 		memset((DtlsSocket *)tunnel, 0, sizeof(DtlsSocket));
 		memset((uint8_t *)tunnel->buf, 0, sizeof(tunnel->buf));
 		ret = init_dtls_socket_gateway((DtlsSocket *)tunnel, config, TUNNEL);
 		// ret = init_dt((PacketSocket*)tunnel ,config,TUNNEL);
 
-		break;
-	case DTLS_CLIENT_SOCKET:
-		tunnel = (L2_Gateway *)((DtlsSocket *)malloc(sizeof(DtlsSocket)));
-		memset((DtlsSocket *)tunnel, 0, sizeof(DtlsSocket));
-		ret = init_dtls_socket_gateway((DtlsSocket *)tunnel, config, TUNNEL);
 		break;
 	case UDP_SOCKET:
 		LOG_ERR("UDP_SOCKET not implemented yet");

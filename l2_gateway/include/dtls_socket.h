@@ -23,7 +23,7 @@ typedef struct DtlsSocket
     char const *own_ip_address;
     uint16_t client_port;
     uint16_t server_port;
-    l2_gateway_config *config;
+    l2_gateway_config const *config;
 
     char const *target_ip_address;
     uint16_t target_port;
