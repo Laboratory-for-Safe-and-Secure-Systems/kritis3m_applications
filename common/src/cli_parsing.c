@@ -296,6 +296,11 @@ int parse_cli_arguments(enum application_role *role, struct proxy_config *proxy_
                         {
                                 l2_gw_config->asset_type = DTLS_SOCKET;
                         }
+
+                        else if (strcmp(optarg, "tap_interface") == 0)
+                        {
+                                l2_gw_config->asset_type = TAP_INTERFACE;
+                        }
                         else
                         {
                                 shell_error(sh, "invalid asset type");
@@ -318,12 +323,17 @@ int parse_cli_arguments(enum application_role *role, struct proxy_config *proxy_
                         {
                                 l2_gw_config->tunnel_type = DTLS_SOCKET;
                         }
+                        else if (strcmp(optarg, "tap_interface") == 0)
+                        {
+                                l2_gw_config->tunnel_type = TAP_INTERFACE;
+                        }
                         else
                         {
                                 print_help(sh, argv[0]);
                                 shell_error(sh, "invalid asset type");
                                 return -1;
                         }
+
                         break;
                 }
                 case 'C': // asset ip

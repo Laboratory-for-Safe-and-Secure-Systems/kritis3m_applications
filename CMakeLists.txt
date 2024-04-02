@@ -13,3 +13,6 @@ add_subdirectory(tls_proxy)
 
 # Layer 2 bridge application
 add_subdirectory(l2_bridge)
+
+# Layer 2 bridge application
+add_subdirectory(l2_gateway)
