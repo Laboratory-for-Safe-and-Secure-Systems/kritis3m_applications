@@ -11,7 +11,7 @@
  */
 typedef enum interface_type
 {
-	TUN_INTERFACE, /**< TUN interface type. */
+	TAP_INTERFACE, /**< TUN interface type. */
 	PACKET_SOCKET, /**< Packet socket interface type. */
 	UDP_SOCKET,
 	DTLS_SOCKET,

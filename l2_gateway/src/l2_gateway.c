@@ -12,12 +12,7 @@
 #if defined(__ZEPHYR__)
 
 #include <zephyr/net/ethernet.h>
-#include <zephyr/net/virtual.h>
-#include <zephyr/net/virtual_mgmt.h>
-
 #include <zephyr/kernel.h>
-
-#include <zephyr/net/conn_mgr_monitor.h>
 
 #else
 
@@ -27,6 +22,7 @@
 #include <sys/ioctl.h>
 
 #endif
+#include "tap_interface.h"
 #include "packet_socket.h"
 #include "dtls_socket.h"
 // #include "udp_socket.h"
@@ -157,7 +153,8 @@ int l2_gateway_start(l2_gateway_config const *config)
 	if (ret == 0)
 	{
 		LOG_INF("L2 bridge main thread started");
-		while(1){
+		while (1)
+		{
 			sleep(1);
 		}
 	}
@@ -298,8 +295,11 @@ int init_asset(const l2_gateway_config *config, l2_gateway *gw)
 	case UDP_SOCKET:
 		LOG_INF("Not implemented yet");
 		break;
-	case TUN_INTERFACE:
-		LOG_INF("Not implemented yet");
+	case TAP_INTERFACE:
+		asset = (L2_Gateway *)((TapInterface *)malloc(sizeof(TapInterface)));
+		memset((TapInterface *)asset, 0, sizeof(TapInterface));
+		memset((uint8_t *)asset->buf, 0, sizeof(asset->buf));
+		ret = init_tap_interface_gateway((TapInterface *)asset, config, ASSET);
 		break;
 	}
 
@@ -335,8 +335,11 @@ int init_tunnel(const l2_gateway_config *config, l2_gateway *gw)
 	case UDP_SOCKET:
 		LOG_ERR("UDP_SOCKET not implemented yet");
 		break;
-	case TUN_INTERFACE:
-		LOG_INF("Not implemented yet");
+	case TAP_INTERFACE:
+		tunnel = (L2_Gateway *)((TapInterface *)malloc(sizeof(TapInterface)));
+		memset((TapInterface *)tunnel, 0, sizeof(TapInterface));
+		memset((uint8_t *)tunnel->buf, 0, sizeof(tunnel->buf));
+		ret = init_tap_interface_gateway((TapInterface *)tunnel, config, TUNNEL);
 		break;
 	}
 	if (ret < 0)
@@ -388,8 +391,6 @@ static void *l2_gateway_main_thread(void *ptr)
 				LOG_ERR("Failed to initialize tunnel");
 				return NULL;
 			}
-
-			ret = l2_gw_container->tunnel->vtable[call_connect](l2_gw_container->tunnel);
 			if (ret >= 0)
 			{
 				ret = init_asset(config, l2_gw_container);
