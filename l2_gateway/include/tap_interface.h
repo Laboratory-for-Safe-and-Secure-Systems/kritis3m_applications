@@ -14,19 +14,15 @@
 typedef struct TapInterface TapInterface;
 struct TapInterface
 {
-    L2_Gateway bridge; /**< The bridge associated with the packet socket. */
-    int packet_socket_fd;
-    struct sockaddr_ll tap_iface_addr;   /**< The socket address. */
-    const l2_gateway_config *config;
-    char tap_name[IFNAMSIZ]; /**< The name of the tap interface. */
+    L2_Gateway bridge; // The bridge associated with the packet socket.
+    int packet_socket_fd; // The file descriptor for the packet socket, which is not used by now.
+    struct sockaddr_ll tap_iface_addr; // the link address of the tap interace
+    const l2_gateway_config *config; // the general config
+    char tap_name[IFNAMSIZ]; // the name of the tap interface
 };
 
+// the function to initialize the tap interface
 int init_tap_interface_gateway(TapInterface *l2_gw, const l2_gateway_config *config, connected_channel channel);
-
-int tap_interface_send(TapInterface *tap_interface, int fd, uint8_t *buffer, int buffer_len, int frame_start);
-int tap_interface_receive(TapInterface *tap_interface, int fd, int (*regiser_cb)(int fd));
-int tap_interface_pipe(TapInterface *tap_interface);
-int tap_interface_close(TapInterface *tap_interface);
 
 #endif
 
