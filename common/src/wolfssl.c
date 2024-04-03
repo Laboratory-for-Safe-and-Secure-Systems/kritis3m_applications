@@ -100,7 +100,6 @@ static int errorOccured(int32_t ret)
 	return 0;
 }
 
-
 static int wolfssl_read_callback(WOLFSSL *wolfssl, char *buffer, int size, void *ctx)
 {
 	int socket = wolfSSL_get_fd(wolfssl);
@@ -1035,6 +1034,15 @@ int wolfssl_receive(wolfssl_session *session, uint8_t *buffer, int max_size)
 
 	return bytes_read;
 }
+int is_session_connected(wolfssl_session *session) {
+    // Check if SSL handshake is complete
+    if (wolfSSL_is_init_finished(session->session)) {
+        return 1; // Session is connected
+    } else {
+        return 0; // Session is not connected
+    }
+}
+
 
 /* Send data to the TLS remote peer.
  *

@@ -76,6 +76,8 @@ typedef struct tls_handshake_metrics
         uint32_t rxBytes;
 } tls_handshake_metrics;
 
+
+int is_session_connected(wolfssl_session* ssl);
 /* Initialize WolfSSL library.
  *
  * Parameter is a pointer to a filled library_configuration structure.

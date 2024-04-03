@@ -77,6 +77,7 @@ int remove_session(dtls_session *sessions, int sessions_len, dtls_session sessio
             {
                 // last element in sessions
                 sessions[i].session = NULL;
+                sessions[i].fd = -1;
             }
             else if (i < (sessions_len - 1) && sessions[i + 1].session != NULL)
             {
@@ -84,12 +85,15 @@ int remove_session(dtls_session *sessions, int sessions_len, dtls_session sessio
                 for (int j = i; j < (sessions_len - 1); j++)
                 {
                     sessions[i] = sessions[i + 1];
+                    sessions[i + 1].session = NULL;
+                    sessions[i + 1].fd = -1;
                 }
             }
             else if (i == (sessions_len - 1))
             {
                 // last element in sessions
                 sessions[i].session = NULL;
+                sessions[i].fd = -1;
             }
             else
             {
@@ -124,7 +128,7 @@ dtls_session find_session_by_fd(int fd, dtls_session *sessions, int sessions_len
             break;
         }
         wolfssl_session *session = sessions[i].session;
-        if (get_fd(session) == fd)
+        if (sessions[i].fd == fd)
         {
             ret = sessions[i];
             break;
@@ -153,11 +157,11 @@ int register_fds(DtlsSocket *gateway)
         {
             if (gateway->dtls_sessions[i].type == DTLS_SERVER)
             {
-                ret = l2_gateway_register_fd(get_fd(gateway->dtls_sessions[i].session), POLLIN | POLLHUP);
+                ret = l2_gateway_register_fd(gateway->dtls_sessions[i].fd, POLLIN | POLLHUP);
             }
             else if (gateway->dtls_sessions[i].type == DTLS_CLIENT)
             {
-                ret = l2_gateway_register_fd(get_fd(gateway->dtls_sessions[i].session), POLLHUP);
+                ret = l2_gateway_register_fd(gateway->dtls_sessions[i].fd, POLLHUP);
             }
         }
     }
@@ -211,6 +215,7 @@ int init_dtls_socket_gateway(DtlsSocket *gateway, const l2_gateway_config *confi
     for (int i = 0; i < sizeof(gateway->dtls_sessions) / sizeof(gateway->dtls_sessions[0]); i++)
     {
         gateway->dtls_sessions[i].session = NULL;
+        gateway->dtls_sessions[i].fd = -1;
     }
 
     // request kernel to add ip address to the interface
@@ -226,12 +231,12 @@ int init_dtls_socket_gateway(DtlsSocket *gateway, const l2_gateway_config *confi
         return -1;
     }
     // add ipv4 address to the interface
-    ret = add_ipv4_address((channel == ASSET) ? network_interfaces()->asset : network_interfaces()->tunnel,
-                           addr.sin_addr);
-    if (ret < 0)
-    {
-        LOG_ERR("couldn't assign ip addr to iface, errno: %d ", errno);
-    }
+    // ret = add_ipv4_address((channel == ASSET) ? network_interfaces()->asset : network_interfaces()->tunnel,
+    //                        addr.sin_addr);
+    // if (ret < 0)
+    // {
+    //     LOG_ERR("couldn't assign ip addr to iface, errno: %d ", errno);
+    // }
 
     // init dtls server endpoint, init corresponding server socket
     ret = init_dtls_server_socket_gateway(gateway);
@@ -415,7 +420,7 @@ int init_dtls_client_session(DtlsSocket *gateway)
     }
 
     // add session to intern session storage
-    dtls_session dtls_session = {.session = session, .type = DTLS_CLIENT};
+    dtls_session dtls_session = {.session = session, .type = DTLS_CLIENT, .fd = sockfd};
     ret = add_session(gateway->dtls_sessions,
                       sizeof(gateway->dtls_sessions) / sizeof(dtls_session),
                       dtls_session);
@@ -448,7 +453,7 @@ int restart_client(DtlsSocket *gateway, poll_set *poll_set)
     {
         if (gateway->dtls_sessions[i].session != NULL && gateway->dtls_sessions[i].type == DTLS_CLIENT)
         {
-            int fd = get_fd(gateway->dtls_sessions[i].session);
+            int fd = gateway->dtls_sessions[i].fd;
             poll_set_remove_fd(poll_set, fd);
             remove_session(gateway->dtls_sessions,
                            sizeof(gateway->dtls_sessions) / sizeof(dtls_session),
@@ -464,8 +469,21 @@ int restart_client(DtlsSocket *gateway, poll_set *poll_set)
                 LOG_ERR("failed to restart client");
                 return -1;
             }
+            // get session by fd
+            dtls_session session = find_session_by_fd(fd,
+                                                      gateway->dtls_sessions,
+                                                      sizeof(gateway->dtls_sessions) / sizeof(dtls_session));
+
+            int ret = wolfssl_handshake(session.session);
             // request write permission
-            poll_set_add_fd(poll_set, fd, POLLOUT);
+            if (ret == WOLFSSL_ERROR_WANT_READ)
+            {
+                poll_set_add_fd(poll_set, fd, POLLIN | POLLHUP);
+            }
+            else if (ret == WOLFSSL_ERROR_WANT_WRITE)
+            {
+                poll_set_add_fd(poll_set, fd, POLLOUT);
+            }
             return 1;
             //
         }
@@ -493,61 +511,53 @@ int dtls_socket_connect(DtlsSocket *gateway)
     bool server_connected = false;
     poll_set poll_set;
 
-    poll_set_init(&poll_set);          // init poll set
-    init_dtls_client_session(gateway); // starts client session
-
-    // it is searched for the initial client session and the handshake is initiated
-    for (int i = 0;
-         i < sizeof(gateway->dtls_sessions) / sizeof(gateway->dtls_sessions[0]);
-         i++)
+    poll_set_init(&poll_set);                         // init poll set
+    int clientfd = init_dtls_client_session(gateway); // starts client session
+    dtls_session client_session = find_session_by_fd(clientfd,
+                                                     gateway->dtls_sessions,
+                                                     sizeof(gateway->dtls_sessions) / sizeof(dtls_session));
+    ret = wolfssl_handshake(client_session.session); // start handshake
+    if (ret == WOLFSSL_ERROR_WANT_WRITE)
     {
-        if (gateway->dtls_sessions[i].session != NULL && gateway->dtls_sessions[i].type == DTLS_CLIENT)
-        {
-
-            poll_set_add_fd(&poll_set, get_fd(gateway->dtls_sessions[i].session), POLLIN | POLLHUP);
-
-            // start handshake
-            int ret = wolfssl_handshake(gateway->dtls_sessions[i].session);
-            LOG_INF("DTLS CLIENT: Handshake status: %d", ret);
-        }
+        poll_set_add_fd(&poll_set, clientfd, POLLOUT | POLLHUP);
     }
-    // register server socket for incomming connections (POLLIN)
+    else if (ret == WOLFSSL_ERROR_WANT_READ)
+    {
+        poll_set_add_fd(&poll_set, clientfd, POLLIN | POLLHUP);
+    }
     poll_set_add_fd(&poll_set, gateway->bridge.fd, POLLIN | POLLHUP);
 
     while (1)
     {
         ret = poll(poll_set.fds, poll_set.num_fds, 5000);
-        if (ret == 0)
-        {
-            LOG_INF("poll timeout");
-            // retry client handshake
-            if (!client_connected)
-            {
-                // restart client on timeout
-                ret = restart_client(gateway, &poll_set);
-            }
-            continue;
-        }
 
         if (ret < 0)
         {
             LOG_ERR("poll error: %d", errno);
             continue;
         }
-
+        if ((ret == 0) && !client_connected)
+        {
+            restart_client(gateway, &poll_set);
+            continue;
+        }
         for (int i = 0; i < poll_set.num_fds; i++)
         {
             // check if session matches fd. And operate regarding the event
             int fd = poll_set.fds[i].fd;
             int event = poll_set.fds[i].revents;
+            if (event == 0)
+            {
+                continue;
+            }
 
             if ((fd == gateway->bridge.fd) && (event & POLLIN))
             {
                 // new connection request
                 LOG_INF("DTLS SERVER: New connection request");
                 int connection_fd = dlts_socket_create_connection(gateway, fd);
-                poll_set_add_fd(&poll_set, connection_fd, POLLIN | POLLHUP);
-                continue;
+
+                poll_set_add_fd(&poll_set, connection_fd, POLLIN | POLLHUP | POLLOUT);
             }
             else
             {
@@ -563,15 +573,21 @@ int dtls_socket_connect(DtlsSocket *gateway)
                         ret = wolfssl_handshake(session.session);
                         if (ret == 0 && session.type == DTLS_CLIENT)
                         {
-                            client_connected = true;
-                            LOG_INF("client connected");
-                            poll_set_remove_fd(&poll_set, fd);
+                            if (is_session_connected(session.session))
+                            {
+                                client_connected = true;
+                                LOG_INF("client connected");
+                                poll_set_remove_fd(&poll_set, fd);
+                            }
                         }
                         else if (ret == 0 && session.type == DTLS_SERVER)
                         {
-                            server_connected = true;
-                            LOG_INF("Server connected");
-                            poll_set_remove_fd(&poll_set, fd);
+                            if (is_session_connected(session.session))
+                            {
+                                server_connected = true;
+                                LOG_INF("client connected");
+                                poll_set_remove_fd(&poll_set, fd);
+                            }
                         }
                         else if (ret == WOLFSSL_ERROR_WANT_WRITE)
                         {
@@ -593,6 +609,7 @@ int dtls_socket_connect(DtlsSocket *gateway)
                     {
                         // close connection
                         LOG_INF("Error code is %d on fd: %d ", errno, fd);
+                        return -1;
                     }
                 }
             }
@@ -698,7 +715,7 @@ int dlts_socket_create_connection(DtlsSocket *gateway, int fd)
         LOG_ERR("failed to create new session");
         return -1;
     }
-    dtls_session dtls_session_t = {.session = new_session, .type = DTLS_SERVER};
+    dtls_session dtls_session_t = {.session = new_session, .type = DTLS_SERVER, .fd = server_connection_fd};
     ret = add_session(gateway->dtls_sessions,
                       sizeof(gateway->dtls_sessions) / sizeof(dtls_session),
                       dtls_session_t);
@@ -793,7 +810,7 @@ int dtls_socket_send(DtlsSocket *gateway, int fd, uint8_t *buffer, int buffer_le
  * @param fd The file descriptor of the DTLS socket.
  * @param register_cb  !!NOT USED!! nonsense
  * @return The result of the receive operation. Returns -1 on error, otherwise returns the number of bytes received.
- * 
+ *
  * @todo Handle incomming connection requests
  */
 int dtls_socket_receive(DtlsSocket *gateway, int fd, int (*register_cb)(int fd))
@@ -806,7 +823,7 @@ int dtls_socket_receive(DtlsSocket *gateway, int fd, int (*register_cb)(int fd))
     {
         // on initial connection request, a new connection is created
         LOG_ERR("DTLS_SOCKET: Durign the standard transfer, a new connection is not supported");
-        //dlts_socket_create_connection(gateway, fd);
+        // dlts_socket_create_connection(gateway, fd);
     }
     else
     {
@@ -819,11 +836,15 @@ int dtls_socket_receive(DtlsSocket *gateway, int fd, int (*register_cb)(int fd))
             if (session.type == DTLS_SERVER)
             {
                 ret = dtls_socket_server_receive(session.session, gateway);
+                if (ret == 0)
+                {
+                    LOG_INF("DTLS_SERVER: Connection closed");
+                }
             }
             else if (session.type == DTLS_CLIENT)
             {
                 LOG_ERR("DTLS_CLIENT: Received data on client socket is not supported");
-                //ret = dtls_socket_client_receive(session.session);
+                // ret = dtls_socket_client_receive(session.session);
             }
         }
     }
@@ -886,7 +907,7 @@ int dtls_socket_close(DtlsSocket *bridge)
     {
         if (bridge->dtls_sessions[i].session != NULL)
         {
-            int fd = get_fd(bridge->dtls_sessions[i].session);
+            int fd = bridge->dtls_sessions[i].fd;
             wolfssl_close_session(bridge->dtls_sessions[i].session);
             wolfssl_free_session(bridge->dtls_sessions[i].session);
             close(fd);
@@ -923,8 +944,8 @@ int dtls_socket_server_receive(wolfssl_session *session, DtlsSocket *gateway)
 #if defined CONFIG_NET_VLAN
     offset = VLAN_HEADER_SIZE;
 #endif
-
     ret = wolfssl_receive(session, gateway->bridge.buf + offset, sizeof(gateway->bridge.buf) - offset);
+    LOG_INF("DTLS SERVER: Receiving data %d", ret);
     gateway->bridge.len = ret + offset;
     return ret;
 }
@@ -947,10 +968,11 @@ int dtls_socket_client_receive(wolfssl_session *session)
  */
 int dtls_socket_client_send(wolfssl_session *session, uint8_t *buffer, int buffer_len, int frame_start)
 {
+    LOG_INF("DTLS CLIENT sending %d data to server", buffer_len - frame_start);
     return wolfssl_send(session, buffer + frame_start, buffer_len - frame_start);
 }
 
 int dtls_socket_server_send(wolfssl_session *session)
 {
-LOG_ERR("DTLS Server shouldn't be sending data. Probably usefull for the handshake");
+    LOG_ERR("DTLS Server shouldn't be sending data. Probably usefull for the handshake");
 }

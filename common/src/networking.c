@@ -227,9 +227,9 @@ int configure_management()
 /* Initialize the network interfaces */
 int initialize_network_interfaces()
 {
-	ifaces.management = "wlp0s20f3";
-	ifaces.tunnel = "wlp0s20f3";
-	ifaces.asset = "wlp0s20f3";
+	ifaces.management = "enxa0cec88b5c73";
+	ifaces.tunnel = "enxa0cec88b5c73";
+	ifaces.asset = "tap0";// not needed for now
 
 	return 0;
 }

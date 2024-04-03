@@ -233,7 +233,7 @@ int standard_transfer(l2_gateway *l2_gw_container)
 				}
 				if (ret == 0)
 				{
-					continue;
+					goto return_standard_transfer;
 				}
 
 				ret = l2_gateway_pipe(t_bridge);
@@ -262,6 +262,7 @@ int standard_transfer(l2_gateway *l2_gw_container)
 
 return_standard_transfer:
 	LOG_INF("Standard transfer exiting");
+	poll_set_init(&theBridge.poll_set);
 	return -1;
 }
 int init_asset(const l2_gateway_config *config, l2_gateway *gw)
@@ -345,8 +346,6 @@ int init_tunnel(const l2_gateway_config *config, l2_gateway *gw)
 	if (ret < 0)
 	{
 		LOG_ERR("Failed to initialize tunnel");
-		free(tunnel);
-		tunnel = NULL;
 	}
 	gw->tunnel = tunnel;
 	return ret;
@@ -389,9 +388,8 @@ static void *l2_gateway_main_thread(void *ptr)
 			if (ret < 0)
 			{
 				LOG_ERR("Failed to initialize tunnel");
-				return NULL;
-			}
-			if (ret >= 0)
+				l2_gateway_close(l2_gw_container->tunnel);
+			}else if (ret >= 0)
 			{
 				ret = init_asset(config, l2_gw_container);
 				if (ret < 0)
@@ -401,10 +399,6 @@ static void *l2_gateway_main_thread(void *ptr)
 				}
 				marry_bridges(theBridge.asset, theBridge.tunnel);
 				connected = true;
-			}
-			else
-			{
-				l2_gateway_close(l2_gw_container->tunnel);
 			}
 		}
 	}

@@ -15,6 +15,8 @@ typedef struct TapInterface TapInterface;
 struct TapInterface
 {
     L2_Gateway bridge; /**< The bridge associated with the packet socket. */
+    int packet_socket_fd;
+    struct sockaddr_ll tap_iface_addr;   /**< The socket address. */
     const l2_gateway_config *config;
     char tap_name[IFNAMSIZ]; /**< The name of the tap interface. */
 };

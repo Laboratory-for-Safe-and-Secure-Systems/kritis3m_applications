@@ -14,6 +14,7 @@ typedef struct dtls_session
 {
     wolfssl_session *session;
     enum dtls_type type;
+    int fd;
 }dtls_session;
 
 typedef struct DtlsSocket
