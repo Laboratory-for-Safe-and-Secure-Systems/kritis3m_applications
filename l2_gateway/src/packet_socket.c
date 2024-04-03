@@ -176,7 +176,7 @@ int packet_socket_send(PacketSocket *l2_gw, int _fd, uint8_t *buffer, int buffer
     return ret;
 }
 
-int packet_socket_receive(PacketSocket *l2_gw, int fd, int (*_not_used_cb)(int fd))
+int packet_socket_receive(PacketSocket *l2_gw, int fd)
 {
     if (l2_gw == NULL)
     {

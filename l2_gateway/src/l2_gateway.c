@@ -175,7 +175,7 @@ int l2_gateway_send(L2_Gateway *bridge, int fd, uint8_t *buffer, int buffer_len,
 int l2_gateway_receive(L2_Gateway *bridge, int fd)
 {
 	receiveFunc receive = (receiveFunc)bridge->vtable[call_receive];
-	return receive(bridge, fd, NULL);
+	return receive(bridge, fd);
 }
 
 int l2_gateway_pipe(L2_Gateway *bridge)
