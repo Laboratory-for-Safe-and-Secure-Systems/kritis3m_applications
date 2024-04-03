@@ -14,14 +14,15 @@
 #define RECV_BUFFER_SIZE 1600
 LOG_MODULE_REGISTER(dtls_gateway);
 
-// forward declarations
-
-// concrete l2_gateway functions
-
-int dtls_socket_receive(DtlsSocket *gateway, int fd, int (*register_cb)(int fd));
+/******************************************************************************************************
+ *  Forward Declarations                                                                              *
+ ******************************************************************************************************/
+// l2_gateway_functions
+int dtls_socket_receive(DtlsSocket *gateway, int fd);
 int dtls_socket_send(DtlsSocket *gateway, int fd, uint8_t *buffer, int buffer_len, int frame_start);
 int dtls_socket_pipe(DtlsSocket *gateway);
 int dtls_socket_close(DtlsSocket *bridge);
+// internal functions
 int dtls_socket_connect(DtlsSocket *gateway);
 int dlts_socket_create_connection(DtlsSocket *gateway, int fd);
 int dtls_socket_client_receive(wolfssl_session *session);
@@ -51,6 +52,10 @@ int add_session(dtls_session *sessions, int sessions_len, dtls_session session)
             break;
         }
     }
+    if (ret < 0)
+    {
+        LOG_ERR("failed to add dtls_session to sessions ... list is full");
+    }
     return ret;
 }
 
@@ -73,13 +78,13 @@ int remove_session(dtls_session *sessions, int sessions_len, dtls_session sessio
         if (sessions[i].session == session.session)
         {
             ret = i;
-            if (i < (sessions_len - 1) && sessions[i + 1].session == NULL)
-            {
-                // last element in sessions
-                sessions[i].session = NULL;
-                sessions[i].fd = -1;
-            }
-            else if (i < (sessions_len - 1) && sessions[i + 1].session != NULL)
+            wolfssl_close_session(sessions[i].session);
+            wolfssl_free_session(sessions[i].session);
+            sessions[i].session = NULL;
+            sessions[i].fd = -1;
+            ret = i;
+            // if a session
+            if (i < (sessions_len - 1) && sessions[i + 1].session != NULL)
             {
                 // shift all subsequent sessions to the left
                 for (int j = i; j < (sessions_len - 1); j++)
@@ -89,18 +94,12 @@ int remove_session(dtls_session *sessions, int sessions_len, dtls_session sessio
                     sessions[i + 1].fd = -1;
                 }
             }
-            else if (i == (sessions_len - 1))
-            {
-                // last element in sessions
-                sessions[i].session = NULL;
-                sessions[i].fd = -1;
-            }
-            else
-            {
-                LOG_ERR("failed to remove session from list, unknown error");
-            }
             break;
         }
+    }
+    if (ret < 0)
+    {
+        LOG_ERR("failed to remove dtls_session from sessions ... session not found");
     }
     return ret;
 }
@@ -124,12 +123,13 @@ dtls_session find_session_by_fd(int fd, dtls_session *sessions, int sessions_len
     {
         if (sessions[i].session == NULL)
         {
-            // sessions are alligned. First NULL session means that there are no more sessions
+            LOG_ERR("dtls session with fd %d is not in dtls_sessions", fd);
             break;
         }
         wolfssl_session *session = sessions[i].session;
         if (sessions[i].fd == fd)
         {
+            // found matching session by fd
             ret = sessions[i];
             break;
         }
@@ -142,6 +142,7 @@ dtls_session find_session_by_fd(int fd, dtls_session *sessions, int sessions_len
  *
  * This function registers the file descriptors associated with the DtlsSocket
  * at the main module l2_gateway, by using l2_gateway_register_fd.
+ * The client does not need to get notfied on POLLIN event, since the client is only sending data.
  *
  * @param gateway The DtlsSocket object.
  * @return Returns 1 on success, or -1 on failure.
@@ -163,10 +164,16 @@ int register_fds(DtlsSocket *gateway)
             {
                 ret = l2_gateway_register_fd(gateway->dtls_sessions[i].fd, POLLHUP);
             }
+
+            if (ret < 0)
+            {
+                LOG_ERR("failed to register fd %d at l2 gateway", gateway->dtls_sessions[i].fd);
+                break;
+            }
         }
     }
 
-    return 1;
+    return ret;
 }
 
 /**
@@ -181,7 +188,7 @@ int register_fds(DtlsSocket *gateway)
  * @return 1 on success, -1 on failure.
  *
  * @todo in the future the client port will be generated randomly, or is obtained from the config
- * @bug on linux add_ipv4_addr should just be called, if the ip address is not already assigned to the interface
+ * @bug if ip addr is already assigned to the interface, ip addr add fails
  */
 int init_dtls_socket_gateway(DtlsSocket *gateway, const l2_gateway_config *config, connected_channel channel)
 {
@@ -288,6 +295,9 @@ int init_dtls_client_socket_gateway(DtlsSocket *gateway)
  *
  * @param gateway A pointer to the DtlsSocket structure representing the gateway.
  * @return Returns 1 on success, or -1 on failure.
+ * 
+ * @note On initial receive, the server receives Client Hello. 
+ * The data must be passed to the corresponding session by using dtls_server_handshake() function.
  */
 int init_dtls_server_socket_gateway(DtlsSocket *gateway)
 {
@@ -308,6 +318,10 @@ int init_dtls_server_socket_gateway(DtlsSocket *gateway)
     }
     gateway->bridge.fd = server_fd;
 
+    /**
+     * To reuse the address and port, the SO_REUSEADDR and SO_REUSEPORT options are set.
+     * This allows tcp like behaviour, where each client is assigned an own connection socket 
+    */
     if (setsockopt(gateway->bridge.fd, SOL_SOCKET, SO_REUSEADDR, &(int){1}, sizeof(int)) < 0)
     {
         LOG_ERR("setsockopt(SO_REUSEADDR) failed: errer %d\n", errno);
@@ -322,6 +336,7 @@ int init_dtls_server_socket_gateway(DtlsSocket *gateway)
         return -1;
     }
 
+    // bind the server to the ip address
     struct sockaddr_in server_sock;
     memset(&server_sock, 0, sizeof(server_sock));
     server_sock.sin_family = AF_INET;
@@ -455,11 +470,10 @@ int restart_client(DtlsSocket *gateway, poll_set *poll_set)
         {
             int fd = gateway->dtls_sessions[i].fd;
             poll_set_remove_fd(poll_set, fd);
+            // remove session closes the dtls session and frees the memory
             remove_session(gateway->dtls_sessions,
                            sizeof(gateway->dtls_sessions) / sizeof(dtls_session),
                            gateway->dtls_sessions[i]);
-            wolfssl_close_session(gateway->dtls_sessions[i].session);
-            wolfssl_free_session(gateway->dtls_sessions[i].session);
             close(fd);
 
             // restart new client session
@@ -729,7 +743,7 @@ int dlts_socket_create_connection(DtlsSocket *gateway, int fd)
     ret = wolfssl_dtls_server_handshake(new_session, init_buffer, len_recvd);
     if (ret < 0)
     {
-        LOG_ERR("failed to handshake with client");
+        LOG_ERR("dtls server connection: can't init handshake");
         wolfssl_free_session(new_session);
         return -1;
     }
@@ -808,12 +822,11 @@ int dtls_socket_send(DtlsSocket *gateway, int fd, uint8_t *buffer, int buffer_le
  *
  * @param gateway The DtlsSocket object.
  * @param fd The file descriptor of the DTLS socket.
- * @param register_cb  !!NOT USED!! nonsense
  * @return The result of the receive operation. Returns -1 on error, otherwise returns the number of bytes received.
  *
  * @todo Handle incomming connection requests
  */
-int dtls_socket_receive(DtlsSocket *gateway, int fd, int (*register_cb)(int fd))
+int dtls_socket_receive(DtlsSocket *gateway, int fd)
 {
     // local function variables
     int ret = -1;
