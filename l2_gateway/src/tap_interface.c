@@ -82,6 +82,7 @@ int init_tap_interface_gateway(TapInterface *l2_gw, const l2_gateway_config *con
      * @param send_sockaddr: sockaddr_ll structure to bind the socket to the interface
      */
     struct sockaddr_ll send_sockaddr;
+    memset(&send_sockaddr, 0, sizeof(send_sockaddr));
     send_sockaddr.sll_family = AF_PACKET;
     send_sockaddr.sll_halen = ETH_ALEN;
     send_sockaddr.sll_ifindex = ifindex; // The number we just found earlier..
