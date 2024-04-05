@@ -33,7 +33,7 @@ struct certificates
 
         uint8_t* additional_key_buffer;
         size_t additional_key_buffer_size;
-        
+
         uint8_t* root_buffer;
         size_t root_buffer_size;
 };
@@ -73,8 +73,8 @@ static int read_certificates(const struct shell *sh, struct certificates* certs,
 static void print_help(const struct shell *sh, char const* name);
 
 
-/* Parse the provided argv array and store the information in the provided config variables. 
- * 
+/* Parse the provided argv array and store the information in the provided config variables.
+ *
  * Returns 0 on success, +1 in case the help was printed and  -1 on failure (error is printed
  * on console).
  */
@@ -159,7 +159,7 @@ int parse_cli_arguments(enum application_role* role, struct proxy_config* proxy_
 	{
 		int result = getopt_long(argc, argv, "wxyza:b:v:c:k:i:r:l:n:o:q:sm:p:dj:e:f:h", cli_options, &index);
 
-		if (result == -1) 
+		if (result == -1)
 		        break; /* end of list */
 
 		switch (result)
@@ -302,7 +302,7 @@ int parse_cli_arguments(enum application_role* role, struct proxy_config* proxy_
                         case 'j':
                         #if defined(HAVE_SECRET_CALLBACK)
                                 proxy_config->tls_config.keylog_file = optarg;
-                        #else   
+                        #else
                                 shell_warn(sh, "--keylogFile is not compiled in, ignoring...");
                         #endif
                                 break;
@@ -384,16 +384,16 @@ static void print_help(const struct shell *sh, char const* name)
 #include "certificates.h"
 
 
-/* Read all certificate and key files from the paths provided in the `certs` 
+/* Read all certificate and key files from the paths provided in the `certs`
  * structure and store the data in the buffers. Memory is allocated internally
- * and must be freed by the user. 
- * 
+ * and must be freed by the user.
+ *
  * Returns 0 on success, -1 on failure (error is printed on console). */
 static int read_certificates(const struct shell *sh, struct certificates* certs,
                              enum application_role* role)
 {
         (void) role;
-        
+
         if (certs->certificate_path != NULL)
         {
                 shell_warn(sh, "--cert not support in Zephyr at the moment, ignoring...");
@@ -466,7 +466,7 @@ static int read_certificates(const struct shell *sh, struct certificates* certs,
                 certs->root_buffer = (uint8_t*) hybrid_pqc_root_cert;
                 certs->root_buffer_size = sizeof(hybrid_pqc_root_cert);
         }
-        else 
+        else
         {
                 shell_error(sh, "no valid identity specified");
                 shell_error(sh, "valid options are: classic, pqc, hybrid_classic and hybrid_pqc");
@@ -478,39 +478,49 @@ static int read_certificates(const struct shell *sh, struct certificates* certs,
 
 #else /* __ZEPHYR__ */
 
-static const size_t certificate_chain_buffer_size = 32 * 1024;
-static const size_t private_key_buffer_size = 16 * 1024;
-static const size_t root_certificate_buffer_size = 16 * 1024;
 
-
-static int readFile(const char* filePath, uint8_t* buffer, size_t bufferSize)
+static int readFile(const char* filePath, uint8_t** buffer, size_t bufferSize)
 {
+    uint8_t* destination = NULL;
+
     /* Open the file */
     FILE* file = fopen(filePath, "r");
-    
+
     if (file == NULL)
     {
         LOG_ERR("file (%s) cannot be opened", filePath);
         return -1;
     }
-    
+
     /* Get length of file */
     fseek(file, 0, SEEK_END);
     long fileSize = ftell(file);
     rewind(file);
 
-    if ((size_t)fileSize > bufferSize)
+    /* Allocate buffer for file content */
+    if (*buffer == NULL && bufferSize == 0)
     {
-        LOG_ERR("file (%s) is too large for internal buffer", filePath);
-        fclose(file);
-        return -1;
+        *buffer = (uint8_t*) malloc(fileSize);
+        destination = *buffer;
     }
-    
+    else if (*buffer != NULL && bufferSize > 0)
+    {
+        *buffer = (uint8_t*) realloc(*buffer, bufferSize + fileSize);
+        destination = *buffer + bufferSize;
+    }
+
+    if (*buffer == NULL)
+    {
+            LOG_ERR("unable to allocate memory for file contents of %s", filePath);
+            fclose(file);
+            return -1;
+    }
+
     /* Read file to buffer */
     int bytesRead = 0;
     while (bytesRead < fileSize)
     {
-        int read = fread(buffer + bytesRead, sizeof(uint8_t), fileSize - bytesRead, file);
+        int read = fread(destination + bytesRead, sizeof(uint8_t), fileSize - bytesRead, file);
         if (read < 0)
         {
             LOG_ERR("unable to read file (%s)", filePath);
@@ -519,36 +529,28 @@ static int readFile(const char* filePath, uint8_t* buffer, size_t bufferSize)
         }
         bytesRead += read;
     }
-    
+
     fclose(file);
 
     return bytesRead;
 }
 
 
-/* Read all certificate and key files from the paths provided in the `certs` 
+/* Read all certificate and key files from the paths provided in the `certs`
  * structure and store the data in the buffers. Memory is allocated internally
- * and must be freed by the user. 
- * 
+ * and must be freed by the user.
+ *
  * Returns 0 on success, -1 on failure (error is printed on console). */
 static int read_certificates(const struct shell *sh, struct certificates* certs,
                              enum application_role* role)
 {
         (void) sh;
-        
+
         /* Read certificate chain */
         if (certs->certificate_path != NULL)
         {
-                certs->chain_buffer = (uint8_t*) malloc(certificate_chain_buffer_size);
-                if (certs->chain_buffer == NULL)
-                {
-                        LOG_ERR("unable to allocate memory for certificate chain");
-                        goto error;
-                }
-
                 int cert_size = readFile(certs->certificate_path,
-                                         certs->chain_buffer,
-                                         certificate_chain_buffer_size);
+                                         &certs->chain_buffer, 0);
                 if (cert_size < 0)
                 {
                         LOG_ERR("unable to read certificate from file %s", certs->certificate_path);
@@ -560,8 +562,7 @@ static int read_certificates(const struct shell *sh, struct certificates* certs,
                 if (certs->intermediate_path != NULL)
                 {
                         int inter_size = readFile(certs->intermediate_path,
-                                                  certs->chain_buffer + cert_size,
-                                                  certificate_chain_buffer_size - cert_size);
+                                                  &certs->chain_buffer, cert_size);
                         if (inter_size < 0)
                         {
                                 LOG_ERR("unable to read intermediate certificate from file %s", certs->intermediate_path);
@@ -580,16 +581,8 @@ static int read_certificates(const struct shell *sh, struct certificates* certs,
         /* Read private key */
         if (certs->private_key_path != 0)
         {
-                certs->key_buffer = (uint8_t*) malloc(private_key_buffer_size);
-                if (certs->key_buffer == NULL)
-                {
-                        LOG_ERR("unable to allocate memory for private key");
-                        goto error;
-                }
-
                 int key_size = readFile(certs->private_key_path,
-                                        certs->key_buffer,
-                                        private_key_buffer_size);
+                                        &certs->key_buffer, 0);
                 if (key_size < 0)
                 {
                         LOG_ERR("unable to read private key from file %s", certs->private_key_path);
@@ -607,16 +600,8 @@ static int read_certificates(const struct shell *sh, struct certificates* certs,
         /* Read addtional private key */
         if (certs->additional_key_path != 0)
         {
-                certs->additional_key_buffer = (uint8_t*) malloc(private_key_buffer_size);
-                if (certs->additional_key_buffer == NULL)
-                {
-                        LOG_ERR("unable to allocate memory for additional private key");
-                        goto error;
-                }
-
                 int key_size = readFile(certs->additional_key_path,
-                                        certs->additional_key_buffer,
-                                        private_key_buffer_size);
+                                        &certs->additional_key_buffer, 0);
                 if (key_size < 0)
                 {
                         LOG_ERR("unable to read private key from file %s", certs->private_key_path);
@@ -629,16 +614,8 @@ static int read_certificates(const struct shell *sh, struct certificates* certs,
         /* Read root certificate */
         if (certs->root_path != 0)
         {
-                certs->root_buffer = (uint8_t*) malloc(root_certificate_buffer_size);
-                if (certs->root_buffer == NULL)
-                {
-                        LOG_ERR("unable to allocate memory for root certificate");
-                        goto error;
-                }
-
                 int root_size = readFile(certs->root_path,
-                                        certs->root_buffer,
-                                        root_certificate_buffer_size);
+                                         &certs->root_buffer, 0);
                 if (root_size < 0)
                 {
                         LOG_ERR("unable to read root certificate from file %s", certs->root_path);

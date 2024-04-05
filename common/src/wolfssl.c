@@ -29,7 +29,7 @@ extern size_t wolfsslMemoryBufferSize;
 #endif
 
 
-enum connection_state 
+enum connection_state
 {
 	CONNECTION_STATE_NOT_CONNECTED,
 	CONNECTION_STATE_HANDSHAKE,
@@ -38,7 +38,7 @@ enum connection_state
 
 
 /* Data structure for an endpoint */
-struct wolfssl_endpoint 
+struct wolfssl_endpoint
 {
         WOLFSSL_CTX* context;
 
@@ -54,7 +54,7 @@ struct wolfssl_session
         WOLFSSL* session;
 	enum connection_state state;
 
-        struct 
+        struct
 	{
 		struct timespec start_time;
 		struct timespec end_time;
@@ -120,7 +120,7 @@ static int wolfssl_read_callback(WOLFSSL* wolfssl, char* buffer, int size, void*
 	{
 		session->handshake_metrics_priv.rxBytes += ret;
 	}
-	
+
 	return ret;
 }
 
@@ -169,10 +169,10 @@ static int wolfssl_secret_callback(WOLFSSL* ssl, int id, const uint8_t* secret,
 	unsigned char serverRandom[32];
 	int serverRandomSz;
 	FILE* fp = stderr;
-	if (ctx) 
+	if (ctx)
 	{
 		fp = fopen((const char*)ctx, "a");
-		if (fp == NULL) 
+		if (fp == NULL)
 		{
 			return BAD_FUNC_ARG;
 		}
@@ -186,7 +186,7 @@ static int wolfssl_secret_callback(WOLFSSL* ssl, int id, const uint8_t* secret,
 		LOG_ERR("Error getting server random: %d\n", serverRandomSz);
 	}
 
-	switch (id) 
+	switch (id)
 	{
 		case CLIENT_EARLY_TRAFFIC_SECRET:
 			str = "CLIENT_EARLY_TRAFFIC_SECRET";
@@ -247,7 +247,7 @@ int wolfssl_init(struct wolfssl_library_configuration const* config)
         /* Initialize WolfSSL */
 	int ret = wolfSSL_Init();
 	if (errorOccured(ret))
-		return -1; 
+		return -1;
 
 #ifdef WOLFSSL_STATIC_MEMORY
 	/* Load static memory to avoid malloc */
@@ -339,7 +339,7 @@ int wolfssl_init(struct wolfssl_library_configuration const* config)
 
 
 /* Configure the new context.
- * 
+ *
  * Returns 0 on success, -1 on failure (error message is logged to the console).
  */
 static int wolfssl_configure_context(WOLFSSL_CTX* context, struct wolfssl_endpoint_configuration const* config)
@@ -541,7 +541,7 @@ wolfssl_endpoint* wolfssl_setup_server_endpoint(wolfssl_endpoint_configuration c
 	        return NULL;
         }
 
-	/* Set the preference for verfication of hybrid signatures to be for both the 
+	/* Set the preference for verfication of hybrid signatures to be for both the
 	 * native and alternative chains.
 	 */
         static uint8_t cks_order[] = {
@@ -664,7 +664,7 @@ wolfssl_endpoint* wolfssl_setup_client_endpoint(wolfssl_endpoint_configuration c
  *
  * Parameters are a pointer to a configured endpoint and the socket fd of the underlying
  * network connection.
- * 
+ *
  * Return value is a pointer to the newly created session or NULL in case of an error
  * (error message is logged to the console).
  */
@@ -767,7 +767,7 @@ int wolfssl_handshake(wolfssl_session* session)
 
 			/* Get end time */
 			if (clock_gettime(CLOCK_MONOTONIC,
-					&session->handshake_metrics_priv.end_time) != 0) 
+					&session->handshake_metrics_priv.end_time) != 0)
 			{
 				// Handle error
 				LOG_ERR("Error stopping handshake timer");
@@ -796,7 +796,7 @@ int wolfssl_handshake(wolfssl_session* session)
 
 				LOG_ERR("TLS handshake failed: %s", errMsg);
 				ret = -1;
-				break;		
+				break;
 			}
 		}
 	}
@@ -820,12 +820,12 @@ int wolfssl_receive(wolfssl_session* session, uint8_t* buffer, int max_size)
 		LOG_ERR("Session is NULL");
 		return -1;
 	}
-	
+
 	while (1)
 	{
 		int ret = wolfSSL_read(session->session, tmp, max_size - bytes_read);
 
-		if (ret <= 0) 
+		if (ret <= 0)
 		{
 			ret = wolfSSL_get_error(session->session, ret);
 
@@ -867,7 +867,7 @@ int wolfssl_receive(wolfssl_session* session, uint8_t* buffer, int max_size)
 
 /* Send data to the TLS remote peer.
  *
- * Returns 0 on success, -1 on failure (error message is logged to the console). In case 
+ * Returns 0 on success, -1 on failure (error message is logged to the console). In case
  * we cannot write the data in one call, WOLFSSL_ERROR_WANT_WRITE is returned, indicating
  * that you have to call the method again (with the same data!) once the socket is writable.
  */
@@ -944,7 +944,7 @@ int wolfssl_send(wolfssl_session* session, uint8_t const* buffer, int size)
 tls_handshake_metrics wolfssl_get_handshake_metrics(wolfssl_session* session)
 {
 	tls_handshake_metrics metrics;
-	
+
 	metrics.duration_us = (session->handshake_metrics_priv.end_time.tv_sec - session->handshake_metrics_priv.start_time.tv_sec) * 1000000.0 +
 			      (session->handshake_metrics_priv.end_time.tv_nsec - session->handshake_metrics_priv.start_time.tv_nsec) / 1000.0;
 	metrics.txBytes = session->handshake_metrics_priv.txBytes;
