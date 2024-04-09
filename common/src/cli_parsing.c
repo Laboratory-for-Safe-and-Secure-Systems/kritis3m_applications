@@ -41,29 +41,29 @@ struct certificates
 
 static const struct option cli_options[] =
 {
-    { "reverse_proxy",    no_argument,          0, 'w' },
-    { "forward_proxy",    no_argument,          0, 'x' },
-    { "echo_server",      no_argument,          0, 'y' },
-    { "echo_client",      no_argument,          0, 'z' },
-    { "incoming",         required_argument,    0, 'a' },
-    { "outgoing",         required_argument,    0, 'b' },
-    { "identity",         required_argument,    0, 'v' },
-    { "cert",             required_argument,    0, 'c' },
-    { "key",              required_argument,    0, 'k' },
-    { "intermediate",     required_argument,    0, 'i' },
-    { "root",             required_argument,    0, 'r' },
-    { "additionalKey",    required_argument,    0, 'l' },
-    { "mutualAuth",       required_argument,    0, 'n' },
-    { "noEncryption",     required_argument,    0, 'o' },
-    { "hybrid_signature", required_argument,    0, 'q' },
-    { "secure_element",   no_argument,          0, 's' },
-    { "middleware_path",  required_argument,    0, 'm' },
-    { "se_import_keys",   required_argument,    0, 'p' },
-    { "debug",            no_argument,          0, 'd' },
-    { "keylogFile",       required_argument,    0, 'j' },
-    { "bridge_lan",       required_argument,    0, 'e' },
-    { "bridge_wan",       required_argument,    0, 'f' },
-    { "help",             no_argument,          0, 'h' },
+    { "reverse_proxy",      no_argument,          0, 'w' },
+    { "forward_proxy",      no_argument,          0, 'x' },
+    { "echo_server",        no_argument,          0, 'y' },
+    { "echo_client",        no_argument,          0, 'z' },
+    { "incoming",           required_argument,    0, 'a' },
+    { "outgoing",           required_argument,    0, 'b' },
+    { "identity",           required_argument,    0, 'v' },
+    { "cert",               required_argument,    0, 'c' },
+    { "key",                required_argument,    0, 'k' },
+    { "intermediate",       required_argument,    0, 'i' },
+    { "root",               required_argument,    0, 'r' },
+    { "additionalKey",      required_argument,    0, 'l' },
+    { "mutualAuth",         required_argument,    0, 'n' },
+    { "noEncryption",       required_argument,    0, 'o' },
+    { "hybrid_signature",   required_argument,    0, 'q' },
+    { "use_secure_element", required_argument,    0, 's' },
+    { "middleware_path",    required_argument,    0, 'm' },
+    { "se_import_keys",     required_argument,    0, 'p' },
+    { "debug",              no_argument,          0, 'd' },
+    { "keylogFile",         required_argument,    0, 'j' },
+    { "bridge_lan",         required_argument,    0, 'e' },
+    { "bridge_wan",         required_argument,    0, 'f' },
+    { "help",               no_argument,          0, 'h' },
     {NULL, 0, NULL, 0}
 };
 
@@ -157,7 +157,7 @@ int parse_cli_arguments(enum application_role* role, struct proxy_config* proxy_
 #endif
 	while (true)
 	{
-		int result = getopt_long(argc, argv, "wxyza:b:v:c:k:i:r:l:n:o:q:sm:p:dj:e:f:h", cli_options, &index);
+		int result = getopt_long(argc, argv, "wxyza:b:v:c:k:i:r:l:n:o:q:s:m:p:dj:e:f:h", cli_options, &index);
 
 		if (result == -1)
 		        break; /* end of list */
@@ -284,9 +284,10 @@ int parse_cli_arguments(enum application_role* role, struct proxy_config* proxy_
                                 break;
                         }
 			case 's':
-                                proxy_config->tls_config.use_secure_element = true;
+                                bool use_secure_element = (bool) strtoul(optarg, NULL, 10);
+                                proxy_config->tls_config.use_secure_element = use_secure_element;
 				if (wolfssl_config != NULL)
-                                        wolfssl_config->secure_element_support = true;
+                                        wolfssl_config->secure_element_support = use_secure_element;
 				break;
                         case 'm':
                                 if (wolfssl_config != NULL)
@@ -360,22 +361,22 @@ static void print_help(const struct shell *sh, char const* name)
 #if defined(__ZEPHYR__)
         shell_print(sh, "  -v, --identity name              use stored certificates for given identity");
 #endif
-        shell_print(sh, "  -c, --cert file_path             path to the certificate file");
-        shell_print(sh, "  -k, --key file_path              path to the private key file");
-        shell_print(sh, "  -i, --intermediate file_path     path to an intermediate certificate file");
-        shell_print(sh, "  -r, --root file_path             path to the root certificate file");
+        shell_print(sh, "  --cert file_path                 path to the certificate file");
+        shell_print(sh, "  --key file_path                  path to the private key file");
+        shell_print(sh, "  --intermediate file_path         path to an intermediate certificate file");
+        shell_print(sh, "  --root file_path                 path to the root certificate file");
         shell_print(sh, "  --additionalKey file_path        path to an additional private key file (hybrid signature mode)\n");
         shell_print(sh, "  --mutualAuth 0|1                 enable or disable mutual authentication (default enabled)");
         shell_print(sh, "  --noEncryption 0|1               enable or disable encryption (default enabled)");
         shell_print(sh, "  --hybrid_signature mode          mode for hybrid signatures: both, native, alternative (default: both)\n");
-        shell_print(sh, "  --secure_element                 use secure element");
+        shell_print(sh, "  --use_secure_element 0|1         use secure element (default disabled)");
         shell_print(sh, "  --middleware_path file_path      path to the secure element middleware");
         shell_print(sh, "  --se_import_keys 0|1             import provided keys into secure element (default disabled)\n");
-        shell_print(sh, "  -d, --debug                      enable debug output");
+        shell_print(sh, "  --debug                          enable debug output");
         shell_print(sh, "  --keylogFile file_path           path to the keylog file for Wireshark\n");
         shell_print(sh, "  --bridge_lan interface           name of the LAN interface for the Layer 2 bridge");
         shell_print(sh, "  --bridge_wan interface           name of the WAN interface for the Layer 2 bridge\n");
-        shell_print(sh, "  -h, --help                       display this help and exit");
+        shell_print(sh, "  --help                           display this help and exit");
 }
 
 
