@@ -246,6 +246,10 @@ static int add_new_proxy(enum tls_proxy_direction direction, proxy_config const*
 		return -1;
 	}
 
+	/* This is only a temporary solution, as we currently not set the log level
+	 * on a proxy individual base, but rather on a system wide level. */
+	LOG_LEVEL_SET(config->logLevel);
+
 	proxy* proxy = &proxy_pool[freeSlot];
 
 	proxy->in_use = true;

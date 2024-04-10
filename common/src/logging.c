@@ -9,8 +9,15 @@
 #include <sys/syscall.h>
 
 
-void log_message(char const* module, char const* level, char const* fmt, ...)
+
+
+void log_message(LOG_MODULE const* module, enum LOG_LEVEL level, char const* fmt, ...)
 {
+    if (level < module->level)
+    {
+        return;
+    }
+
     va_list args;
     va_start(args, fmt);
 
@@ -19,7 +26,28 @@ void log_message(char const* module, char const* level, char const* fmt, ...)
 
     va_end(args);
 
-    printf("<%s>\t%s (%ld): %s\r\n", level, module, syscall(SYS_gettid), message);
+    char const* level_str = "";
+    switch (level)
+    {
+    case LOG_LEVEL_INFO:
+        level_str = "INFO";
+        break;
+    case LOG_LEVEL_WARN:
+        level_str = "WARN";
+        break;
+    case LOG_LEVEL_ERROR:
+        level_str = "ERROR";
+        break;
+    default:
+        break;
+    }
+
+    printf("<%s>\t%s (%ld): %s\r\n", level_str, module->name, syscall(SYS_gettid), message);
+}
+
+void log_level_set(LOG_MODULE* module, enum LOG_LEVEL level)
+{
+    module->level = level;
 }
 
 void shell_log(struct shell const* sh, char const* fmt, ...)

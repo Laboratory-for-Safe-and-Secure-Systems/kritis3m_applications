@@ -263,6 +263,7 @@ int wolfssl_init(struct wolfssl_library_configuration const* config)
 #endif
 
 	/* Configure the logging interface */
+	LOG_LEVEL_SET(config->logLevel);
 	if (config->loggingEnabled)
 	{
 		wolfSSL_SetLoggingCb(wolfssl_logging_callback);

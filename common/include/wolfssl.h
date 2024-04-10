@@ -5,6 +5,8 @@
 #include <stdbool.h>
 #include <time.h>
 
+#include "logging.h"
+
 #include "wolfssl/wolfcrypt/settings.h"
 #include "wolfssl/ssl.h"
 #include "wolfssl/wolfcrypt/wc_pkcs11.h"
@@ -14,12 +16,13 @@
 typedef struct wolfssl_library_configuration
 {
         bool loggingEnabled;
+        enum LOG_LEVEL logLevel;
 
         bool secure_element_support;
         char const* secure_element_middleware_path;
 
 #ifdef WOLFSSL_STATIC_MEMORY
-        struct 
+        struct
         {
                 uint8_t* buffer;
                 size_t size;
@@ -47,7 +50,7 @@ typedef struct wolfssl_endpoint_configuration
         bool no_encryption;
         bool use_secure_element;
         bool secure_element_import_keys;
-        
+
         enum hybrid_signature_mode hybrid_signature_mode;
 
         struct
@@ -145,7 +148,7 @@ wolfssl_endpoint* wolfssl_setup_client_endpoint(wolfssl_endpoint_configuration c
  *
  * Parameters are a pointer to a configured endpoint and the socket fd of the underlying
  * network connection.
- * 
+ *
  * Return value is a pointer to the newly created session or NULL in case of an error
  * (error message is logged to the console).
  */
@@ -172,7 +175,7 @@ int wolfssl_receive(wolfssl_session* session, uint8_t* buffer, int max_size);
 
 /* Send data to the TLS remote peer.
  *
- * Returns 0 on success, -1 on failure (error message is logged to the console). In case 
+ * Returns 0 on success, -1 on failure (error message is logged to the console). In case
  * we cannot write the data in one call, WOLFSSL_ERROR_WANT_WRITE is returned, indicating
  * that you have to call the method again (with the same data!) once the socket is writable.
  */

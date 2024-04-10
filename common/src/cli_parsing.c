@@ -59,6 +59,7 @@ static const struct option cli_options[] =
     { "use_secure_element", required_argument,    0, 's' },
     { "middleware_path",    required_argument,    0, 'm' },
     { "se_import_keys",     required_argument,    0, 'p' },
+    { "verbose",            no_argument,          0, 't' },
     { "debug",              no_argument,          0, 'd' },
     { "keylogFile",         required_argument,    0, 'j' },
     { "bridge_lan",         required_argument,    0, 'e' },
@@ -112,11 +113,13 @@ int parse_cli_arguments(enum application_role* role, struct proxy_config* proxy_
 #if defined(HAVE_SECRET_CALLBACK)
         proxy_config->tls_config.keylog_file = NULL;
 #endif
+        proxy_config->logLevel = LOG_LEVEL_WARN;
 
         if (wolfssl_config != NULL)
         {
                 memset(wolfssl_config, 0, sizeof(*wolfssl_config));
                 wolfssl_config->loggingEnabled = false;
+                wolfssl_config->logLevel = LOG_LEVEL_WARN;
                 wolfssl_config->secure_element_support = false;
                 wolfssl_config->secure_element_middleware_path = NULL;
         }
@@ -157,7 +160,7 @@ int parse_cli_arguments(enum application_role* role, struct proxy_config* proxy_
 #endif
 	while (true)
 	{
-		int result = getopt_long(argc, argv, "wxyza:b:v:c:k:i:r:l:n:o:q:s:m:p:dj:e:f:h", cli_options, &index);
+		int result = getopt_long(argc, argv, "wxyza:b:v:c:k:i:r:l:n:o:q:s:m:p:tdj:e:f:h", cli_options, &index);
 
 		if (result == -1)
 		        break; /* end of list */
@@ -296,6 +299,11 @@ int parse_cli_arguments(enum application_role* role, struct proxy_config* proxy_
                         case 'p':
                                 proxy_config->tls_config.secure_element_import_keys = (bool) strtoul(optarg, NULL, 10);
                                 break;
+                        case 't':
+                                proxy_config->logLevel = LOG_LEVEL_INFO;
+                                if (wolfssl_config != NULL)
+                                        wolfssl_config->logLevel = LOG_LEVEL_INFO;
+                                break;
                         case 'd':
                                 if (wolfssl_config != NULL)
                                         wolfssl_config->loggingEnabled = true;
@@ -372,6 +380,7 @@ static void print_help(const struct shell *sh, char const* name)
         shell_print(sh, "  --use_secure_element 0|1         use secure element (default disabled)");
         shell_print(sh, "  --middleware_path file_path      path to the secure element middleware");
         shell_print(sh, "  --se_import_keys 0|1             import provided keys into secure element (default disabled)\n");
+        shell_print(sh, "  --verbose                        enable verbose output");
         shell_print(sh, "  --debug                          enable debug output");
         shell_print(sh, "  --keylogFile file_path           path to the keylog file for Wireshark\n");
         shell_print(sh, "  --bridge_lan interface           name of the LAN interface for the Layer 2 bridge");
