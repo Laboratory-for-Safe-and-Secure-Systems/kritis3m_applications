@@ -13,34 +13,41 @@
 
 enum LOG_LEVEL
 {
-    LOG_LEVEL_INFO,
-    LOG_LEVEL_WARN,
-    LOG_LEVEL_ERROR
+    LOG_LEVEL_NONE  = 0U,
+    LOG_LEVEL_ERR   = 1U,
+    LOG_LEVEL_WRN   = 2U,
+    LOG_LEVEL_INF   = 3U,
+    LOG_LEVEL_DBG   = 4U,
 };
 
 typedef struct LOG_MODULE
 {
     char const* name;
-    enum LOG_LEVEL level;
+    int32_t level;
 }
 LOG_MODULE;
 
 
 /* Register a new logging module */
-#define LOG_MODULE_REGISTER(module_name) static LOG_MODULE log_module = { \
+#define LOG_MODULE_REGISTER(module_name) static struct LOG_MODULE log_module = { \
                                                 .name = #module_name, \
-                                                .level = LOG_LEVEL_INFO \
+                                                .level = LOG_LEVEL_WRN \
                                         }
 
-#define LOG_INF(fmt, ...) log_message(&log_module, LOG_LEVEL_INFO, fmt, ##__VA_ARGS__)
-#define LOG_WRN(fmt, ...) log_message(&log_module, LOG_LEVEL_WARN, fmt, ##__VA_ARGS__)
-#define LOG_ERR(fmt, ...) log_message(&log_module, LOG_LEVEL_ERROR, fmt, ##__VA_ARGS__)
+#define LOG_MODULE_REGISTER_EX(module_name, log_level) static struct LOG_MODULE log_module = { \
+                                                .name = #module_name, \
+                                                .level = log_level \
+                                        }
+
+#define LOG_INF(fmt, ...) log_message(&log_module, LOG_LEVEL_INF, fmt, ##__VA_ARGS__)
+#define LOG_WRN(fmt, ...) log_message(&log_module, LOG_LEVEL_WRN, fmt, ##__VA_ARGS__)
+#define LOG_ERR(fmt, ...) log_message(&log_module, LOG_LEVEL_ERR, fmt, ##__VA_ARGS__)
 
 #define LOG_LEVEL_SET(level) log_level_set(&log_module, level)
 
 
-void log_message(LOG_MODULE const* module, enum LOG_LEVEL level, char const* fmt, ...);
-void log_level_set(LOG_MODULE* module, enum LOG_LEVEL level);
+void log_message(LOG_MODULE const* module, int32_t level, char const* fmt, ...);
+void log_level_set(LOG_MODULE* module, int32_t level);
 
 
 struct shell

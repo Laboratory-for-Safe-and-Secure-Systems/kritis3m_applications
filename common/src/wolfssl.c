@@ -457,7 +457,7 @@ static int wolfssl_configure_context(WOLFSSL_CTX* context, struct wolfssl_endpoi
 
 	/* Configure the available curves for Key Exchange */
 	int wolfssl_key_exchange_curves[] = {
-		// WOLFSSL_ECC_SECP384R1,
+		WOLFSSL_ECC_SECP384R1,
 		// WOLFSSL_KYBER_LEVEL1,
         	WOLFSSL_KYBER_LEVEL3,
         	WOLFSSL_KYBER_LEVEL5,
@@ -877,8 +877,6 @@ int wolfssl_send(wolfssl_session* session, uint8_t const* buffer, int size)
         uint8_t const* tmp = buffer;
 	int ret = 0;
 
-	int debug_size = size;
-
 	if (session == NULL)
 	{
 		LOG_ERR("Session is NULL");
@@ -919,10 +917,6 @@ int wolfssl_send(wolfssl_session* session, uint8_t const* buffer, int size)
 			}
 			else
 			{
-				if (ret == -173)
-				{
-					LOG_ERR("size: %d, debug_size: %d", size, debug_size);
-				}
 				if (ret != 0)
 				{
 					char errMsg[WOLFSSL_MAX_ERROR_SZ];

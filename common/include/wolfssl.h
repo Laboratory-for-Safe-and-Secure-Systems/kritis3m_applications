@@ -16,7 +16,7 @@
 typedef struct wolfssl_library_configuration
 {
         bool loggingEnabled;
-        enum LOG_LEVEL logLevel;
+        int32_t logLevel;
 
         bool secure_element_support;
         char const* secure_element_middleware_path;

@@ -11,9 +11,9 @@
 
 
 
-void log_message(LOG_MODULE const* module, enum LOG_LEVEL level, char const* fmt, ...)
+void log_message(LOG_MODULE const* module, int32_t level, char const* fmt, ...)
 {
-    if (level < module->level)
+    if (level > module->level)
     {
         return;
     }
@@ -29,13 +29,13 @@ void log_message(LOG_MODULE const* module, enum LOG_LEVEL level, char const* fmt
     char const* level_str = "";
     switch (level)
     {
-    case LOG_LEVEL_INFO:
+    case LOG_LEVEL_INF:
         level_str = "INFO";
         break;
-    case LOG_LEVEL_WARN:
+    case LOG_LEVEL_WRN:
         level_str = "WARN";
         break;
-    case LOG_LEVEL_ERROR:
+    case LOG_LEVEL_ERR:
         level_str = "ERROR";
         break;
     default:
@@ -45,7 +45,7 @@ void log_message(LOG_MODULE const* module, enum LOG_LEVEL level, char const* fmt
     printf("<%s>\t%s (%ld): %s\r\n", level_str, module->name, syscall(SYS_gettid), message);
 }
 
-void log_level_set(LOG_MODULE* module, enum LOG_LEVEL level)
+void log_level_set(LOG_MODULE* module, int32_t level)
 {
     module->level = level;
 }

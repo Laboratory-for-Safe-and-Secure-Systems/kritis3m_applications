@@ -14,7 +14,8 @@
 #include "wolfssl.h"
 
 
-LOG_MODULE_REGISTER(tls_proxy);
+LOG_MODULE_REGISTER_EX(tls_proxy, LOG_LEVEL_WRN);
+
 
 #define MAX_PROXYS 3
 
@@ -23,10 +24,16 @@ LOG_MODULE_REGISTER(tls_proxy);
 #define RECV_BUFFER_SIZE 1024
 #define MAX_CONNECTIONS_PER_PROXY 3
 
+#define BACKEND_THREAD_PRIORITY 8
+#define HANDLER_THREAD_PRIORITY 10
+
 #else
 
 #define RECV_BUFFER_SIZE 32768
 #define MAX_CONNECTIONS_PER_PROXY 15
+
+#define BACKEND_THREAD_PRIORITY 10
+#define HANDLER_THREAD_PRIORITY 12
 
 #endif
 
@@ -527,6 +534,14 @@ static proxy_connection* add_new_connection_to_proxy(proxy* proxy,
 			      K_THREAD_STACK_SIZEOF(connection_handler_stack_pool[freeSlotConnectionPool]));
 #endif
 
+	/* Set the priority of the client handler thread to be one higher than the backend thread.
+	 * This priorizes active connections before handshakes of new ones. */
+	// struct sched_param param = {
+	// 	.sched_priority = HANDLER_THREAD_PRIORITY,
+	// };
+	// pthread_attr_setschedparam(&connection->thread_attr, &param);
+	// pthread_attr_setschedpolicy(&connection->thread_attr, SCHED_RR);
+
 	/* Print info */
 	struct sockaddr_in* client_data = (struct sockaddr_in*) client_addr;
 	char peer_ip[20];
@@ -786,58 +801,72 @@ static void* connection_handler_thread(void *ptr)
 			{
 				if (event & POLLIN)
 				{
-					/* Data received from the tunnel */
-					ret = wolfssl_receive(connection->tls_session,
-							      connection->tun2ass_buffer,
-							      sizeof(connection->tun2ass_buffer));
-
-					if (ret > 0)
+					ret = 1;
+					while (ret > 0)
 					{
-						connection->num_of_bytes_in_tun2ass_buffer = ret;
+						/* Data received from the tunnel */
+						ret = wolfssl_receive(connection->tls_session,
+								connection->tun2ass_buffer,
+								sizeof(connection->tun2ass_buffer));
 
-						/* Send received data to the asset */
-						ret = send(connection->asset_sock,
-							   connection->tun2ass_buffer,
-							   connection->num_of_bytes_in_tun2ass_buffer,
-							   0);
-
-						if (ret == -1)
+						if (ret > 0)
 						{
-							if ((errno == EAGAIN) || (errno == EWOULDBLOCK))
+							connection->num_of_bytes_in_tun2ass_buffer = ret;
+
+							/* Send received data to the asset */
+							ret = send(connection->asset_sock,
+								connection->tun2ass_buffer,
+								connection->num_of_bytes_in_tun2ass_buffer,
+								0);
+
+							if (ret == -1)
 							{
-								/* We have to wait for the asset socket to be writable. Until we can send
-							 	 * the data, we also mustn't receive more data on the tunnel socket. */
-								poll_set_add_events(&poll_set, connection->asset_sock, POLLOUT);
-								poll_set_remove_events(&poll_set, connection->tunnel_sock, POLLIN);
-								ret = 0;
+								if ((errno == EAGAIN) || (errno == EWOULDBLOCK))
+								{
+									/* We have to wait for the asset socket to be writable. Until we can send
+									* the data, we also mustn't receive more data on the tunnel socket. */
+									poll_set_add_events(&poll_set, connection->asset_sock, POLLOUT);
+									poll_set_remove_events(&poll_set, connection->tunnel_sock, POLLIN);
+									ret = 0;
+								}
+								else
+								{
+									// LOG_ERR("Error sending data to asset: %s", strerror(errno));
+									shutdown = true;
+									break;
+								}
+							}
+							else if ((size_t)ret == connection->num_of_bytes_in_tun2ass_buffer)
+							{
+								if (connection->num_of_bytes_in_tun2ass_buffer < sizeof(connection->tun2ass_buffer))
+								{
+									/* We read the maximum amount of data from the tunnel connection. This
+									 * could be an indication that there is more data to be read. Hence, we
+									 * trigger another read here. */
+									ret = 0;
+								}
+
+								connection->num_of_bytes_in_tun2ass_buffer = 0;
 							}
 							else
 							{
-								// LOG_ERR("Error sending data to asset: %s", strerror(errno));
-								shutdown = true;
-								break;
+								connection->num_of_bytes_in_tun2ass_buffer -= ret;
+								memmove(connection->tun2ass_buffer, connection->tun2ass_buffer + ret,
+									connection->num_of_bytes_in_tun2ass_buffer);
+								poll_set_update_events(&poll_set, connection->asset_sock, POLLOUT);
+								// Do we need have to remove POLLIN from tunnel_sock here?
+								// LOG_WRN("Not all data sent to asset");
+								ret = 0;
 							}
-						}
-						else if ((size_t)ret == connection->num_of_bytes_in_tun2ass_buffer)
-						{
-							connection->num_of_bytes_in_tun2ass_buffer = 0;
-						}
-						else
-						{
-							connection->num_of_bytes_in_tun2ass_buffer -= ret;
-							memmove(connection->tun2ass_buffer, connection->tun2ass_buffer + ret,
-								connection->num_of_bytes_in_tun2ass_buffer);
-							poll_set_update_events(&poll_set, connection->asset_sock, POLLOUT);
-							// LOG_WRN("Not all data sent to asset");
-						}
 
-					}
-					else if (ret < 0)
-					{
-						/* Connection closed */
-						// LOG_INF("Tunnel connection on slot %d/%d closed",
-						// 	connection->slot+1, MAX_CONNECTIONS_PER_PROXY);
-						ret = -1;
+						}
+						else if (ret < 0)
+						{
+							/* Connection closed */
+							// LOG_INF("Tunnel connection on slot %d/%d closed",
+							// 	connection->slot+1, MAX_CONNECTIONS_PER_PROXY);
+							ret = -1;
+						}
 					}
 				}
 				if (event & POLLOUT)
@@ -1022,6 +1051,14 @@ int tls_proxy_backend_run(void)
 	/* We have to properly set the attributes with the stack to use for Zephyr. */
 	pthread_attr_setstack(&proxy_backend.thread_attr, &backend_stack, K_THREAD_STACK_SIZEOF(backend_stack));
 #endif
+
+	/* Set the priority of the client handler thread to be one higher than the backend thread.
+	 * This priorizes active connections before handshakes of new ones. */
+	// struct sched_param param = {
+	// 	.sched_priority = BACKEND_THREAD_PRIORITY,
+	// };
+	// pthread_attr_setschedparam(&proxy_backend.thread_attr, &param);
+	// pthread_attr_setschedpolicy(&proxy_backend.thread_attr, SCHED_RR);
 
 	/* Create the socket pair for external management */
 	int ret = socketpair(AF_UNIX, SOCK_STREAM, 0, proxy_backend.management_socket_pair);

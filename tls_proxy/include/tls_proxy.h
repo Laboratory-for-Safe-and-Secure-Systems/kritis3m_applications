@@ -14,7 +14,7 @@ typedef struct proxy_config
 	char const* target_ip_address;
 	uint16_t target_port;
 	struct wolfssl_endpoint_configuration tls_config;
-	enum LOG_LEVEL logLevel;
+	int32_t logLevel;
 }
 proxy_config;
 

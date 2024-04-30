@@ -113,13 +113,13 @@ int parse_cli_arguments(enum application_role* role, struct proxy_config* proxy_
 #if defined(HAVE_SECRET_CALLBACK)
         proxy_config->tls_config.keylog_file = NULL;
 #endif
-        proxy_config->logLevel = LOG_LEVEL_WARN;
+        proxy_config->logLevel = LOG_LEVEL_WRN;
 
         if (wolfssl_config != NULL)
         {
                 memset(wolfssl_config, 0, sizeof(*wolfssl_config));
                 wolfssl_config->loggingEnabled = false;
-                wolfssl_config->logLevel = LOG_LEVEL_WARN;
+                wolfssl_config->logLevel = LOG_LEVEL_WRN;
                 wolfssl_config->secure_element_support = false;
                 wolfssl_config->secure_element_middleware_path = NULL;
         }
@@ -300,13 +300,17 @@ int parse_cli_arguments(enum application_role* role, struct proxy_config* proxy_
                                 proxy_config->tls_config.secure_element_import_keys = (bool) strtoul(optarg, NULL, 10);
                                 break;
                         case 't':
-                                proxy_config->logLevel = LOG_LEVEL_INFO;
+                                proxy_config->logLevel = LOG_LEVEL_INF;
                                 if (wolfssl_config != NULL)
-                                        wolfssl_config->logLevel = LOG_LEVEL_INFO;
+                                        wolfssl_config->logLevel = LOG_LEVEL_INF;
                                 break;
                         case 'd':
+                                proxy_config->logLevel = LOG_LEVEL_DBG;
                                 if (wolfssl_config != NULL)
+                                {
                                         wolfssl_config->loggingEnabled = true;
+                                        wolfssl_config->logLevel = LOG_LEVEL_DBG;
+                                }
                                 break;
                         case 'j':
                         #if defined(HAVE_SECRET_CALLBACK)
