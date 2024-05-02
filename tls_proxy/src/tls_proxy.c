@@ -14,7 +14,7 @@
 #include "wolfssl.h"
 
 
-LOG_MODULE_REGISTER_EX(tls_proxy, LOG_LEVEL_WRN);
+LOG_MODULE_REGISTER(tls_proxy);
 
 
 #define MAX_PROXYS 3
