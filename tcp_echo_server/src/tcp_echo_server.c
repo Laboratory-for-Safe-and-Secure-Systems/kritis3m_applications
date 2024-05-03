@@ -71,7 +71,7 @@ static void* tcp_echo_server_main_thread(void* ptr)
 	server->running = true;
 
 	pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
-	
+
 	while (1)
 	{
 		struct sockaddr client_addr;
@@ -86,7 +86,7 @@ static void* tcp_echo_server_main_thread(void* ptr)
 		}
 
 		/* Check which fds created an event */
-		for (int i = 0; i < server->poll_set.num_fds; i++) 
+		for (int i = 0; i < server->poll_set.num_fds; i++)
 		{
 			int fd = server->poll_set.fds[i].fd;
 			short event = server->poll_set.fds[i].revents;
@@ -103,7 +103,7 @@ static void* tcp_echo_server_main_thread(void* ptr)
 				{
 					/* New client connection, try to handle it */
 					int client_socket = accept(server->tcp_server_socket, &client_addr, &client_addr_len);
-					if (client_socket < 0) 
+					if (client_socket < 0)
 					{
 						int error = errno;
 						if (error != EAGAIN)
@@ -150,7 +150,7 @@ static void* tcp_echo_server_main_thread(void* ptr)
 							   0);
 
 						if ((ret == -1) && ((errno == EAGAIN) || (errno == EWOULDBLOCK)))
-						{	
+						{
 							/* We have to wait for the socket to be writable */
 							poll_set_update_events(&server->poll_set, fd, POLLOUT);
 							ret = 0;
@@ -170,7 +170,7 @@ static void* tcp_echo_server_main_thread(void* ptr)
 						   client->recv_buffer,
 						   client->num_of_bytes_in_recv_buffer,
 						   0);
-					
+
 					if (ret >= 0)
 					{
 						/* Wait again for incoming data */
@@ -224,7 +224,7 @@ static echo_client* add_new_client(int client_socket,
 	struct sockaddr_in* client_data = (struct sockaddr_in*) client_addr;
 	char peer_ip[20];
 	net_addr_ntop(AF_INET, &client_data->sin_addr, peer_ip, sizeof(peer_ip));
-	LOG_INF("New client connection from %s:%d, using slot %d/%d", 
+	LOG_INF("New client connection from %s:%d, using slot %d/%d",
 		peer_ip, ntohs(client_data->sin_port),
 		freeSlot+1, MAX_CLIENTS);
 
@@ -261,7 +261,7 @@ static void client_cleanup(echo_client* client)
 
 
 /* Start a new thread and run the TCP echo server.
- * 
+ *
  * Returns 0 on success, -1 on failure (error message is printed to console).
  */
 int tcp_echo_server_run(tcp_echo_server_config const* config)
@@ -314,7 +314,7 @@ int tcp_echo_server_run(tcp_echo_server_config const* config)
 	net_addr_pton(bind_addr.sin_family, config->own_ip_address, &bind_addr.sin_addr);
 
 	/* Bind server socket to its destined IPv4 address */
-	if (bind(echo_server.tcp_server_socket, (struct sockaddr*) &bind_addr, sizeof(bind_addr)) == -1) 
+	if (bind(echo_server.tcp_server_socket, (struct sockaddr*) &bind_addr, sizeof(bind_addr)) == -1)
 	{
 		LOG_ERR("Cannot bind socket %d to %s:%d: error %d\n",
                         echo_server.tcp_server_socket, config->own_ip_address, config->listening_port, errno);

@@ -14,15 +14,16 @@
 #include "wolfssl.h"
 
 
+// LOG_LEVEL_SET(LOG_LEVEL_WRN);
 LOG_MODULE_REGISTER(tls_proxy);
 
 
-#define MAX_PROXYS 3
+#define MAX_PROXYS 1
 
 #if defined(__ZEPHYR__)
 
 #define RECV_BUFFER_SIZE 1024
-#define MAX_CONNECTIONS_PER_PROXY 3
+#define MAX_CONNECTIONS_PER_PROXY 1
 
 #define BACKEND_THREAD_PRIORITY 8
 #define HANDLER_THREAD_PRIORITY 10
