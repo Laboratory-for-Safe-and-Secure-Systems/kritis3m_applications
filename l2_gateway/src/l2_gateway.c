@@ -294,13 +294,18 @@ int init_asset(const l2_gateway_config *config, l2_gateway *gw)
 		}
 		break;
 	case UDP_SOCKET:
-		LOG_INF("Not implemented yet");
+		LOG_INF(" UDP Not implemented yet");
 		break;
+#if !defined(__ZEPHYR__)
 	case TAP_INTERFACE:
 		asset = (L2_Gateway *)((TapInterface *)malloc(sizeof(TapInterface)));
 		memset((TapInterface *)asset, 0, sizeof(TapInterface));
 		memset((uint8_t *)asset->buf, 0, sizeof(asset->buf));
 		ret = init_tap_interface_gateway((TapInterface *)asset, config, ASSET);
+		break;
+#endif
+	default:
+		LOG_INF("Not config available in l2_gateway");
 		break;
 	}
 
@@ -336,11 +341,16 @@ int init_tunnel(const l2_gateway_config *config, l2_gateway *gw)
 	case UDP_SOCKET:
 		LOG_ERR("UDP_SOCKET not implemented yet");
 		break;
+#if !defined(__ZEPHYR__)
 	case TAP_INTERFACE:
 		tunnel = (L2_Gateway *)((TapInterface *)malloc(sizeof(TapInterface)));
 		memset((TapInterface *)tunnel, 0, sizeof(TapInterface));
 		memset((uint8_t *)tunnel->buf, 0, sizeof(tunnel->buf));
 		ret = init_tap_interface_gateway((TapInterface *)tunnel, config, TUNNEL);
+		break;
+#endif
+	default:
+		LOG_ERR("config not available");
 		break;
 	}
 	if (ret < 0)
@@ -389,7 +399,8 @@ static void *l2_gateway_main_thread(void *ptr)
 			{
 				LOG_ERR("Failed to initialize tunnel");
 				l2_gateway_close(l2_gw_container->tunnel);
-			}else if (ret >= 0)
+			}
+			else if (ret >= 0)
 			{
 				ret = init_asset(config, l2_gw_container);
 				if (ret < 0)

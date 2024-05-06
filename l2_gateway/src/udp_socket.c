@@ -237,7 +237,7 @@ int udp_socket_pipe(UdpSocket *bridge)
     /**
      * here would be a good place to apply a filter on the frames
      */
-    int ret = l2_gateway_send(bridge->bridge.l2_gw_pipe, bridge->bridge.buf, bridge->bridge.len, offset);
+    int ret = l2_gateway_send(bridge->bridge.l2_gw_pipe, -1, bridge->bridge.buf, bridge->bridge.len, offset);
     if (ret < 0)
     {
         LOG_ERR("Failed to l2_gw_pipe data to other bridge: %d", ret);

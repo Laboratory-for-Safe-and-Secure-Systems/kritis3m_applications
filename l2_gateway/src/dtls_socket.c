@@ -988,4 +988,5 @@ int dtls_socket_client_send(wolfssl_session *session, uint8_t *buffer, int buffe
 int dtls_socket_server_send(wolfssl_session *session)
 {
     LOG_ERR("DTLS Server shouldn't be sending data. Probably usefull for the handshake");
+    return 0;
 }

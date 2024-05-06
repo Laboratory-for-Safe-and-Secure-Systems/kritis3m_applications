@@ -31,16 +31,30 @@
 
 LOG_MODULE_REGISTER(packet_socket_l2_gw);
 
+/**
+ * Initializes a packet socket gateway.
+ *
+ * @param l2_gw     Pointer to the PacketSocket structure to be initialized.
+ * @param config    Pointer to the l2_gateway_config structure containing the configuration settings.
+ * @param channel   The connected_channel enum value representing the channel type.
+ * @return          Returns 1 on success, -1 on failure.
+ *
+ * @bug On Linux, function find does not work as expected. The socket still receives packets from interfaces with different ifindex
+ */
 int init_packet_socket_gateway(PacketSocket *l2_gw, const l2_gateway_config *config, connected_channel channel)
 {
     int ret = -1;
     int proto = ETH_P_ALL;
+    l2_gw->bridge.vtable[call_send] = (int (*)())packet_socket_send;
+    l2_gw->bridge.vtable[call_receive] = (int (*)())packet_socket_receive;
+    l2_gw->bridge.vtable[call_pipe] = (int (*)())packet_socket_pipe;
+    l2_gw->bridge.vtable[call_close] = (int (*)())packet_socket_close;
+
 #if !defined(__ZEPHYR__)
     proto = htons(proto);
 #endif
 
     memset(&l2_gw->addr, 0, sizeof(l2_gw->addr));
-    memset(&l2_gw->source, 0, sizeof(l2_gw->source));
 
     l2_gw->addr.sll_family = AF_PACKET;
     l2_gw->addr.sll_protocol = proto;
@@ -48,29 +62,14 @@ int init_packet_socket_gateway(PacketSocket *l2_gw, const l2_gateway_config *con
     l2_gw->bridge.type = PACKET_SOCKET;
     l2_gw->bridge.channel = channel;
 
-    struct net_if *t_iface = NULL;
 #if defined(__ZEPHYR__)
-    switch (channel)
-    {
-    case ASSET:
-        t_iface = (struct net_if *)network_interfaces()->asset;
-        l2_gw->bridge.vlan_tag = config->asset_vlan_tag;
-        break;
-    case TUNNEL:
-        t_iface = (struct net_if *)network_interfaces()->tunnel;
-        l2_gw->bridge.vlan_tag = config->tunnel_vlan_tag;
-        break;
-    }
-
-    l2_gw->addr.sll_ifindex = net_if_get_by_iface(t_iface);
-    // get vlan tag of interface
+    struct net_if *iface = (channel == ASSET) ? (struct net_if *)network_interfaces()->asset : (struct net_if *)network_interfaces()->tunnel;
+    l2_gw->addr.sll_ifindex = net_if_get_by_iface(iface);
 #else
-    /* We have to get the mapping between interface name and index */
     l2_gw->addr.sll_ifindex = if_nametoindex(network_interfaces()->asset);
 #endif
 
     l2_gw->bridge.fd = socket(l2_gw->addr.sll_family, SOCK_RAW, l2_gw->addr.sll_protocol);
-
     // check if socket initialization was successful
     if (l2_gw->bridge.fd < 0)
     {
@@ -78,26 +77,12 @@ int init_packet_socket_gateway(PacketSocket *l2_gw, const l2_gateway_config *con
         return -1;
     }
 
-#if !defined(__ZEPHYR__)
-    const len = strnlen(network_interfaces()->asset, IFNAMSIZ);
-    if (len == IFNAMSIZ)
-    {
-        fprintf(stderr, "Too long iface name");
-        return 1;
-    }
-    ret = setsockopt(l2_gw->bridge.fd, SOL_SOCKET, SO_BINDTODEVICE, network_interfaces()->asset, len);
-    if (ret < 0)
-    {
-        LOG_ERR("couldnt bind to iface");
-    }
-#else
     /* Bind the packet sockets to their interfaces */
     if (bind(l2_gw->bridge.fd, (struct sockaddr *)&l2_gw->addr, sizeof(l2_gw->addr)) < 0)
     {
         LOG_ERR("binding ASSET socket to interface failed: error %d\n", errno);
         return -1;
     }
-#endif
 
 #if !defined(__ZEPHYR__)
     if (setsockopt(l2_gw->bridge.fd, SOL_PACKET, PACKET_IGNORE_OUTGOING, &(int){1}, sizeof(int)) < 0)
@@ -108,11 +93,6 @@ int init_packet_socket_gateway(PacketSocket *l2_gw, const l2_gateway_config *con
 #endif
 
     l2_gateway_register_fd(l2_gw->bridge.fd, POLLIN);
-
-    l2_gw->bridge.vtable[call_send] = (int (*)())packet_socket_send;
-    l2_gw->bridge.vtable[call_receive] = (int (*)())packet_socket_receive;
-    l2_gw->bridge.vtable[call_pipe] = (int (*)())packet_socket_pipe;
-    l2_gw->bridge.vtable[call_close] = (int (*)())packet_socket_close;
 
     return 1;
 }
@@ -183,13 +163,15 @@ int packet_socket_receive(PacketSocket *l2_gw, int fd)
         LOG_ERR("L2_Gateway is NULL");
         return -1;
     }
-
-    int source_len = sizeof(l2_gw->source);
+    // set source addr to 0
     memset(&l2_gw->source, 0, sizeof(l2_gw->source));
+    int source_len = sizeof(l2_gw->source);
+
     int ret = recvfrom(l2_gw->bridge.fd,
                        l2_gw->bridge.buf,
                        sizeof(l2_gw->bridge.buf),
-                       0, (struct sockaddr *)&l2_gw->source,
+                       0,
+                       (struct sockaddr *)&l2_gw->source,
                        &source_len);
     if (ret < 0)
     {

@@ -5,6 +5,7 @@ target_sources(${TARGET} PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src/poll_set.c
         ${CMAKE_CURRENT_SOURCE_DIR}/src/wolfssl.c
         ${CMAKE_CURRENT_SOURCE_DIR}/src/cli_parsing.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/l2_util.c
 
         # ${CMAKE_CURRENT_SOURCE_DIR}/src/secure_element/secure_element.c
         ${CMAKE_CURRENT_SOURCE_DIR}/src/secure_element/wolfssl_pkcs11_pqc.c

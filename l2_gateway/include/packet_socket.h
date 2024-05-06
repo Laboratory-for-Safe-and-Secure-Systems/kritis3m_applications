@@ -4,24 +4,19 @@
 #include "l2_gateway.h"
 
 #if !defined(__ZEPHYR__)
-       #include <linux/if_packet.h>
-       #include <net/ethernet.h> /* the L2 protocols */
-       #endif
-
+#include <linux/if_packet.h>
+#include <net/ethernet.h> /* the L2 protocols */
+#endif
 
 typedef struct PacketSocket PacketSocket;
 struct PacketSocket
 {
     L2_Gateway bridge;         /**< The bridge associated with the packet socket. */
     struct sockaddr_ll addr;   /**< The socket address. */
-    struct sockaddr_ll source; /**< The source address, which is used by the recieve function. */
+    struct sockaddr_ll source;   /**< The socket address. */
 };
 
 int init_packet_socket_gateway(PacketSocket *l2_gw, const l2_gateway_config *config, connected_channel channel);
-
-int init_packet_socket_bridge(PacketSocket *bridge,
-                              const interface_config *interface,
-                              connected_channel channel);
 
 int packet_socket_send(PacketSocket *l2_gateway, int fd, uint8_t *buffer, int buffer_len, int frame_start);
 
