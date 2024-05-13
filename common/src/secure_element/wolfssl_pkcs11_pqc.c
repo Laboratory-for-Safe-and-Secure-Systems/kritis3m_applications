@@ -6,7 +6,7 @@
 
 LOG_MODULE_REGISTER(wolfssl_pkcs11);
 
-
+#ifdef HAVE_LIBOQS
 #define DEVICE_ID_SECURE_ELEMENT 1
 
 static char private_key_id[] = "ENTITY_KEY";
@@ -235,3 +235,5 @@ ecc_key* create_ecc_key_from_buffer(uint8_t const* der_buffer, uint32_t der_size
 
 	return key;
 }
+
+#endif 

@@ -899,7 +899,6 @@ wolfssl_session *wolfssl_create_session(wolfssl_endpoint *endpoint, int socket_f
 	wolfSSL_SetIOWriteCtx(new_session->session, new_session);
 	return new_session;
 }
-
 /* Perform the TLS handshake for a newly created session.
  *
  * Returns 0 on success, -1 on failure (error message is logged to the console) and a positive
