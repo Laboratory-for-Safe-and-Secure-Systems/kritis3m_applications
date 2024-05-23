@@ -5,13 +5,15 @@
 #include <unistd.h>
 #include <stdint.h>
 #include <netinet/tcp.h>
+#include <string.h>
 
 #include "tls_proxy.h"
 
 #include "logging.h"
 #include "poll_set.h"
 #include "networking.h"
-#include "wolfssl.h"
+
+#include "asl.h"
 
 
 // LOG_LEVEL_SET(LOG_LEVEL_WRN);
@@ -53,7 +55,7 @@ typedef struct proxy_connection
 	enum tls_proxy_direction direction;
 	int tunnel_sock;
 	int asset_sock;
-	wolfssl_session* tls_session;
+	asl_session* tls_session;
 	int slot;
 	pthread_t thread;
 	pthread_attr_t thread_attr;
@@ -72,7 +74,7 @@ typedef struct proxy
 	enum tls_proxy_direction direction;
 	int incoming_sock;
 	struct sockaddr_in target_addr;
-	wolfssl_endpoint* tls_endpoint;
+	asl_endpoint* tls_endpoint;
 	struct proxy_connection* connections[MAX_CONNECTIONS_PER_PROXY];
 }
 proxy;
@@ -269,7 +271,7 @@ static int add_new_proxy(enum tls_proxy_direction direction, proxy_config const*
 			config->listening_port, freeSlot+1, MAX_PROXYS);
 
 		/* Create the TLS endpoint */
-		proxy->tls_endpoint = wolfssl_setup_server_endpoint(&config->tls_config);
+		proxy->tls_endpoint = asl_setup_server_endpoint(&config->tls_config);
 	}
 	else if (direction == FORWARD_PROXY)
 	{
@@ -277,7 +279,7 @@ static int add_new_proxy(enum tls_proxy_direction direction, proxy_config const*
 		config->target_ip_address, config->target_port, freeSlot+1, MAX_PROXYS);
 
 		/* Create the TLS endpoint */
-		proxy->tls_endpoint = wolfssl_setup_client_endpoint(&config->tls_config);
+		proxy->tls_endpoint = asl_setup_client_endpoint(&config->tls_config);
 	}
 
 	if (proxy->tls_endpoint == NULL)
@@ -379,7 +381,7 @@ static void kill_proxy(proxy* proxy)
 	/* Clear TLS context */
 	if (proxy->tls_endpoint != NULL)
 	{
-		wolfssl_free_endpoint(proxy->tls_endpoint);
+		asl_free_endpoint(proxy->tls_endpoint);
 		proxy->tls_endpoint = NULL;
 	}
 
@@ -516,7 +518,7 @@ static proxy_connection* add_new_connection_to_proxy(proxy* proxy,
 	}
 
 	/* Create a new TLS session on the destined interface depending on the direction */
-	connection->tls_session = wolfssl_create_session(proxy->tls_endpoint, connection->tunnel_sock);
+	connection->tls_session = asl_create_session(proxy->tls_endpoint, connection->tunnel_sock);
 	if (connection->tls_session == NULL)
 	{
 		LOG_ERR("Cannot accept more connections (error creating TLS session)");
@@ -572,7 +574,7 @@ static void proxy_connection_cleanup(proxy_connection* connection)
 	/* Cleanup the TLS session */
 	if (connection->tls_session != NULL)
 	{
-		wolfssl_free_session(connection->tls_session);
+		asl_free_session(connection->tls_session);
 		connection->tls_session = NULL;
 	}
 
@@ -693,16 +695,10 @@ void* tls_proxy_main_thread(void* ptr)
 				if ((event & POLLIN) || (event & POLLOUT))
 				{
 					/* Continue with the handshake */
-					ret = wolfssl_handshake(proxy_connection->tls_session);
+					ret = asl_handshake(proxy_connection->tls_session);
 
-					if (ret < 0)
-					{
-						LOG_ERR("Error performing TLS handshake");
-						poll_set_remove_fd(&config->poll_set, fd);
-						proxy_connection_cleanup(proxy_connection);
-						continue;
-					}
-					else if (ret == 0)
+
+					if (ret == ASL_SUCCESS)
 					{
 						/* Handshake done, remove respective socket from the poll_set */
 						poll_set_remove_fd(&config->poll_set, fd);
@@ -711,8 +707,8 @@ void* tls_proxy_main_thread(void* ptr)
 						 * on the TLS client endpoint). */
 						if (proxy_connection->direction == REVERSE_PROXY)
 						{
-							tls_handshake_metrics metrics;
-							metrics = wolfssl_get_handshake_metrics(proxy_connection->tls_session);
+							asl_handshake_metrics metrics;
+							metrics = asl_get_handshake_metrics(proxy_connection->tls_session);
 
 							LOG_INF("Handshake done\r\n\tDuration: %.3f milliseconds\r\n\tTx bytes: "\
 								"%d\r\n\tRx bytes: %d", metrics.duration_us / 1000.0,
@@ -730,15 +726,22 @@ void* tls_proxy_main_thread(void* ptr)
 							proxy_connection_cleanup(proxy_connection);
 						}
 					}
-					else if (ret == WOLFSSL_ERROR_WANT_WRITE)
+					else if (ret == ASL_WANT_READ)
+					{
+						/* We have to wait for more data from the peer */
+						poll_set_update_events(&config->poll_set, fd, POLLIN);
+					}
+					else if (ret == ASL_WANT_WRITE)
 					{
 						/* We have to wait for the socket to be writable */
 						poll_set_update_events(&config->poll_set, fd, POLLOUT);
 					}
 					else
 					{
-						/* We have to wait for more data from the peer */
-						poll_set_update_events(&config->poll_set, fd, POLLIN);
+						LOG_ERR("Error performing TLS handshake: %s", asl_error_message(ret));
+						poll_set_remove_fd(&config->poll_set, fd);
+						proxy_connection_cleanup(proxy_connection);
+						continue;
 					}
 				}
 				if ((event & POLLERR) || (event & POLLHUP))
@@ -806,7 +809,7 @@ static void* connection_handler_thread(void *ptr)
 					while (ret > 0)
 					{
 						/* Data received from the tunnel */
-						ret = wolfssl_receive(connection->tls_session,
+						ret = asl_receive(connection->tls_session,
 								connection->tun2ass_buffer,
 								sizeof(connection->tun2ass_buffer));
 
@@ -861,6 +864,13 @@ static void* connection_handler_thread(void *ptr)
 							}
 
 						}
+						else if (ret == ASL_WANT_READ)
+						{
+							/* We have to wait for more data from the peer to read data (not a full record has been
+							 * received).
+							 */
+							ret = 0;
+						}
 						else if (ret < 0)
 						{
 							/* Connection closed */
@@ -874,7 +884,7 @@ static void* connection_handler_thread(void *ptr)
 				{
 					/* We can send data on the tunnel connection now. Send remaining
 					 * data from the asset. */
-					ret = wolfssl_send(connection->tls_session,
+					ret = asl_send(connection->tls_session,
 							   connection->ass2tun_buffer,
 							   connection->num_of_bytes_in_ass2tun_buffer);
 
@@ -913,11 +923,11 @@ static void* connection_handler_thread(void *ptr)
 						connection->num_of_bytes_in_ass2tun_buffer = ret;
 
 						/* Send received data to the other socket */
-						ret = wolfssl_send(connection->tls_session,
+						ret = asl_send(connection->tls_session,
 								   connection->ass2tun_buffer,
 								   connection->num_of_bytes_in_ass2tun_buffer);
 
-						if (ret == WOLFSSL_ERROR_WANT_WRITE)
+						if (ret == ASL_WANT_WRITE)
 						{
 							/* We have to wait for the tunnel socket to be writable. Until we can send
 							 * the data, we also mustn't receive more data on the asset socket. */
@@ -996,7 +1006,7 @@ static void* connection_handler_thread(void *ptr)
 
 	LOG_INF("Connection on slot %d/%d closed", connection->slot+1, MAX_CONNECTIONS_PER_PROXY);
 
-	wolfssl_close_session(connection->tls_session);
+	asl_close_session(connection->tls_session);
 
 	proxy_connection_cleanup(connection);
 

@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-#include "wolfssl.h"
+#include "asl.h"
 
 
 typedef struct proxy_config
@@ -13,7 +13,7 @@ typedef struct proxy_config
 	uint16_t listening_port;
 	char const* target_ip_address;
 	uint16_t target_port;
-	struct wolfssl_endpoint_configuration tls_config;
+	asl_endpoint_configuration tls_config;
 	int32_t logLevel;
 }
 proxy_config;

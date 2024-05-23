@@ -80,7 +80,7 @@ static void print_help(const struct shell *sh, char const* name);
  * on console).
  */
 int parse_cli_arguments(enum application_role* role, struct proxy_config* proxy_config,
-                        wolfssl_library_configuration* wolfssl_config, l2_bridge_config* bridge_config,
+                        asl_configuration* asl_config, l2_bridge_config* bridge_config,
                         struct shell const* sh, size_t argc, char** argv)
 {
         if ((role == NULL) || (proxy_config == NULL))
@@ -115,13 +115,13 @@ int parse_cli_arguments(enum application_role* role, struct proxy_config* proxy_
 #endif
         proxy_config->logLevel = LOG_LEVEL_WRN;
 
-        if (wolfssl_config != NULL)
+        if (asl_config != NULL)
         {
-                memset(wolfssl_config, 0, sizeof(*wolfssl_config));
-                wolfssl_config->loggingEnabled = false;
-                wolfssl_config->logLevel = LOG_LEVEL_WRN;
-                wolfssl_config->secure_element_support = false;
-                wolfssl_config->secure_element_middleware_path = NULL;
+                memset(asl_config, 0, sizeof(*asl_config));
+                asl_config->loggingEnabled = false;
+                asl_config->logLevel = LOG_LEVEL_WRN;
+                asl_config->secure_element_support = false;
+                asl_config->secure_element_middleware_path = NULL;
         }
 
         if (bridge_config != NULL)
@@ -270,7 +270,7 @@ int parse_cli_arguments(enum application_role* role, struct proxy_config* proxy_
                                 break;
                         case 'q':
                         {
-                                enum hybrid_signature_mode mode;
+                                enum asl_hybrid_signature_mode mode;
                                 if (strcmp(optarg, "both") == 0)
                                         mode = HYBRID_SIGNATURE_MODE_BOTH;
                                 else if (strcmp(optarg, "native") == 0)
@@ -289,27 +289,27 @@ int parse_cli_arguments(enum application_role* role, struct proxy_config* proxy_
 			case 's':
                                 bool use_secure_element = (bool) strtoul(optarg, NULL, 10);
                                 proxy_config->tls_config.use_secure_element = use_secure_element;
-				if (wolfssl_config != NULL)
-                                        wolfssl_config->secure_element_support = use_secure_element;
+				if (asl_config != NULL)
+                                        asl_config->secure_element_support = use_secure_element;
 				break;
                         case 'm':
-                                if (wolfssl_config != NULL)
-                                        wolfssl_config->secure_element_middleware_path = optarg;
+                                if (asl_config != NULL)
+                                        asl_config->secure_element_middleware_path = optarg;
                                 break;
                         case 'p':
                                 proxy_config->tls_config.secure_element_import_keys = (bool) strtoul(optarg, NULL, 10);
                                 break;
                         case 't':
                                 proxy_config->logLevel = LOG_LEVEL_INF;
-                                if (wolfssl_config != NULL)
-                                        wolfssl_config->logLevel = LOG_LEVEL_INF;
+                                if (asl_config != NULL)
+                                        asl_config->logLevel = LOG_LEVEL_INF;
                                 break;
                         case 'd':
                                 proxy_config->logLevel = LOG_LEVEL_DBG;
-                                if (wolfssl_config != NULL)
+                                if (asl_config != NULL)
                                 {
-                                        wolfssl_config->loggingEnabled = true;
-                                        wolfssl_config->logLevel = LOG_LEVEL_DBG;
+                                        asl_config->loggingEnabled = true;
+                                        asl_config->logLevel = LOG_LEVEL_DBG;
                                 }
                                 break;
                         case 'j':

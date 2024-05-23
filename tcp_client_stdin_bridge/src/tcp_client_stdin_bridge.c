@@ -3,13 +3,13 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "tcp_client_stdin_bridge.h"
 
 #include "logging.h"
 #include "poll_set.h"
 #include "networking.h"
-#include "wolfssl.h"
 
 
 LOG_MODULE_REGISTER(tcp_client_stdin_bridge);
@@ -42,7 +42,7 @@ static void* tcp_client_stdin_bridge_main_thread(void* ptr);
 static void* tcp_client_stdin_bridge_main_thread(void* ptr)
 {
 	struct tcp_client_stdin_bridge* bridge = (struct tcp_client_stdin_bridge*) ptr;
-	
+
 	while (1)
 	{
 		/* Block and wait for incoming events (new connections, received data, ...) */
@@ -54,7 +54,7 @@ static void* tcp_client_stdin_bridge_main_thread(void* ptr)
 		}
 
 		/* Check which fds created an event */
-		for (int i = 0; i < bridge->poll_set.num_fds; i++) 
+		for (int i = 0; i < bridge->poll_set.num_fds; i++)
 		{
 			int fd = bridge->poll_set.fds[i].fd;
 			short event = bridge->poll_set.fds[i].revents;
@@ -93,7 +93,7 @@ static void* tcp_client_stdin_bridge_main_thread(void* ptr)
 						   bridge->recv_buffer,
 						   bridge->num_of_bytes_in_recv_buffer,
 						   0);
-					
+
 					if (ret >= 0)
 					{
 						/* Wait again for incoming data */
@@ -127,7 +127,7 @@ static void* tcp_client_stdin_bridge_main_thread(void* ptr)
 							   0);
 
 						if ((ret == -1) && ((errno == EAGAIN) || (errno == EWOULDBLOCK)))
-						{	
+						{
 							/* We have to wait for the socket to be writable */
 							poll_set_update_events(&bridge->poll_set, bridge->tcp_socket, POLLOUT);
 							ret = 0;
@@ -149,7 +149,7 @@ static void* tcp_client_stdin_bridge_main_thread(void* ptr)
 
 
 /* Start a new thread and run the TCP client stdin bridge application.
- * 
+ *
  * Returns 0 on success, -1 on failure (error message is printed to console).
  */
 int tcp_client_stdin_bridge_run(struct tcp_client_stdin_bridge_config const* config)
