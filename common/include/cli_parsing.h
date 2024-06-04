@@ -26,10 +26,9 @@ enum application_role
 
 /* Parse the provided argv array and store the information in the provided config variables.
  *
- * Returns 0 on success, +1 in case the help was printed and -1 on failure (error is printed
- * on console).
+ * Returns 0 on success, +1 in case the help was printed and -1 on failure (error is printed on console).
  */
-int parse_cli_arguments(enum application_role* role, struct proxy_config* proxy_config,
+int parse_cli_arguments(enum application_role* role, int32_t* log_level, struct proxy_config* proxy_config,
                         asl_configuration* asl_config, l2_bridge_config* bridge_config,
                         struct shell const* sh, size_t argc, char** argv);
 

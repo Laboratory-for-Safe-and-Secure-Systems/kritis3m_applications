@@ -42,6 +42,7 @@ LOG_MODULE;
 #define LOG_INF(fmt, ...) log_message(&log_module, LOG_LEVEL_INF, fmt, ##__VA_ARGS__)
 #define LOG_WRN(fmt, ...) log_message(&log_module, LOG_LEVEL_WRN, fmt, ##__VA_ARGS__)
 #define LOG_ERR(fmt, ...) log_message(&log_module, LOG_LEVEL_ERR, fmt, ##__VA_ARGS__)
+#define LOG_DBG(fmt, ...) log_message(&log_module, LOG_LEVEL_DBG, fmt, ##__VA_ARGS__)
 
 #define LOG_LEVEL_SET(level) log_level_set(&log_module, level)
 

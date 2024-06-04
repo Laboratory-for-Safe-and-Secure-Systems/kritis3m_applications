@@ -76,10 +76,9 @@ static void print_help(const struct shell *sh, char const* name);
 
 /* Parse the provided argv array and store the information in the provided config variables.
  *
- * Returns 0 on success, +1 in case the help was printed and  -1 on failure (error is printed
- * on console).
+ * Returns 0 on success, +1 in case the help was printed and  -1 on failure (error is printed on console).
  */
-int parse_cli_arguments(enum application_role* role, struct proxy_config* proxy_config,
+int parse_cli_arguments(enum application_role* role, int32_t* log_level, struct proxy_config* proxy_config,
                         asl_configuration* asl_config, l2_bridge_config* bridge_config,
                         struct shell const* sh, size_t argc, char** argv)
 {
@@ -91,6 +90,7 @@ int parse_cli_arguments(enum application_role* role, struct proxy_config* proxy_
 
 	/* Set default values */
         *role = NOT_SET;
+        *log_level = LOG_LEVEL_WRN;
 
         memset(proxy_config, 0, sizeof(*proxy_config));
         proxy_config->own_ip_address = NULL;
@@ -300,11 +300,16 @@ int parse_cli_arguments(enum application_role* role, struct proxy_config* proxy_
                                 proxy_config->tls_config.secure_element_import_keys = (bool) strtoul(optarg, NULL, 10);
                                 break;
                         case 't':
+                                *log_level = LOG_LEVEL_INF;
                                 proxy_config->logLevel = LOG_LEVEL_INF;
                                 if (asl_config != NULL)
+                                {
+                                        asl_config->loggingEnabled = true;
                                         asl_config->logLevel = LOG_LEVEL_INF;
+                                }
                                 break;
                         case 'd':
+                                *log_level = LOG_LEVEL_DBG;
                                 proxy_config->logLevel = LOG_LEVEL_DBG;
                                 if (asl_config != NULL)
                                 {
@@ -313,11 +318,7 @@ int parse_cli_arguments(enum application_role* role, struct proxy_config* proxy_
                                 }
                                 break;
                         case 'j':
-                        #if defined(HAVE_SECRET_CALLBACK)
                                 proxy_config->tls_config.keylog_file = optarg;
-                        #else
-                                shell_warn(sh, "--keylogFile is not compiled in, ignoring...");
-                        #endif
                                 break;
                         case 'e':
                                 if (bridge_config != NULL)

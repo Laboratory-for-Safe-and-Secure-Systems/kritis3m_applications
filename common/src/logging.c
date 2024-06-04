@@ -29,6 +29,9 @@ void log_message(LOG_MODULE const* module, int32_t level, char const* fmt, ...)
     char const* level_str = "";
     switch (level)
     {
+    case LOG_LEVEL_DBG:
+        level_str = "DEBUG";
+        break;
     case LOG_LEVEL_INF:
         level_str = "INFO";
         break;
