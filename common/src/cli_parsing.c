@@ -118,8 +118,8 @@ int parse_cli_arguments(enum application_role* role, int32_t* log_level, struct 
         if (asl_config != NULL)
         {
                 memset(asl_config, 0, sizeof(*asl_config));
-                asl_config->loggingEnabled = false;
-                asl_config->logLevel = LOG_LEVEL_WRN;
+                asl_config->logging_enabled = false;
+                asl_config->log_level = LOG_LEVEL_WRN;
                 asl_config->secure_element_support = false;
                 asl_config->secure_element_middleware_path = NULL;
         }
@@ -304,8 +304,8 @@ int parse_cli_arguments(enum application_role* role, int32_t* log_level, struct 
                                 proxy_config->logLevel = LOG_LEVEL_INF;
                                 if (asl_config != NULL)
                                 {
-                                        asl_config->loggingEnabled = true;
-                                        asl_config->logLevel = LOG_LEVEL_INF;
+                                        asl_config->logging_enabled = true;
+                                        asl_config->log_level = LOG_LEVEL_INF;
                                 }
                                 break;
                         case 'd':
@@ -313,8 +313,8 @@ int parse_cli_arguments(enum application_role* role, int32_t* log_level, struct 
                                 proxy_config->logLevel = LOG_LEVEL_DBG;
                                 if (asl_config != NULL)
                                 {
-                                        asl_config->loggingEnabled = true;
-                                        asl_config->logLevel = LOG_LEVEL_DBG;
+                                        asl_config->logging_enabled = true;
+                                        asl_config->log_level = LOG_LEVEL_DBG;
                                 }
                                 break;
                         case 'j':

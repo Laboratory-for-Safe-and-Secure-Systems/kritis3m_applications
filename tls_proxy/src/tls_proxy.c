@@ -712,7 +712,7 @@ void* tls_proxy_main_thread(void* ptr)
 
 							LOG_INF("Handshake done\r\n\tDuration: %.3f milliseconds\r\n\tTx bytes: "\
 								"%d\r\n\tRx bytes: %d", metrics.duration_us / 1000.0,
-								metrics.txBytes, metrics.rxBytes);
+								metrics.tx_bytes, metrics.rx_bytes);
 						}
 
 						/* Start thread for connection handling */
