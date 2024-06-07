@@ -10,11 +10,11 @@
 typedef struct proxy_config
 {
 	char const* own_ip_address;
-	uint16_t listening_port;
 	char const* target_ip_address;
+	uint16_t listening_port;
 	uint16_t target_port;
-	asl_endpoint_configuration tls_config;
 	int32_t logLevel;
+	asl_endpoint_configuration tls_config;
 }
 proxy_config;
 
