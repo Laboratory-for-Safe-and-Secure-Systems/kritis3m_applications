@@ -17,7 +17,7 @@
 #include <net/if.h>
 #include <sys/ioctl.h>
 
-#endif 
+#endif
 
 #include "l2_bridge.h"
 
@@ -26,7 +26,7 @@
 #include "networking.h"
 
 
-LOG_MODULE_REGISTER(l2_bridge);
+LOG_MODULE_CREATE(l2_bridge);
 
 
 typedef struct l2_bridge
@@ -65,19 +65,19 @@ static void* l2_bridge_main_thread(void* ptr)
 	ssize_t recv_buffer_len = 0;
 	struct sockaddr_ll source;
 	socklen_t source_len = sizeof(source);
-	
+
 	while (1)
 	{
 		/* Block and wait for incoming packets */
 		int ret = poll(bridge->poll_set.fds, bridge->poll_set.num_fds, -1);
 
 		if (ret == -1) {
-			LOG_ERR("poll error: %d", errno);
+			LOG_ERROR("poll error: %d", errno);
 			continue;
 		}
 
 		/* Check which fds created an event */
-		for (int i = 0; i < bridge->poll_set.num_fds; i++) 
+		for (int i = 0; i < bridge->poll_set.num_fds; i++)
 		{
 			int fd = bridge->poll_set.fds[i].fd;
 			short event = bridge->poll_set.fds[i].revents;
@@ -100,13 +100,13 @@ static void* l2_bridge_main_thread(void* ptr)
 							continue;
 						}
 
-						LOG_ERR("RAW : recv error %d", errno);
+						LOG_ERROR("RAW : recv error %d", errno);
 						ret = -errno;
 						break;
 					}
 
-					// LOG_INF("Received %d bytes on LAN interface", recv_buffer_len);
-					// LOG_INF("Protocol: %04x", htons(source.sll_protocol));
+					// LOG_INFO("Received %d bytes on LAN interface", recv_buffer_len);
+					// LOG_INFO("Protocol: %04x", htons(source.sll_protocol));
 
 					/* Check if we have to forward the packet */
 					if ((source.sll_pkttype == PACKET_OTHERHOST) ||
@@ -116,16 +116,16 @@ static void* l2_bridge_main_thread(void* ptr)
 						ret = sendto(bridge->wan_socket, recv_buffer, recv_buffer_len, 0,
 							(const struct sockaddr *)&bridge->wan_interface,
 							sizeof(bridge->wan_interface));
-						if (ret < 0) 
+						if (ret < 0)
 						{
-							LOG_ERR("Failed to send to WAN interface, errno %d", errno);
+							LOG_ERROR("Failed to send to WAN interface, errno %d", errno);
 							break;
 						}
 					}
 				}
 				if (event & POLLOUT)
 				{
-					
+
 				}
 			}
 			/* Check all clients */
@@ -143,13 +143,13 @@ static void* l2_bridge_main_thread(void* ptr)
 							continue;
 						}
 
-						LOG_ERR("RAW : recv error %d", errno);
+						LOG_ERROR("RAW : recv error %d", errno);
 						ret = -errno;
 						break;
 					}
 
-					// LOG_INF("Received %d bytes on WAN interface", recv_buffer_len);
-					// LOG_INF("Protocol: %04x", htons(source.sll_protocol));
+					// LOG_INFO("Received %d bytes on WAN interface", recv_buffer_len);
+					// LOG_INFO("Protocol: %04x", htons(source.sll_protocol));
 
 					/* Check if we have to forward the packet */
 					if ((source.sll_pkttype == PACKET_OTHERHOST) ||
@@ -159,21 +159,21 @@ static void* l2_bridge_main_thread(void* ptr)
 						ret = sendto(bridge->lan_socket, recv_buffer, recv_buffer_len, 0,
 			     			     (const struct sockaddr *)&bridge->lan_interface,
 			     			     sizeof(bridge->lan_interface));
-						if (ret < 0) 
+						if (ret < 0)
 						{
-							LOG_ERR("Failed to send to LAN interface, errno %d", errno);
+							LOG_ERROR("Failed to send to LAN interface, errno %d", errno);
 							break;
 						}
 					}
 				}
 				if (event & POLLOUT)
 				{
-					
+
 				}
 			}
 			else
 			{
-				LOG_ERR("Received event for unknown fd %d", fd);
+				LOG_ERROR("Received event for unknown fd %d", fd);
 			}
 		}
 	}
@@ -183,7 +183,7 @@ static void* l2_bridge_main_thread(void* ptr)
 
 
 /* Start a new thread and run the Layer 2 bridge.
- * 
+ *
  * Returns 0 on success, -1 on failure (error message is printed to console).
  */
 int l2_bridge_run(l2_bridge_config const* config)
@@ -202,14 +202,14 @@ int l2_bridge_run(l2_bridge_config const* config)
 	theBridge.lan_socket = socket(AF_PACKET, SOCK_RAW, proto);
 	if (theBridge.lan_socket == -1)
 	{
-		LOG_ERR("Error creating LAN socket: %d", errno);
+		LOG_ERROR("Error creating LAN socket: %d", errno);
 		return -1;
 	}
 
 	theBridge.wan_socket = socket(AF_PACKET, SOCK_RAW, proto);
 	if (theBridge.wan_socket == -1)
 	{
-		LOG_ERR("Error creating WAN socket: %d", errno);
+		LOG_ERROR("Error creating WAN socket: %d", errno);
 		return -1;
 	}
 
@@ -237,14 +237,14 @@ int l2_bridge_run(l2_bridge_config const* config)
 	/* Bind the packet sockets to their interfaces */
 	if (bind(theBridge.lan_socket, (struct sockaddr*) &theBridge.lan_interface, sizeof(theBridge.lan_interface)) < 0)
 	{
-		LOG_ERR("binding LAN socket to interface failed: error %d\n", errno);
+		LOG_ERROR("binding LAN socket to interface failed: error %d\n", errno);
 		close(theBridge.lan_socket);
 		close(theBridge.wan_socket);
 		return -1;
 	}
 	if (bind(theBridge.wan_socket, (struct sockaddr*) &theBridge.wan_interface, sizeof(theBridge.wan_interface)) < 0)
 	{
-		LOG_ERR("binding WAN socket to interface failed: error %d\n", errno);
+		LOG_ERROR("binding WAN socket to interface failed: error %d\n", errno);
 		close(theBridge.lan_socket);
 		close(theBridge.wan_socket);
 		return -1;
@@ -253,7 +253,7 @@ int l2_bridge_run(l2_bridge_config const* config)
 #if !defined(__ZEPHYR__)
         if (setsockopt(theBridge.lan_socket, SOL_PACKET, PACKET_IGNORE_OUTGOING, &(int){1}, sizeof(int)) < 0)
         {
-                LOG_ERR("setsockopt(PACKET_IGNORE_OUTGOING) on LAN socket failed: error %d\n", errno);
+                LOG_ERROR("setsockopt(PACKET_IGNORE_OUTGOING) on LAN socket failed: error %d\n", errno);
 		close(theBridge.lan_socket);
 		close(theBridge.wan_socket);
 		return -1;
@@ -261,7 +261,7 @@ int l2_bridge_run(l2_bridge_config const* config)
 
 	if (setsockopt(theBridge.wan_socket, SOL_PACKET, PACKET_IGNORE_OUTGOING, &(int){1}, sizeof(int)) < 0)
         {
-                LOG_ERR("setsockopt(PACKET_IGNORE_OUTGOING) on WAN socket failed: error %d\n", errno);
+                LOG_ERROR("setsockopt(PACKET_IGNORE_OUTGOING) on WAN socket failed: error %d\n", errno);
 		close(theBridge.lan_socket);
 		close(theBridge.wan_socket);
 		return -1;
@@ -276,7 +276,7 @@ int l2_bridge_run(l2_bridge_config const* config)
 	int ret = poll_set_add_fd(&theBridge.poll_set, theBridge.lan_socket, POLLIN);
 	if (ret != 0)
 	{
-		LOG_ERR("Error adding LAN socket to poll_set");
+		LOG_ERROR("Error adding LAN socket to poll_set");
 		close(theBridge.lan_socket);
 		close(theBridge.wan_socket);
 		return -1;
@@ -284,7 +284,7 @@ int l2_bridge_run(l2_bridge_config const* config)
 	ret = poll_set_add_fd(&theBridge.poll_set, theBridge.wan_socket, POLLIN);
 	if (ret != 0)
 	{
-		LOG_ERR("Error adding WAN socket to poll_set");
+		LOG_ERROR("Error adding WAN socket to poll_set");
 		close(theBridge.lan_socket);
 		close(theBridge.wan_socket);
 		return -1;
@@ -303,11 +303,11 @@ int l2_bridge_run(l2_bridge_config const* config)
 	ret = pthread_create(&theBridge.thread, &theBridge.thread_attr, l2_bridge_main_thread, &theBridge);
 	if (ret == 0)
 	{
-		LOG_INF("L2 bridge main thread started");
+		LOG_INFO("L2 bridge main thread started");
 	}
 	else
 	{
-		LOG_ERR("Error starting L2 bridge thread: %s", strerror(ret));
+		LOG_ERROR("Error starting L2 bridge thread: %s", strerror(ret));
 	}
 
 	return ret;

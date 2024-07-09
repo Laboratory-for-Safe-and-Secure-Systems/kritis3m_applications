@@ -28,7 +28,7 @@
 #include "networking.h"
 #include "logging.h"
 
-LOG_MODULE_REGISTER(networking);
+LOG_MODULE_CREATE(networking);
 
 
 static struct network_interfaces ifaces =
@@ -73,7 +73,7 @@ static void iface_up_handler(struct net_mgmt_event_callback *cb, uint32_t mgmt_e
 
 	if (iface == ifaces.management)
 	{
-		if (mgmt_event == NET_EVENT_L4_CONNECTED) 
+		if (mgmt_event == NET_EVENT_L4_CONNECTED)
 		{
 			status = "up";
 		}
@@ -82,7 +82,7 @@ static void iface_up_handler(struct net_mgmt_event_callback *cb, uint32_t mgmt_e
 			status = "down";
 		}
 
-		LOG_INF("Ethernet link %s (iface %p)", status, iface);
+		LOG_INFO("Ethernet link %s (iface %p)", status, iface);
 	}
 }
 
@@ -94,16 +94,16 @@ int initialize_network_interfaces()
 	/* Add an event handler to track ethernet link changes */
 	static struct net_mgmt_event_callback iface_up_cb;
 	net_mgmt_init_event_callback(&iface_up_cb, iface_up_handler, NET_EVENT_L4_CONNECTED | NET_EVENT_L4_DISCONNECTED);
-	net_mgmt_add_event_callback(&iface_up_cb);	
+	net_mgmt_add_event_callback(&iface_up_cb);
 
 	/* Initialize the Management VLAN */
 	ifaces.management = net_if_get_default();
 
 	#if defined(CONFIG_NET_VLAN)
 	int ret = net_eth_vlan_enable(ifaces.management, CONFIG_VLAN_TAG_MANAGEMENT);
-	if (ret < 0) 
+	if (ret < 0)
 	{
-		LOG_ERR("Cannot enable VLAN for tag %d: error %d", CONFIG_VLAN_TAG_MANAGEMENT, ret);
+		LOG_ERROR("Cannot enable VLAN for tag %d: error %d", CONFIG_VLAN_TAG_MANAGEMENT, ret);
         	return ret;
 	}
 	#endif
@@ -113,9 +113,9 @@ int initialize_network_interfaces()
 	#if defined(CONFIG_NET_VLAN)
 	/* Initialize LAN VLAN */
 	ret = net_eth_vlan_enable(ifaces.lan, CONFIG_VLAN_TAG_LAN);
-	if (ret < 0) 
+	if (ret < 0)
 	{
-		LOG_ERR("Cannot enable VLAN for tag %d: error %d", CONFIG_VLAN_TAG_LAN, ret);
+		LOG_ERROR("Cannot enable VLAN for tag %d: error %d", CONFIG_VLAN_TAG_LAN, ret);
         return ret;
 	}
 
@@ -123,18 +123,18 @@ int initialize_network_interfaces()
 
 	/* Set netmask and gateway for lan interface */
 	ret = net_addr_pton(AF_INET, CONFIG_NET_PROD_LAN_IPV4_NETMASK, &helper_addr);
-	if (ret != 0) 
+	if (ret != 0)
 	{
-		LOG_ERR("Invalid netmask %s for the LAN interface: error %d", CONFIG_NET_PROD_LAN_IPV4_NETMASK, ret);
+		LOG_ERROR("Invalid netmask %s for the LAN interface: error %d", CONFIG_NET_PROD_LAN_IPV4_NETMASK, ret);
 		return ret;
 	}
 
 	net_if_ipv4_set_netmask(ifaces.lan, &helper_addr);
 
 	ret = net_addr_pton(AF_INET, CONFIG_NET_PROD_LAN_IPV4_GW, &helper_addr);
-	if (ret != 0) 
+	if (ret != 0)
 	{
-		LOG_ERR("Invalid gateway address %s for the LAN interface: error %d", CONFIG_NET_PROD_LAN_IPV4_GW, ret);
+		LOG_ERROR("Invalid gateway address %s for the LAN interface: error %d", CONFIG_NET_PROD_LAN_IPV4_GW, ret);
 		return ret;
 	}
 
@@ -142,26 +142,26 @@ int initialize_network_interfaces()
 
 	/* Initialize WAN VLAN */
 	ret = net_eth_vlan_enable(ifaces.wan, CONFIG_VLAN_TAG_WAN);
-	if (ret < 0) 
+	if (ret < 0)
 	{
-		LOG_ERR("Cannot enable VLAN for tag %d: error %d", CONFIG_VLAN_TAG_WAN, ret);
+		LOG_ERROR("Cannot enable VLAN for tag %d: error %d", CONFIG_VLAN_TAG_WAN, ret);
         return ret;
 	}
 
 	/* Set netmask and gateway for lan interface */
 	ret = net_addr_pton(AF_INET, CONFIG_NET_PROD_WAN_IPV4_NETMASK, &helper_addr);
-	if (ret != 0) 
+	if (ret != 0)
 	{
-		LOG_ERR("Invalid netmask %s for the WAN interface: error %d", CONFIG_NET_PROD_WAN_IPV4_NETMASK, ret);
+		LOG_ERROR("Invalid netmask %s for the WAN interface: error %d", CONFIG_NET_PROD_WAN_IPV4_NETMASK, ret);
 		return ret;
 	}
 
 	net_if_ipv4_set_netmask(ifaces.wan, &helper_addr);
 
 	ret = net_addr_pton(AF_INET, CONFIG_NET_PROD_WAN_IPV4_GW, &helper_addr);
-	if (ret != 0) 
+	if (ret != 0)
 	{
-		LOG_ERR("Invalid gateway address %s for the WAN interface: error %d", CONFIG_NET_PROD_WAN_IPV4_GW, ret);
+		LOG_ERROR("Invalid gateway address %s for the WAN interface: error %d", CONFIG_NET_PROD_WAN_IPV4_GW, ret);
 		return ret;
 	}
 
@@ -176,11 +176,11 @@ int add_ipv4_address(void* iface, struct in_addr ipv4_addr)
 {
 	int ret = -EINVAL;
 
-	if (IS_ENABLED(CONFIG_NET_IPV4) && net_if_flag_is_set((struct net_if*) iface, NET_IF_IPV4)) 
+	if (IS_ENABLED(CONFIG_NET_IPV4) && net_if_flag_is_set((struct net_if*) iface, NET_IF_IPV4))
 	{
 		struct net_if_addr* ifaddr = net_if_ipv4_addr_add((struct net_if*) iface, &ipv4_addr, NET_ADDR_MANUAL, 0);
 
-		if (ifaddr) 
+		if (ifaddr)
 		{
 			ret = 0;
 		}
@@ -192,7 +192,7 @@ int add_ipv4_address(void* iface, struct in_addr ipv4_addr)
 /* Remove an ip address from a network interface */
 int remove_ipv4_address(void* iface, struct in_addr ipv4_addr)
 {
-	if (IS_ENABLED(CONFIG_NET_IPV4) && net_if_flag_is_set((struct net_if*) iface, NET_IF_IPV4)) 
+	if (IS_ENABLED(CONFIG_NET_IPV4) && net_if_flag_is_set((struct net_if*) iface, NET_IF_IPV4))
 	{
 		net_if_ipv4_addr_rm((struct net_if*) iface, &ipv4_addr);
 	}
@@ -218,7 +218,7 @@ int run_ip_shell_cmd(char const* command, char** output)
 #define MALLOC_SIZE 4096
 
     *output = (char*) malloc(MALLOC_SIZE);
-    
+
     if (*output == NULL)
     {
         return -ENOMEM;
@@ -226,22 +226,22 @@ int run_ip_shell_cmd(char const* command, char** output)
 
     /* Open a pipe to the command and execute it */
     FILE* fp = popen(command, "r");
-    if (fp == NULL) 
+    if (fp == NULL)
     {
          free(*output);
-		 *output = NULL; 
+		 *output = NULL;
          return -errno;
     }
 
     /* Read the output */
     size_t bytesRead = 0;
-    while (!feof(fp)) 
+    while (!feof(fp))
     {
       /* Read output */
       bytesRead += fread(*output + bytesRead, sizeof(char), MALLOC_SIZE - bytesRead, fp);
     }
     (*output)[bytesRead] = '\0';
-   
+
     /* Close the pipe and read the return code of the executed command */
     return WEXITSTATUS(pclose(fp));
 }
@@ -269,7 +269,7 @@ int add_ipv4_address(void* iface, struct in_addr ipv4_addr)
 		}
 		else
 		{
-			LOG_ERR("Command %s failed with error code %d (output %s)", ret, output);
+			LOG_ERROR("Command %s failed with error code %d (output %s)", ret, output);
 		}
     }
 
@@ -302,7 +302,7 @@ int remove_ipv4_address(void* iface, struct in_addr ipv4_addr)
 		}
 		else
 		{
-			LOG_ERR("Command %s failed with error code %d (output %s)", ret, output);
+			LOG_ERROR("Command %s failed with error code %d (output %s)", ret, output);
 		}
     }
 
@@ -327,25 +327,25 @@ int setblocking(int fd, bool val)
 	int fl, res;
 
 	fl = fcntl(fd, F_GETFL, 0);
-	if (fl == -1) 
+	if (fl == -1)
 	{
-		LOG_ERR("fcntl(F_GETFL): %d", errno);
+		LOG_ERROR("fcntl(F_GETFL): %d", errno);
 		return errno;
 	}
 
-	if (val) 
+	if (val)
 	{
 		fl &= ~O_NONBLOCK;
-	} 
-	else 
+	}
+	else
 	{
 		fl |= O_NONBLOCK;
 	}
 
 	res = fcntl(fd, F_SETFL, fl);
-	if (res == -1) 
+	if (res == -1)
 	{
-		LOG_ERR("fcntl(F_SETFL): %d", errno);
+		LOG_ERROR("fcntl(F_SETFL): %d", errno);
 		return errno;
 	}
 
@@ -358,14 +358,14 @@ int blocking_send(int fd, char* data, size_t length)
 	setblocking(fd, true); //ToDo: remove this blocking stuff and implement proper async send
 
 	int out_len;
-	for (char const* p = data; length > 0; length -= out_len) 
+	for (char const* p = data; length > 0; length -= out_len)
 	{
 		out_len = send(fd, p, length, 0);
-		
-		if (out_len < 0) 
+
+		if (out_len < 0)
 		{
 			int error = errno;
-			LOG_ERR("send error (fd=%d): %d", fd, error);
+			LOG_ERROR("send error (fd=%d): %d", fd, error);
 			break;
 		}
 

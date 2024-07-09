@@ -7,23 +7,30 @@
 #include "asl.h"
 
 
+typedef struct proxy_backend_config
+{
+	int32_t log_level;
+}
+proxy_backend_config;
+
+
 typedef struct proxy_config
 {
 	char const* own_ip_address;
 	char const* target_ip_address;
 	uint16_t listening_port;
 	uint16_t target_port;
-	int32_t logLevel;
+	int32_t log_level;
 	asl_endpoint_configuration tls_config;
 }
 proxy_config;
 
 
-/* Start a new thread and run the main TLS proxy backend.
+/* Start a new thread and run the main TLS proxy backend with given config.
  *
  * Returns 0 on success, -1 on failure (error message is printed to console).
  */
-int tls_proxy_backend_run(void);
+int tls_proxy_backend_run(proxy_backend_config const* config);
 
 
 /* Start a new reverse proxy with given config.

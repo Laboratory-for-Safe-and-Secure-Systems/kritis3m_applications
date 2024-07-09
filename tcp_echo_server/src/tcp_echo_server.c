@@ -13,7 +13,7 @@
 #include "networking.h"
 
 
-LOG_MODULE_REGISTER(tcp_echo_server);
+LOG_MODULE_CREATE(tcp_echo_server);
 
 
 #define MAX_CLIENTS 5
@@ -81,7 +81,7 @@ static void* tcp_echo_server_main_thread(void* ptr)
 		int ret = poll(server->poll_set.fds, server->poll_set.num_fds, -1);
 
 		if (ret == -1) {
-			LOG_ERR("poll error: %d", errno);
+			LOG_ERROR("poll error: %d", errno);
 			continue;
 		}
 
@@ -107,7 +107,7 @@ static void* tcp_echo_server_main_thread(void* ptr)
 					{
 						int error = errno;
 						if (error != EAGAIN)
-							LOG_ERR("accept error: %d (fd=%d)", error, server->tcp_server_socket);
+							LOG_ERROR("accept error: %d (fd=%d)", error, server->tcp_server_socket);
 						continue;
 					}
 
@@ -116,7 +116,7 @@ static void* tcp_echo_server_main_thread(void* ptr)
 								&client_addr);
 					if (client == NULL)
 					{
-						LOG_ERR("Error adding new client");
+						LOG_ERROR("Error adding new client");
 						continue;
 					}
 
@@ -124,7 +124,7 @@ static void* tcp_echo_server_main_thread(void* ptr)
 					ret = poll_set_add_fd(&server->poll_set, client->socket, POLLIN);
 					if (ret != 0)
 					{
-						LOG_ERR("Error adding new client to poll_set");
+						LOG_ERROR("Error adding new client to poll_set");
 						client_cleanup(client);
 						continue;
 					}
@@ -159,7 +159,7 @@ static void* tcp_echo_server_main_thread(void* ptr)
                                         else if (ret == 0)
 					{
 						/* Connection closed */
-						LOG_INF("TCP connection closed by peer");
+						LOG_INFO("TCP connection closed by peer");
 						ret = -1;
 					}
 				}
@@ -187,7 +187,7 @@ static void* tcp_echo_server_main_thread(void* ptr)
 			}
 			else
 			{
-				LOG_ERR("Received event for unknown fd %d", fd);
+				LOG_ERROR("Received event for unknown fd %d", fd);
 			}
 		}
 	}
@@ -224,7 +224,7 @@ static echo_client* add_new_client(int client_socket,
 	struct sockaddr_in* client_data = (struct sockaddr_in*) client_addr;
 	char peer_ip[20];
 	net_addr_ntop(AF_INET, &client_data->sin_addr, peer_ip, sizeof(peer_ip));
-	LOG_INF("New client connection from %s:%d, using slot %d/%d",
+	LOG_INFO("New client connection from %s:%d, using slot %d/%d",
 		peer_ip, ntohs(client_data->sin_port),
 		freeSlot+1, MAX_CLIENTS);
 
@@ -270,12 +270,12 @@ int tcp_echo_server_run(tcp_echo_server_config const* config)
 	{
 		if (config->listening_port != echo_server.listening_port)
 		{
-			LOG_ERR("TCP echo server is already running on port %d, killing it", echo_server.listening_port);
+			LOG_ERROR("TCP echo server is already running on port %d, killing it", echo_server.listening_port);
 			tcp_echo_server_terminate();
 		}
 		else
 		{
-			LOG_INF("TCP echo server is already running on port %d", echo_server.listening_port);
+			LOG_INFO("TCP echo server is already running on port %d", echo_server.listening_port);
 			return 0;
 		}
 	}
@@ -294,13 +294,13 @@ int tcp_echo_server_run(tcp_echo_server_config const* config)
 	echo_server.tcp_server_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 	if (echo_server.tcp_server_socket == -1)
 	{
-		LOG_ERR("Error creating incoming TCP socket");
+		LOG_ERROR("Error creating incoming TCP socket");
 		return -1;
 	}
 
         if (setsockopt(echo_server.tcp_server_socket, SOL_SOCKET, SO_REUSEADDR, &(int){1}, sizeof(int)) < 0)
         {
-                LOG_ERR("setsockopt(SO_REUSEADDR) failed: error %d\n", errno);
+                LOG_ERROR("setsockopt(SO_REUSEADDR) failed: error %d\n", errno);
 		close(echo_server.tcp_server_socket);
 		return -1;
         }
@@ -316,7 +316,7 @@ int tcp_echo_server_run(tcp_echo_server_config const* config)
 	/* Bind server socket to its destined IPv4 address */
 	if (bind(echo_server.tcp_server_socket, (struct sockaddr*) &bind_addr, sizeof(bind_addr)) == -1)
 	{
-		LOG_ERR("Cannot bind socket %d to %s:%d: error %d\n",
+		LOG_ERROR("Cannot bind socket %d to %s:%d: error %d\n",
                         echo_server.tcp_server_socket, config->own_ip_address, config->listening_port, errno);
 		close(echo_server.tcp_server_socket);
 		return -1;
@@ -332,7 +332,7 @@ int tcp_echo_server_run(tcp_echo_server_config const* config)
 	int ret = poll_set_add_fd(&echo_server.poll_set, echo_server.tcp_server_socket, POLLIN);
 	if (ret != 0)
 	{
-		LOG_ERR("Error adding socket to poll_set");
+		LOG_ERROR("Error adding socket to poll_set");
 		close(echo_server.tcp_server_socket);
 		return -1;
 	}
@@ -350,11 +350,11 @@ int tcp_echo_server_run(tcp_echo_server_config const* config)
 	ret = pthread_create(&echo_server.thread, &echo_server.thread_attr, tcp_echo_server_main_thread, &echo_server);
 	if (ret == 0)
 	{
-		LOG_INF("TCP echo server main thread started");
+		LOG_INFO("TCP echo server main thread started");
 	}
 	else
 	{
-		LOG_ERR("Error starting TCP echo server thread: %s", strerror(ret));
+		LOG_ERROR("Error starting TCP echo server thread: %s", strerror(ret));
 	}
 
 	return ret;
@@ -369,7 +369,7 @@ int tcp_echo_server_terminate(void)
 {
 	if (echo_server.running == false)
 	{
-		LOG_INF("TCP echo server is not running");
+		LOG_INFO("TCP echo server is not running");
 		return 0;
 	}
 

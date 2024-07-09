@@ -1,67 +1,53 @@
 #ifndef LOGGING_H_
 #define LOGGING_H_
 
-#if defined(__ZEPHYR__)
-
-#include <zephyr/logging/log.h>
-
-#else
-
 #include <stdint.h>
 #include <stdarg.h>
 
 
-enum LOG_LEVEL
+enum LOG_LVL
 {
-    LOG_LEVEL_NONE  = 0U,
-    LOG_LEVEL_ERR   = 1U,
-    LOG_LEVEL_WRN   = 2U,
-    LOG_LEVEL_INF   = 3U,
-    LOG_LEVEL_DBG   = 4U,
+    LOG_LVL_NONE  = 0U,
+    LOG_LVL_ERROR = 1U,
+    LOG_LVL_WARN  = 2U,
+    LOG_LVL_INFO  = 3U,
+    LOG_LVL_DEBUG = 4U,
 };
 
-typedef struct LOG_MODULE
+
+typedef struct log_module
 {
     char const* name;
     int32_t level;
 }
-LOG_MODULE;
+log_module;
 
 
-/* Register a new logging module */
-#define LOG_MODULE_REGISTER(module_name) static struct LOG_MODULE log_module = { \
+/* Create a new logging module */
+#define LOG_MODULE_CREATE(module_name) static log_module log_inst = { \
                                                 .name = #module_name, \
-                                                .level = LOG_LEVEL_WRN \
+                                                .level = LOG_LVL_WARN \
                                         }
 
-#define LOG_MODULE_REGISTER_EX(module_name, log_level) static struct LOG_MODULE log_module = { \
+#define LOG_MODULE_CREATE_EX(module_name, log_level) static log_moduel log_inst = { \
                                                 .name = #module_name, \
                                                 .level = log_level \
                                         }
 
-#define LOG_INF(fmt, ...) log_message(&log_module, LOG_LEVEL_INF, fmt, ##__VA_ARGS__)
-#define LOG_WRN(fmt, ...) log_message(&log_module, LOG_LEVEL_WRN, fmt, ##__VA_ARGS__)
-#define LOG_ERR(fmt, ...) log_message(&log_module, LOG_LEVEL_ERR, fmt, ##__VA_ARGS__)
-#define LOG_DBG(fmt, ...) log_message(&log_module, LOG_LEVEL_DBG, fmt, ##__VA_ARGS__)
+#define LOG_INFO(fmt, ...) log_message(&log_inst, LOG_LVL_INFO, fmt, ##__VA_ARGS__)
+#define LOG_WARN(fmt, ...) log_message(&log_inst, LOG_LVL_WARN, fmt, ##__VA_ARGS__)
+#define LOG_ERROR(fmt, ...) log_message(&log_inst, LOG_LVL_ERROR, fmt, ##__VA_ARGS__)
+#define LOG_DEBUG(fmt, ...) log_message(&log_inst, LOG_LVL_DEBUG, fmt, ##__VA_ARGS__)
 
-#define LOG_LEVEL_SET(level) log_level_set(&log_module, level)
+#define LOG_INFO_EX(module, fmt, ...) log_message(&module, LOG_LVL_INFO, fmt, ##__VA_ARGS__)
+#define LOG_WARN_EX(module, fmt, ...) log_message(&module, LOG_LVL_WARN, fmt, ##__VA_ARGS__)
+#define LOG_ERROR_EX(module, fmt, ...) log_message(&module, LOG_LVL_ERROR, fmt, ##__VA_ARGS__)
+#define LOG_DEBUG_EX(module, fmt, ...) log_message(&module, LOG_LVL_DEBUG, fmt, ##__VA_ARGS__)
+
+#define LOG_LVL_SET(level) log_level_set(&log_inst, level)
 
 
-void log_message(LOG_MODULE const* module, int32_t level, char const* fmt, ...);
-void log_level_set(LOG_MODULE* module, int32_t level);
-
-
-struct shell
-{
-        int dummy;
-};
-
-#define shell_print(sh, fmt, ...) shell_log(sh, fmt, ##__VA_ARGS__)
-#define shell_warn(sh, fmt, ...) shell_log(sh, fmt, ##__VA_ARGS__)
-#define shell_error(sh, fmt, ...) shell_log(sh, fmt, ##__VA_ARGS__)
-
-void shell_log(struct shell const* sh, char const* fmt, ...);
-
-#endif
+void log_message(log_module const* module, int32_t level, char const* fmt, ...);
+void log_level_set(log_module* module, int32_t level);
 
 #endif /* LOGGING_H_ */

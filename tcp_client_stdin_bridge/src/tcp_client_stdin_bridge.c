@@ -12,7 +12,7 @@
 #include "networking.h"
 
 
-LOG_MODULE_REGISTER(tcp_client_stdin_bridge);
+LOG_MODULE_CREATE(tcp_client_stdin_bridge);
 
 
 #if !defined(__ZEPHYR__)
@@ -49,7 +49,7 @@ static void* tcp_client_stdin_bridge_main_thread(void* ptr)
 		int ret = poll(bridge->poll_set.fds, bridge->poll_set.num_fds, -1);
 
 		if (ret == -1) {
-			LOG_ERR("poll error: %d", errno);
+			LOG_ERROR("poll error: %d", errno);
 			continue;
 		}
 
@@ -82,7 +82,7 @@ static void* tcp_client_stdin_bridge_main_thread(void* ptr)
                                         else if (ret == 0)
 					{
 						/* Connection closed */
-						LOG_INF("TCP connection closed by peer");
+						LOG_INFO("TCP connection closed by peer");
 						ret = -1;
 					}
 				}
@@ -137,7 +137,7 @@ static void* tcp_client_stdin_bridge_main_thread(void* ptr)
 			}
 			else
 			{
-				LOG_ERR("Received event for unknown fd %d", fd);
+				LOG_ERROR("Received event for unknown fd %d", fd);
 			}
 		}
 	}
@@ -152,10 +152,10 @@ static void* tcp_client_stdin_bridge_main_thread(void* ptr)
  *
  * Returns 0 on success, -1 on failure (error message is printed to console).
  */
-int tcp_client_stdin_bridge_run(struct tcp_client_stdin_bridge_config const* config)
+int tcp_client_stdin_bridge_run(tcp_client_stdin_bridge_config const* config)
 {
 #if defined(__ZEPHYR__)
-	LOG_ERR("TCP client stdin bridge not supported on Zephyr");
+	LOG_ERROR("TCP client stdin bridge not supported on Zephyr");
 	return -1;
 #else
         /* Init */
@@ -166,11 +166,11 @@ int tcp_client_stdin_bridge_run(struct tcp_client_stdin_bridge_config const* con
 	client_stdin_bridge.tcp_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 	if (client_stdin_bridge.tcp_socket == -1)
 	{
-		LOG_ERR("Error creating TCP socket");
+		LOG_ERROR("Error creating TCP socket");
 		return -1;
 	}
 
-	LOG_INF("Connecting to %s:%d", config->target_ip_address, config->target_port);
+	LOG_INFO("Connecting to %s:%d", config->target_ip_address, config->target_port);
 
 	/* Configure TCP server */
 	struct sockaddr_in target_addr = {
@@ -186,7 +186,7 @@ int tcp_client_stdin_bridge_run(struct tcp_client_stdin_bridge_config const* con
 	int ret = connect(client_stdin_bridge.tcp_socket, (struct sockaddr*) &target_addr, sizeof(target_addr));
 	if ((ret != 0) && (errno != EINPROGRESS))
 	{
-		LOG_ERR("Unable to connect to target peer, errno: %d", errno);
+		LOG_ERROR("Unable to connect to target peer, errno: %d", errno);
 		close(client_stdin_bridge.tcp_socket);
 		return -1;
 	}
@@ -195,7 +195,7 @@ int tcp_client_stdin_bridge_run(struct tcp_client_stdin_bridge_config const* con
 	ret = poll_set_add_fd(&client_stdin_bridge.poll_set, client_stdin_bridge.tcp_socket, POLLOUT);
 	if (ret != 0)
 	{
-		LOG_ERR("Error adding TCP client to poll_set");
+		LOG_ERROR("Error adding TCP client to poll_set");
 		close(client_stdin_bridge.tcp_socket);
 		return -1;
 	}
@@ -204,7 +204,7 @@ int tcp_client_stdin_bridge_run(struct tcp_client_stdin_bridge_config const* con
 	ret = poll_set_add_fd(&client_stdin_bridge.poll_set, STDIN_FILENO, POLLIN);
 	if (ret != 0)
 	{
-		LOG_ERR("Error adding stdin to poll_set");
+		LOG_ERROR("Error adding stdin to poll_set");
 		close(client_stdin_bridge.tcp_socket);
 		return -1;
 	}
@@ -217,11 +217,11 @@ int tcp_client_stdin_bridge_run(struct tcp_client_stdin_bridge_config const* con
 	ret = pthread_create(&client_stdin_bridge.thread, &client_stdin_bridge.thread_attr, tcp_client_stdin_bridge_main_thread, &client_stdin_bridge);
 	if (ret == 0)
 	{
-		LOG_INF("TCP client stdin bridge main thread started");
+		LOG_INFO("TCP client stdin bridge main thread started");
 	}
 	else
 	{
-		LOG_ERR("Error starting TCP client stdin bridge thread: %s", strerror(ret));
+		LOG_ERROR("Error starting TCP client stdin bridge thread: %s", strerror(ret));
 		close(client_stdin_bridge.tcp_socket);
 	}
 
@@ -237,7 +237,7 @@ int tcp_client_stdin_bridge_run(struct tcp_client_stdin_bridge_config const* con
 int tcp_client_stdin_bridge_terminate(void)
 {
 #if defined(__ZEPHYR__)
-	LOG_ERR("TCP client stdin bridge not supported on Zephyr");
+	LOG_ERROR("TCP client stdin bridge not supported on Zephyr");
 	return -1;
 #else
 	/* Stop the main thread */
