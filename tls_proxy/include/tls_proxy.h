@@ -7,6 +7,13 @@
 #include "asl.h"
 
 
+enum tls_proxy_direction
+{
+        REVERSE_PROXY,
+        FORWARD_PROXY,
+};
+
+
 typedef struct proxy_backend_config
 {
 	int32_t log_level;
@@ -24,6 +31,16 @@ typedef struct proxy_config
 	asl_endpoint_configuration tls_config;
 }
 proxy_config;
+
+
+typedef struct proxy_status
+{
+        bool is_running;
+	uint16_t incoming_port;
+	enum tls_proxy_direction direction;
+        uint32_t num_connections;
+}
+proxy_status;
 
 
 /* Start a new thread and run the main TLS proxy backend with given config.
@@ -47,6 +64,13 @@ int tls_reverse_proxy_start(proxy_config const* config);
  * on failure (error message is printed to console).
  */
 int tls_forward_proxy_start(proxy_config const* config);
+
+
+/* Querry status information from the proxy with given id.
+ *
+ * Returns 0 on success, -1 on failure (error message is printed to console).
+ */
+int tls_proxy_get_status(int id, proxy_status* status);
 
 
 /* Stop the running proxy with given id (returned by tls_forward_proxy_start or

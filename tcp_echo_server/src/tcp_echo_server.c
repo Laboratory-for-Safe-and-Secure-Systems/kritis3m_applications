@@ -25,6 +25,7 @@ typedef struct tcp_echo_server
 	bool running;
         int tcp_server_socket;
 	uint16_t listening_port;
+	uint16_t num_clients;
 	pthread_t thread;
 	pthread_attr_t thread_attr;
 	struct poll_set poll_set;
@@ -46,6 +47,7 @@ static tcp_echo_server echo_server = {
 	.running = false,
 	.tcp_server_socket = -1,
 	.listening_port = 0,
+	.num_clients = 0,
 };
 static echo_client client_pool[MAX_CLIENTS];
 
@@ -69,6 +71,7 @@ static void* tcp_echo_server_main_thread(void* ptr)
 	tcp_echo_server* server = (tcp_echo_server*) ptr;
 
 	server->running = true;
+	server->num_clients = 0;
 
 	pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
 
@@ -117,6 +120,7 @@ static void* tcp_echo_server_main_thread(void* ptr)
 					if (client == NULL)
 					{
 						LOG_ERROR("Error adding new client");
+						close(client_socket);
 						continue;
 					}
 
@@ -210,8 +214,15 @@ static echo_client* add_new_client(int client_socket,
 			break;
 		}
 	}
+	if (freeSlot == -1)
+	{
+		LOG_ERROR("No free client slots available");
+		return NULL;
+	}
 
         echo_client* client = &client_pool[freeSlot];
+
+	echo_server.num_clients += 1;
 
 	/* Store new client data */
 	client->in_use = true;
@@ -257,6 +268,8 @@ static void client_cleanup(echo_client* client)
                 client->num_of_bytes_in_recv_buffer = 0;
                 client->in_use = false;
         }
+
+	echo_server.num_clients -= 1;
 }
 
 
@@ -322,6 +335,19 @@ int tcp_echo_server_run(tcp_echo_server_config const* config)
 		return -1;
 	}
 
+	/* If a random port have been used, obtain the actually selected one */
+	if (config->listening_port == 0)
+	{
+		socklen_t sockaddr_len = sizeof(bind_addr);
+		if (getsockname(echo_server.tcp_server_socket, (struct sockaddr*)&bind_addr, &sockaddr_len) < 0)
+		{
+			LOG_ERROR("getsockname failed with errno: %d", errno);
+			close(echo_server.tcp_server_socket);
+			return -1;
+		}
+		echo_server.listening_port = ntohs(bind_addr.sin_port);
+	}
+
 	/* Start listening for incoming connections */
 	listen(echo_server.tcp_server_socket, MAX_CLIENTS);
 
@@ -358,6 +384,21 @@ int tcp_echo_server_run(tcp_echo_server_config const* config)
 	}
 
 	return ret;
+}
+
+
+/* Querry status information from the TCP echo server.
+ *
+ * Returns 0 on success, -1 on failure (error message is printed to console).
+ */
+int tcp_echo_server_get_status(tcp_echo_server_status* status)
+{
+	/* Copy information */
+	status->is_running = echo_server.running;
+	status->listening_port = echo_server.listening_port;
+	status->num_connections = echo_server.num_clients;
+
+	return 0;
 }
 
 

@@ -1,10 +1,15 @@
 
-target_sources(${TARGET} PRIVATE
+# Define the library
+add_library(kritis3m_applications_common STATIC
         ${CMAKE_CURRENT_SOURCE_DIR}/src/networking.c
         ${CMAKE_CURRENT_SOURCE_DIR}/src/logging.c
         ${CMAKE_CURRENT_SOURCE_DIR}/src/poll_set.c
 )
 
-target_include_directories(${TARGET} PUBLIC
+# Public include directories
+target_include_directories(kritis3m_applications_common PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
+
+# Link the library to the main target
+target_link_libraries(${TARGET} PRIVATE kritis3m_applications_common)
