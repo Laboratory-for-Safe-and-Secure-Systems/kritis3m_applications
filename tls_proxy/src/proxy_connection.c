@@ -216,7 +216,10 @@ void proxy_connection_cleanup(proxy_connection* connection)
         }
 
         /* Update connection count */
-        connection->proxy->num_connections -= 1;
+        if (connection->proxy != NULL)
+        {
+                connection->proxy->num_connections -= 1;
+        }
 
         connection->num_of_bytes_in_tun2ass_buffer = 0;
         connection->num_of_bytes_in_ass2tun_buffer = 0;
