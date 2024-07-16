@@ -8,6 +8,7 @@
 #include "tls_proxy.h"
 
 #include "logging.h"
+#include "networking.h"
 
 #include "asl.h"
 
@@ -44,6 +45,9 @@ typedef struct proxy_connection
         log_module* log_module;
         proxy* proxy;
         int slot;
+
+        int management_socket_pair[2];
+
         pthread_t thread;
         pthread_attr_t thread_attr;
 
@@ -63,8 +67,11 @@ proxy_connection* add_new_connection_to_proxy(proxy* proxy, int client_socket,
 
 proxy_connection* find_proxy_connection_by_fd(int fd);
 
+int proxy_connection_detach_handling(proxy_connection* connection);
+
+int proxy_connection_stop_handling(proxy_connection* connection);
+
 void proxy_connection_cleanup(proxy_connection* connection);
 
-void* connection_handler_thread(void *ptr);
 
 #endif /* PROXY_CONNECTION_H */

@@ -12,7 +12,7 @@
 
 #include "proxy_management.h"
 #include "proxy_connection.h"
-#include "proxy.h"
+#include "proxy_backend.h"
 
 #include "logging.h"
 #include "poll_set.h"
@@ -28,31 +28,9 @@ LOG_MODULE_CREATE(proxy_backend);
 #define ERROR_OUT_EX(module, ...) { LOG_ERROR_EX(module, __VA_ARGS__); goto cleanup; }
 
 
-#if defined(__ZEPHYR__)
-
-#define BACKEND_THREAD_PRIORITY 8
-#define HANDLER_THREAD_PRIORITY 10
-
-#else
-
-#define BACKEND_THREAD_PRIORITY 10
-#define HANDLER_THREAD_PRIORITY 12
-
-#endif
-
-
-typedef struct tls_proxy_backend
-{
-        int management_socket_pair[2];
-        pthread_t thread;
-        pthread_attr_t thread_attr;
-        poll_set poll_set;
-}
-tls_proxy_backend;
-
 
 /* File global variables */
-static tls_proxy_backend proxy_backend;
+static proxy proxy_pool[MAX_PROXYS];
 
 
 
@@ -65,12 +43,278 @@ Z_KERNEL_STACK_DEFINE_IN(backend_stack, BACKEND_STACK_SIZE, \
 
 
 /* Internal method declarations */
-static int handle_management_message(int socket, tls_proxy_management_message const* msg);
-static void* tls_proxy_main_thread(void* ptr);
+static int add_new_proxy(enum tls_proxy_direction direction, proxy_config const* config);
+static proxy* find_proxy_by_fd(int fd);
+static proxy* find_proxy_by_id(int id);
+static void kill_proxy(proxy* proxy);
+
+static int handle_management_message(proxy_backend* backend, int socket, proxy_management_message const* msg);
+static void kill_all_proxies(proxy_backend* backend);
+static void asl_log_callback(int32_t level, char const* message);
+static void* proxy_backend_thread(void* ptr);
 
 
-static int handle_management_message(int socket, tls_proxy_management_message const* msg)
+void init_proxy_pool(void)
 {
+        for (int i = 0; i < MAX_PROXYS; i++)
+        {
+                proxy_pool[i].in_use = false;
+                proxy_pool[i].direction = REVERSE_PROXY;
+                proxy_pool[i].incoming_sock = -1;
+                proxy_pool[i].incoming_port = 0;
+                proxy_pool[i].tls_endpoint = NULL;
+                proxy_pool[i].log_module.name = NULL;
+                proxy_pool[i].log_module.level = LOG_LVL_WARN;
+                proxy_pool[i].num_connections = 0;
+
+                for (int j = 0; j < MAX_CONNECTIONS_PER_PROXY; j++)
+                {
+                        proxy_pool[i].connections[j] = NULL;
+                }
+        }
+}
+
+
+int proxy_backend_init(proxy_backend* backend, proxy_backend_config const* config)
+{
+        /* Init app config */
+        backend->management_socket_pair[0] = -1;
+        backend->management_socket_pair[1] = -1;
+
+        pthread_attr_init(&backend->thread_attr);
+        pthread_attr_setdetachstate(&backend->thread_attr, PTHREAD_CREATE_JOINABLE);
+
+        poll_set_init(&backend->poll_set);
+
+#if defined(__ZEPHYR__)
+        /* We have to properly set the attributes with the stack to use for Zephyr. */
+        pthread_attr_setstack(&backend->thread_attr, &backend_stack, K_THREAD_STACK_SIZEOF(backend_stack));
+#endif
+
+        /* Set the priority of the client handler thread to be one higher than the backend thread.
+         * This priorizes active connections before handshakes of new ones. */
+        // struct sched_param param = {
+        // 	.sched_priority = BACKEND_THREAD_PRIORITY,
+        // };
+        // pthread_attr_setschedparam(&backend->thread_attr, &param);
+        // pthread_attr_setschedpolicy(&backend->thread_attr, SCHED_RR);
+
+        /* Set the log level */
+        LOG_LVL_SET(config->log_level);
+
+        /* Create the socket pair for external management */
+        int ret = socketpair(AF_UNIX, SOCK_STREAM, 0, backend->management_socket_pair);
+        if (ret < 0)
+        {
+                LOG_ERROR("Error creating socket pair for management: %d (%s)", errno, strerror(errno));
+                return -1;
+        }
+        LOG_DEBUG("Created management socket pair (%d, %d)", backend->management_socket_pair[0],
+                                                            backend->management_socket_pair[1]);
+
+        /* Create the new thread */
+        ret = pthread_create(&backend->thread, &backend->thread_attr, proxy_backend_thread, backend);
+        if (ret != 0)
+        {
+                LOG_ERROR("Error starting TLS proxy thread: %d (%s)", errno, strerror(errno));
+                return -1;
+        }
+
+        return 0;
+}
+
+
+/* Create a new proxy and add it to the main event loop */
+static int add_new_proxy(enum tls_proxy_direction direction, proxy_config const* config)
+{
+        /* Search for a free server slot */
+        int freeSlot = -1;
+        for (int i = 0; i < MAX_PROXYS; i++)
+        {
+                if (proxy_pool[i].in_use == false)
+                {
+                        freeSlot = i;
+                        break;
+                }
+        }
+
+        if (freeSlot == -1)
+        {
+                LOG_ERROR("Cannot create more TLS proxies (no free slot)");
+                return -1;
+        }
+
+        proxy* proxy = &proxy_pool[freeSlot];
+
+        proxy->in_use = true;
+        proxy->direction = direction;
+
+        /* Setup the log module for the proxy */
+        char* log_module_name = (char*) malloc(32);
+        if (log_module_name == NULL)
+                ERROR_OUT("Error allocating memory for log module name");
+        snprintf(log_module_name, 32, "tls_proxy_%d", freeSlot+1);
+        proxy->log_module.name = log_module_name;
+        proxy->log_module.level = config->log_level;
+
+        if (direction == REVERSE_PROXY)
+        {
+                LOG_INFO_EX(proxy->log_module, "Starting new reverse proxy on port %d",
+                        config->listening_port);
+
+                /* Create the TLS endpoint */
+                proxy->tls_endpoint = asl_setup_server_endpoint(&config->tls_config);
+        }
+        else if (direction == FORWARD_PROXY)
+        {
+                LOG_INFO_EX(proxy->log_module, "Starting new forward proxy to %s:%d",
+                config->target_ip_address, config->target_port);
+
+                /* Create the TLS endpoint */
+                proxy->tls_endpoint = asl_setup_client_endpoint(&config->tls_config);
+        }
+        if (proxy->tls_endpoint == NULL)
+                ERROR_OUT_EX(proxy->log_module, "Error creating TLS endpoint");
+
+        /* Create the TCP socket for the incoming connection */
+        proxy->incoming_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (proxy->incoming_sock == -1)
+                ERROR_OUT_EX(proxy->log_module, "Error creating incoming TCP socket");
+
+        if (setsockopt(proxy->incoming_sock, SOL_SOCKET, SO_REUSEADDR, &(int){1}, sizeof(int)) < 0)
+                ERROR_OUT_EX(proxy->log_module, "setsockopt(SO_REUSEADDR) failed: errer %d", errno);
+
+        /* Configure TCP server */
+        struct sockaddr_in bind_addr = {
+                        .sin_family = AF_INET,
+                        .sin_port = htons(config->listening_port)
+        };
+        net_addr_pton(bind_addr.sin_family, config->own_ip_address, &bind_addr.sin_addr);
+        proxy->incoming_port = config->listening_port;
+
+        /* Bind server socket to its destined IPv4 address */
+        if (bind(proxy->incoming_sock, (struct sockaddr*) &bind_addr, sizeof(bind_addr)) == -1)
+                ERROR_OUT_EX(proxy->log_module, "Cannot bind socket %d to %s:%d: error %d",
+                        proxy->incoming_sock, config->own_ip_address, config->listening_port, errno);
+
+        /* If a random port have been used, obtain the actually selected one */
+	if (config->listening_port == 0)
+	{
+		socklen_t sockaddr_len = sizeof(bind_addr);
+		if (getsockname(proxy->incoming_sock, (struct sockaddr*)&bind_addr, &sockaddr_len) < 0)
+                        ERROR_OUT_EX(proxy->log_module, "getsockname failed with errno: %d", errno);
+
+		proxy->incoming_port = ntohs(bind_addr.sin_port);
+	}
+
+        /* Start listening for incoming connections */
+        listen(proxy->incoming_sock, MAX_CONNECTIONS_PER_PROXY);
+
+        /* Set the new socket to non-blocking */
+        setblocking(proxy->incoming_sock, false);
+
+        /* Configure TCP client */
+        proxy->target_addr.sin_family = AF_INET;
+        proxy->target_addr.sin_port = htons(config->target_port);
+        net_addr_pton(proxy->target_addr.sin_family, config->target_ip_address, &proxy->target_addr.sin_addr);
+
+        LOG_DEBUG_EX(proxy->log_module, "Waiting for incoming connections on port %d", config->listening_port);
+
+        return freeSlot+1;
+
+cleanup:
+        kill_proxy(proxy);
+
+        return -1;
+}
+
+
+static proxy* find_proxy_by_fd(int fd)
+{
+        for (int i = 0; i < MAX_PROXYS; i++)
+        {
+                if (proxy_pool[i].incoming_sock == fd)
+                {
+                        return &proxy_pool[i];
+                }
+        }
+
+        return NULL;
+}
+
+
+static proxy* find_proxy_by_id(int id)
+{
+        if (id < 1 || id >= MAX_PROXYS)
+                return NULL;
+
+        if (proxy_pool[id-1].in_use == false)
+                return NULL;
+
+        return &proxy_pool[id-1];
+
+}
+
+
+/* Stop a running proxy and cleanup afterwards */
+static void kill_proxy(proxy* proxy)
+{
+        /* Stop the listening socket and clear it from the poll_set */
+        if (proxy->incoming_sock >= 0)
+        {
+                close(proxy->incoming_sock);
+                proxy->incoming_sock = -1;
+        }
+
+        /* Kill all connections */
+        for (int i = 0; i < MAX_CONNECTIONS_PER_PROXY; i++)
+        {
+                if (proxy->connections[i] != NULL)
+                {
+                        /* Stop the running thread. */
+                        if (proxy->connections[i]->in_use == true)
+                        {
+                                LOG_DEBUG("Killing proxy connection %d", i);
+                                proxy_connection_stop_handling(proxy->connections[i]);
+                        }
+
+                        /* Cleanup the client */
+                        proxy_connection_cleanup(proxy->connections[i]);
+
+                        proxy->connections[i] = NULL;
+                }
+        }
+
+        LOG_DEBUG_EX(proxy->log_module, "Killed all connections");
+
+        /* Clear TLS context */
+        if (proxy->tls_endpoint != NULL)
+        {
+                asl_free_endpoint(proxy->tls_endpoint);
+                proxy->tls_endpoint = NULL;
+        }
+
+        /* Free log module name */
+        if (proxy->log_module.name != NULL)
+        {
+                free((void*) proxy->log_module.name);
+                proxy->log_module.name = NULL;
+        }
+
+        proxy->incoming_sock = 0;
+        proxy->in_use = false;
+}
+
+
+/* Handle incoming management messages.
+ *
+ * Return 0 in case the message has been processed successfully, -1 otherwise. In case the connection thread has
+ * to be stopped and the connection has to be cleaned up, +1 in returned.
+ */
+static int handle_management_message(proxy_backend* backend, int socket, proxy_management_message const* msg)
+{
+        int ret = 0;
+
         switch (msg->type)
         {
                 case REVERSE_PROXY_START_REQUEST:
@@ -80,7 +324,7 @@ static int handle_management_message(int socket, tls_proxy_management_message co
 
                         /* Add proxy to the poll_set */
                         proxy* new_proxy = find_proxy_by_id(proxy_id);
-                        int ret = poll_set_add_fd(&proxy_backend.poll_set, new_proxy->incoming_sock, POLLIN);
+                        int ret = poll_set_add_fd(&backend->poll_set, new_proxy->incoming_sock, POLLIN);
                         if (ret != 0)
                         {
                                 LOG_ERROR("Error adding new proxy to poll_set");
@@ -89,11 +333,11 @@ static int handle_management_message(int socket, tls_proxy_management_message co
                         }
 
                         /* Send response */
-                        tls_proxy_management_message response = {
-                                .type = PROXY_RESPONSE,
+                        proxy_management_message response = {
+                                .type = RESPONSE,
                                 .payload.response_code = proxy_id,
                         };
-                        send_management_message(socket, &response);
+                        ret = send_management_message(socket, &response);
                         break;
                 }
                 case FORWARD_PROXY_START_REQUEST:
@@ -103,7 +347,7 @@ static int handle_management_message(int socket, tls_proxy_management_message co
 
                         /* Add proxy to the poll_set */
                         proxy* new_proxy = find_proxy_by_id(proxy_id);
-                        int ret = poll_set_add_fd(&proxy_backend.poll_set, new_proxy->incoming_sock, POLLIN);
+                        int ret = poll_set_add_fd(&backend->poll_set, new_proxy->incoming_sock, POLLIN);
                         if (ret != 0)
                         {
                                 LOG_ERROR("Error adding new proxy to poll_set");
@@ -112,11 +356,11 @@ static int handle_management_message(int socket, tls_proxy_management_message co
                         }
 
                         /* Send response */
-                        tls_proxy_management_message response = {
-                                .type = PROXY_RESPONSE,
+                        proxy_management_message response = {
+                                .type = RESPONSE,
                                 .payload.response_code = proxy_id,
                         };
-                        send_management_message(socket, &response);
+                        ret = send_management_message(socket, &response);
                         break;
                 }
                 case PROXY_STATUS_REQUEST:
@@ -142,11 +386,11 @@ static int handle_management_message(int socket, tls_proxy_management_message co
                         }
 
                         /* Send response */
-                        tls_proxy_management_message response = {
-                                .type = PROXY_RESPONSE,
+                        proxy_management_message response = {
+                                .type = RESPONSE,
                                 .payload.response_code = 0,
                         };
-                        send_management_message(socket, &response);
+                        ret = send_management_message(socket, &response);
                         break;
                 }
                 case PROXY_STOP_REQUEST:
@@ -155,46 +399,134 @@ static int handle_management_message(int socket, tls_proxy_management_message co
                         proxy* proxy_to_be_killed = find_proxy_by_id(msg->payload.proxy_id);
                         if (proxy_to_be_killed != NULL)
                         {
-                                poll_set_remove_fd(&proxy_backend.poll_set, proxy_to_be_killed->incoming_sock);
+                                poll_set_remove_fd(&backend->poll_set, proxy_to_be_killed->incoming_sock);
                                 kill_proxy(proxy_to_be_killed);
                         }
                         /* Send response */
-                        tls_proxy_management_message response = {
-                                .type = PROXY_RESPONSE,
+                        proxy_management_message response = {
+                                .type = RESPONSE,
                                 .payload.response_code = 0,
                         };
+                        ret = send_management_message(socket, &response);
+                        break;
+                }
+                case BACKEND_STOP_REQUEST:
+                {
+                        /* Kill all proxies */
+                        kill_all_proxies(backend);
+
+                        /* Return 1 to indicate we have to stop the connection thread and cleanup */
+                        ret = 1;
+
+                        /* Send response */
+                        proxy_management_message response = {
+                                .type = RESPONSE,
+                                .payload.response_code = 0,
+                        };
+
+                        /* Do not update ret here to make sure the thread terminates */
                         send_management_message(socket, &response);
                         break;
                 }
                 default:
-                        LOG_ERROR("Received invalid management message");
+                        LOG_ERROR("Received invalid management message: msg->type=%d", msg->type);
+                        ret = -1;
                         break;
         }
 
-        return 0;
+        return ret;
+}
+
+
+static void kill_all_proxies(proxy_backend* backend)
+{
+         /* Stop all running proxies */
+        for (int id = 1; id <= MAX_PROXYS; id++)
+        {
+                proxy* proxy_to_kill = find_proxy_by_id(id);
+                if (proxy_to_kill != NULL)
+                {
+                        LOG_DEBUG("Killing proxy %d", id);
+                        poll_set_remove_fd(&backend->poll_set, proxy_to_kill->incoming_sock);
+                        kill_proxy(proxy_to_kill);
+                }
+        }
+}
+
+
+void proxy_backend_cleanup(proxy_backend* backend)
+{
+        /* Close the management socket pair */
+        if (backend->management_socket_pair[0] >= 0)
+        {
+                close(backend->management_socket_pair[0]);
+                backend->management_socket_pair[0] = -1;
+        }
+        if (backend->management_socket_pair[1] >= 0)
+        {
+                close(backend->management_socket_pair[1]);
+                backend->management_socket_pair[1] = -1;
+        }
+}
+
+
+static void asl_log_callback(int32_t level, char const* message)
+{
+        switch (level)
+        {
+        case ASL_LOG_LEVEL_ERR:
+                LOG_ERROR("%s", message);
+                break;
+        case ASL_LOG_LEVEL_WRN:
+                LOG_WARN("%s", message);
+                break;
+        case ASL_LOG_LEVEL_INF:
+                LOG_INFO("%s", message);
+                break;
+        case ASL_LOG_LEVEL_DBG:
+                LOG_DEBUG("%s", message);
+                break;
+        default:
+                LOG_ERROR("unknown log level %d: %s", level, message);
+                break;
+        }
 }
 
 
 /* The actual main thread for the proxy backend */
-void* tls_proxy_main_thread(void* ptr)
+void* proxy_backend_thread(void* ptr)
 {
-        tls_proxy_backend* backend = (tls_proxy_backend*) ptr;
+        proxy_backend* backend = (proxy_backend*) ptr;
+        bool shutdown = false;
 
-#if !defined(__ZEPHYR__)
-        LOG_INFO("TLS proxy backend started");
-#endif
+        LOG_INFO("Proxy backend thread started");
 
         /* Set the management socket to non-blocking and add it to the poll_set */
         setblocking(backend->management_socket_pair[1], false);
         poll_set_add_fd(&backend->poll_set, backend->management_socket_pair[1], POLLIN);
 
-        while (1)
+        /* Initialize the Agile Security Library */
+        asl_configuration asl_config = {
+                .logging_enabled = true,
+                .log_level = LOG_LVL_GET(),
+                .custom_log_callback = asl_log_callback,
+        };
+	int ret = asl_init(&asl_config);
+	if (ret != 0)
+        {
+                LOG_ERROR("Error initializing ASL: %d", ret);
+
+                /* Immediatelly terminate */
+                shutdown = true;
+        }
+
+        while (!shutdown)
         {
                 struct sockaddr client_addr;
                 socklen_t client_addr_len = sizeof(client_addr);
 
                 /* Block and wait for incoming events (new connections, received data, ...) */
-                int ret = poll(backend->poll_set.fds, backend->poll_set.num_fds, -1);
+                ret = poll(backend->poll_set.fds, backend->poll_set.num_fds, -1);
 
                 if (ret == -1) {
                         LOG_ERROR("poll error: %d", errno);
@@ -218,7 +550,7 @@ void* tls_proxy_main_thread(void* ptr)
                                 if (event & POLLIN)
                                 {
                                         /* management_socket received data */
-                                        tls_proxy_management_message msg;
+                                        proxy_management_message msg;
                                         ret = read_management_message(fd, &msg);
                                         if (ret < 0)
                                         {
@@ -226,7 +558,12 @@ void* tls_proxy_main_thread(void* ptr)
                                         }
 
                                         /* Handle the message */
-                                        handle_management_message(fd, &msg);
+                                        ret = handle_management_message(backend, fd, &msg);
+                                        if (ret == 1)
+                                        {
+                                                shutdown = true;
+                                                break;
+                                        }
                                 }
                         }
                         /* Check all reverse proxies */
@@ -286,7 +623,6 @@ void* tls_proxy_main_thread(void* ptr)
                                         /* Continue with the handshake */
                                         ret = asl_handshake(proxy_connection->tls_session);
 
-
                                         if (ret == ASL_SUCCESS)
                                         {
                                                 /* Handshake done, remove respective socket from the poll_set */
@@ -305,10 +641,7 @@ void* tls_proxy_main_thread(void* ptr)
                                                 }
 
                                                 /* Start thread for connection handling */
-                                                ret = pthread_create(&proxy_connection->thread,
-                                                                     &proxy_connection->thread_attr,
-                                                                     connection_handler_thread,
-                                                                     proxy_connection);
+                                                ret = proxy_connection_detach_handling(proxy_connection);
                                                 if (ret != 0)
                                                 {
                                                         LOG_ERROR("Error starting client handler thread: %d (%s)", errno, strerror(errno));
@@ -348,254 +681,10 @@ void* tls_proxy_main_thread(void* ptr)
                 }
         }
 
+        LOG_INFO("Proxy backend thread terminated");
+
+        proxy_backend_cleanup(backend);
+
         return NULL;
 }
 
-
-
-/* Start a new thread and run the main TLS proxy backend with given config.
- *
- * Returns 0 on success, -1 on failure (error message is printed to console).
- */
-int tls_proxy_backend_run(proxy_backend_config const* config)
-{
-        /* Init connection pool */
-        init_proxy_connection_pool();
-
-        /* Init server pool */
-        init_proxy_pool();
-
-        /* Init app config */
-        proxy_backend.management_socket_pair[0] = -1;
-        proxy_backend.management_socket_pair[1] = -1;
-
-        pthread_attr_init(&proxy_backend.thread_attr);
-        pthread_attr_setdetachstate(&proxy_backend.thread_attr, PTHREAD_CREATE_DETACHED);
-
-        poll_set_init(&proxy_backend.poll_set);
-
-#if defined(__ZEPHYR__)
-        /* We have to properly set the attributes with the stack to use for Zephyr. */
-        pthread_attr_setstack(&proxy_backend.thread_attr, &backend_stack, K_THREAD_STACK_SIZEOF(backend_stack));
-#endif
-
-        /* Set the priority of the client handler thread to be one higher than the backend thread.
-         * This priorizes active connections before handshakes of new ones. */
-        // struct sched_param param = {
-        // 	.sched_priority = BACKEND_THREAD_PRIORITY,
-        // };
-        // pthread_attr_setschedparam(&proxy_backend.thread_attr, &param);
-        // pthread_attr_setschedpolicy(&proxy_backend.thread_attr, SCHED_RR);
-
-        /* Set the log level */
-        LOG_LVL_SET(config->log_level);
-
-        /* Create the socket pair for external management */
-        int ret = socketpair(AF_UNIX, SOCK_STREAM, 0, proxy_backend.management_socket_pair);
-        if (ret < 0)
-        {
-                LOG_ERROR("Error creating socket pair for management: %d (%s)", errno, strerror(errno));
-                return -1;
-        }
-
-        /* Create the new thread */
-        ret = pthread_create(&proxy_backend.thread, &proxy_backend.thread_attr, tls_proxy_main_thread, &proxy_backend);
-        if (ret == 0)
-        {
-                LOG_INFO("TLS proxy main thread started");
-        }
-        else
-        {
-                LOG_ERROR("Error starting TLS proxy thread: %d (%s)", errno, strerror(errno));
-        }
-
-        return ret;
-}
-
-
-int tls_proxy_start_helper(tls_proxy_management_message const* request)
-{
-        tls_proxy_management_message response;
-
-        /* Send request */
-        int ret = send_management_message(proxy_backend.management_socket_pair[0], request);
-        if (ret < 0)
-        {
-                return -1;
-        }
-
-        /* Wait for response */
-        ret = read_management_message(proxy_backend.management_socket_pair[0], &response);
-        if (ret < 0)
-        {
-                return -1;
-        }
-        else if (response.type != PROXY_RESPONSE)
-        {
-                LOG_ERROR("Received invalid response");
-                return -1;
-        }
-        else if (response.payload.response_code < 0)
-        {
-                LOG_ERROR("Error starting new TLS proxy (error %d)", response.payload.response_code);
-                return -1;
-        }
-
-        /* Response code is the id of the new server */
-        return response.payload.response_code;
-}
-
-
-/* Start a new reverse proxy with given config.
- *
- * Returns the id of the new proxy instance on success (positive integer) or -1
- * on failure (error message is printed to console).
- */
-int tls_reverse_proxy_start(proxy_config const* config)
-{
-        /* Create a START_REQUEST message */
-        tls_proxy_management_message request = {
-                .type = REVERSE_PROXY_START_REQUEST,
-                .payload.reverse_proxy_config = *config,
-        };
-
-        return tls_proxy_start_helper(&request);
-}
-
-
-/* Start a new forward proxy with given config.
- *
- * Returns the id of the new proxy instance on success (positive integer) or -1
- * on failure (error message is printed to console).
- */
-int tls_forward_proxy_start(proxy_config const* config)
-{
-        /* Create a START_REQUEST message */
-        tls_proxy_management_message request = {
-                .type = FORWARD_PROXY_START_REQUEST,
-                .payload.forward_proxy_config = *config,
-        };
-
-        return tls_proxy_start_helper(&request);
-}
-
-
-/* Querry status information from the proxy with given id.
- *
- * Returns 0 on success, -1 on failure (error message is printed to console).
- */
-int tls_proxy_get_status(int id, proxy_status* status)
-{
-        /* Create a management message */
-        tls_proxy_management_message message = {
-                .type = PROXY_STATUS_REQUEST,
-                .payload.status_req = {
-                        .proxy_id = id,
-                        .status_obj_ptr = status,
-                }
-        };
-
-        /* Send request */
-        int ret = send_management_message(proxy_backend.management_socket_pair[0], &message);
-        if (ret < 0)
-        {
-                return -1;
-        }
-
-        /* Wait for response */
-        ret = read_management_message(proxy_backend.management_socket_pair[0], &message);
-        if (ret < 0)
-        {
-                return -1;
-        }
-        else if (message.type != PROXY_RESPONSE)
-        {
-                LOG_ERROR("Received invalid response");
-                return -1;
-        }
-        else if (message.payload.response_code < 0)
-        {
-                LOG_ERROR("Error obtaining proxy status (error %d)", message.payload.response_code);
-                return -1;
-        }
-
-        return 0;
-}
-
-
-/* Stop the running proxy with given id (returned by tls_forward_proxy_start or
- * tls_forward_proxy_start).
- *
- * Returns 0 on success, -1 on failure (error message is printed to console).
- */
-int tls_proxy_stop(int id)
-{
-        /* Create a STOP_REQUEST message */
-        tls_proxy_management_message request = {
-                .type = PROXY_STOP_REQUEST,
-                .payload.proxy_id = id,
-        };
-        tls_proxy_management_message response;
-
-        /* Send request */
-        int ret = send_management_message(proxy_backend.management_socket_pair[0], &request);
-        if (ret < 0)
-        {
-                return -1;
-        }
-
-        /* Wait for response */
-        ret = read_management_message(proxy_backend.management_socket_pair[0], &response);
-        if (ret < 0)
-        {
-                return -1;
-        }
-        else if (response.type != PROXY_RESPONSE)
-        {
-                LOG_ERROR("Received invalid response");
-                return -1;
-        }
-        else if (response.payload.response_code < 0)
-        {
-                LOG_ERROR("Error stopping TLS proxy (error %d)", response.payload.response_code);
-                return -1;
-        }
-
-        return 0;
-}
-
-
-/* Terminate the application backend.
- *
- * Returns 0 on success, -1 on failure (error message is printed to console).
- */
-int tls_proxy_backend_terminate(void)
-{
-        /* Stop all running proxies */
-        for (int id = 1; id <= MAX_PROXYS; id++)
-        {
-                proxy* proxy_to_kill = find_proxy_by_id(id);
-                if (proxy_to_kill != NULL)
-                {
-                        poll_set_remove_fd(&proxy_backend.poll_set, proxy_to_kill->incoming_sock);
-                        kill_proxy(proxy_to_kill);
-                }
-        }
-
-        /* Stop the main thread */
-        pthread_cancel(proxy_backend.thread);
-
-        /* Close the management socket pair */
-        if (proxy_backend.management_socket_pair[0] >= 0)
-        {
-                close(proxy_backend.management_socket_pair[0]);
-                proxy_backend.management_socket_pair[0] = -1;
-        }
-        if (proxy_backend.management_socket_pair[1] >= 0)
-        {
-                close(proxy_backend.management_socket_pair[1]);
-                proxy_backend.management_socket_pair[1] = -1;
-        }
-
-        return 0;
-}

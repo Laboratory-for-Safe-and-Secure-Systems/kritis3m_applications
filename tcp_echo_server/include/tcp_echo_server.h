@@ -3,12 +3,14 @@
 
 #include <stdint.h>
 #include <stdlib.h>
+#include <stdbool.h>
 
 
 typedef struct tcp_echo_server_config
 {
         char const* own_ip_address;
         uint16_t listening_port;
+        int32_t log_level;
 }
 tcp_echo_server_config;
 

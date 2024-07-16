@@ -11,17 +11,33 @@
 #include "proxy_connection.h"
 #include "logging.h"
 #include "networking.h"
+#include "poll_set.h"
 
 
 #if defined(__ZEPHYR__)
 
 #define MAX_PROXYS 2
 
+#define BACKEND_THREAD_PRIORITY 8
+
 #else
 
 #define MAX_PROXYS 10
 
+#define BACKEND_THREAD_PRIORITY 10
+
 #endif
+
+
+/* Structure declarations */
+typedef struct proxy_backend
+{
+        int management_socket_pair[2];
+        pthread_t thread;
+        pthread_attr_t thread_attr;
+        poll_set poll_set;
+}
+proxy_backend;
 
 
 typedef struct proxy_connection proxy_connection;
@@ -43,11 +59,9 @@ proxy;
 
 void init_proxy_pool(void);
 
-int add_new_proxy(enum tls_proxy_direction direction, proxy_config const* config);
+int proxy_backend_init(proxy_backend* backend, proxy_backend_config const* config);
 
-proxy* find_proxy_by_fd(int fd);
-proxy* find_proxy_by_id(int id);
+void proxy_backend_cleanup(proxy_backend* backend);
 
-void kill_proxy(proxy* proxy);
 
 #endif /* PROXY_H */
