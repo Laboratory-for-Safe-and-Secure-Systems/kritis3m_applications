@@ -16,8 +16,32 @@
 LOG_MODULE_CREATE(tcp_echo_server);
 
 
+#define ERROR_OUT(...) { LOG_ERROR(__VA_ARGS__); goto cleanup; }
+
 #define MAX_CLIENTS 5
 #define RECV_BUFFER_SIZE 1024
+
+
+enum tcp_echo_server_management_message_type
+{
+	MANAGEMENT_MSG_STATUS_REQUEST,
+	MANAGEMENT_MSG_SHUTDOWN,
+	MANAGEMENT_RESPONSE
+};
+
+typedef struct tcp_echo_server_management_message
+{
+	enum tcp_echo_server_management_message_type type;
+
+        union
+        {
+                tcp_echo_server_status* status_ptr;     /* STATUS_REQUEST */
+                int dummy_unused;                       /* SHUTDOWN */
+		int response_code;                      /* RESPONSE */
+        }
+        payload;
+}
+tcp_echo_server_management_message;
 
 
 typedef struct tcp_echo_server
@@ -26,6 +50,7 @@ typedef struct tcp_echo_server
         int tcp_server_socket;
 	uint16_t listening_port;
 	uint16_t num_clients;
+	int management_socket_pair[2];
 	pthread_t thread;
 	pthread_attr_t thread_attr;
 	struct poll_set poll_set;
@@ -48,6 +73,7 @@ static tcp_echo_server echo_server = {
 	.tcp_server_socket = -1,
 	.listening_port = 0,
 	.num_clients = 0,
+	.management_socket_pair = {-1, -1},
 };
 static echo_client client_pool[MAX_CLIENTS];
 
@@ -64,18 +90,26 @@ static void* tcp_echo_server_main_thread(void* ptr);
 static echo_client* add_new_client(int client_socket, struct sockaddr* client_addr);
 static echo_client* find_client_by_fd(int fd);
 static void client_cleanup(echo_client* client);
+static int send_management_message(int socket, tcp_echo_server_management_message const* msg);
+static int read_management_message(int socket, tcp_echo_server_management_message* msg);
+static int handle_management_message(tcp_echo_server* server, int socket);
+static void echo_server_cleanup(tcp_echo_server* server);
 
 
 static void* tcp_echo_server_main_thread(void* ptr)
 {
 	tcp_echo_server* server = (tcp_echo_server*) ptr;
 
+	bool shutdown = false;
+
 	server->running = true;
 	server->num_clients = 0;
 
-	pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
+	/* Set the management socket to non-blocking and add it to the poll_set */
+        setblocking(server->management_socket_pair[1], false);
+        poll_set_add_fd(&server->poll_set, server->management_socket_pair[1], POLLIN);
 
-	while (1)
+	while (!shutdown)
 	{
 		struct sockaddr client_addr;
 		socklen_t client_addr_len = sizeof(client_addr);
@@ -99,8 +133,22 @@ static void* tcp_echo_server_main_thread(void* ptr)
 
 			echo_client* client = NULL;
 
+			/* Check management socket */
+			if (fd == server->management_socket_pair[1])
+                        {
+                                if (event & POLLIN)
+                                {
+                                        /* Handle the message */
+                                        ret = handle_management_message(server, fd);
+                                        if (ret == 1)
+                                        {
+                                                shutdown = true;
+                                                break;
+                                        }
+                                }
+                        }
                         /* Check server fd */
-			if (fd == server->tcp_server_socket)
+			else if (fd == server->tcp_server_socket)
 			{
 				if (event & POLLIN)
 				{
@@ -196,7 +244,10 @@ static void* tcp_echo_server_main_thread(void* ptr)
 		}
 	}
 
-	server->running = false;
+	/* Cleanup */
+	echo_server_cleanup(server);
+
+	LOG_INFO("TCP echo server main thread terminated");
 
 	return NULL;
 }
@@ -269,7 +320,151 @@ static void client_cleanup(echo_client* client)
                 client->in_use = false;
         }
 
-	echo_server.num_clients -= 1;
+	if (echo_server.num_clients > 0)
+		echo_server.num_clients -= 1;
+}
+
+
+static int send_management_message(int socket, tcp_echo_server_management_message const* msg)
+{
+        int ret = 0;
+        static const int max_retries = 5;
+        int retries = 0;
+
+        while ((ret <= 0) && (retries < max_retries))
+        {
+                ret = send(socket, msg, sizeof(tcp_echo_server_management_message), 0);
+                if (ret < 0)
+                {
+                        if (errno != EAGAIN)
+                        {
+                                LOG_ERROR("Error sending message: %d (%s)", errno, strerror(errno));
+                                return -1;
+                        }
+
+                        usleep(10 * 1000);
+                }
+                else if (ret != sizeof(tcp_echo_server_management_message))
+                {
+                        LOG_ERROR("Sent invalid message");
+                        return -1;
+                }
+
+                retries++;
+        }
+
+        if (retries >= max_retries)
+        {
+                LOG_ERROR("Failed to send message after %d retries", max_retries);
+                return -1;
+        }
+
+        return 0;
+}
+
+
+static int read_management_message(int socket, tcp_echo_server_management_message* msg)
+{
+        int ret = recv(socket, msg, sizeof(tcp_echo_server_management_message), 0);
+        if (ret < 0)
+        {
+                LOG_ERROR("Error receiving message: %d (%s)", errno, strerror(errno));
+                return -1;
+        }
+        else if (ret != sizeof(tcp_echo_server_management_message))
+        {
+                LOG_ERROR("Received invalid response (ret=%d; expected=%lu)", ret, sizeof(tcp_echo_server_management_message));
+                return -1;
+        }
+
+        return 0;
+}
+
+
+/* Handle incoming management messages.
+ *
+ * Return 0 in case the message has been processed successfully, -1 otherwise. In case the connection thread has
+ * to be stopped and the connection has to be cleaned up, +1 in returned.
+ */
+static int handle_management_message(tcp_echo_server* server, int socket)
+{
+	/* Read message from the management socket. */
+	tcp_echo_server_management_message msg;
+	uint8_t msg_byte;
+	int ret = read_management_message(socket, &msg);
+	if (ret < 0)
+	{
+		LOG_ERROR("Error reading management message: %d", ret);
+		return -1;
+	}
+
+        switch (msg.type)
+        {
+		case MANAGEMENT_MSG_STATUS_REQUEST:
+                {
+			/* Fill status object */
+			tcp_echo_server_status* status = msg.payload.status_ptr;
+			status->is_running = server->running;
+			status->listening_port = server->listening_port;
+			status->num_connections = server->num_clients;
+
+                        /* Send response */
+			msg.type = MANAGEMENT_RESPONSE;
+			msg.payload.response_code = 0;
+                        ret = send_management_message(socket, &msg);
+                        break;
+                }
+		case MANAGEMENT_MSG_SHUTDOWN:
+                {
+                        /* Return 1 to indicate we have to stop the connection thread and cleanup */
+                        ret = 1;
+
+                        /* Send response */
+			msg.type = MANAGEMENT_RESPONSE;
+			msg.payload.response_code = 0;
+
+                        /* Do not update ret here to make sure the thread terminates */
+                        send_management_message(socket, &msg);
+
+			LOG_DEBUG("Received shutdown message, stopping server");
+                        break;
+                }
+                default:
+                        LOG_ERROR("Received invalid management message: msg->type=%d", msg.type);
+                        ret = -1;
+                        break;
+	}
+
+	return ret;
+}
+
+
+static void echo_server_cleanup(tcp_echo_server* server)
+{
+	/* Stop all running client connections */
+	for (int i = 0; i < MAX_CLIENTS; i++)
+	{
+                client_cleanup(&client_pool[i]);
+	}
+
+	/* Stop the listening socket */
+        if (server->tcp_server_socket > 0)
+        {
+                close(server->tcp_server_socket);
+                server->tcp_server_socket = -1;
+        }
+
+        /* Close the management socket pair */
+        if (server->management_socket_pair[0] != -1)
+        {
+                close(server->management_socket_pair[0]);
+                server->management_socket_pair[0] = -1;
+        }
+        if (server->management_socket_pair[1] != -1)
+        {
+                close(server->management_socket_pair[1]);
+                server->management_socket_pair[1] = -1;
+        }
 }
 
 
@@ -279,6 +474,9 @@ static void client_cleanup(echo_client* client)
  */
 int tcp_echo_server_run(tcp_echo_server_config const* config)
 {
+	/* Set the log level */
+        LOG_LVL_SET(config->log_level);
+
 	if (echo_server.running == true)
 	{
 		if (config->listening_port != echo_server.listening_port)
@@ -303,20 +501,21 @@ int tcp_echo_server_run(tcp_echo_server_config const* config)
 
         poll_set_init(&echo_server.poll_set);
 
+	/* Create the socket pair for external management */
+        int ret = socketpair(AF_UNIX, SOCK_STREAM, 0, echo_server.management_socket_pair);
+        if (ret < 0)
+        	ERROR_OUT("Error creating socket pair for management: %d (%s)", errno, strerror(errno));
+
+        LOG_DEBUG("Created management socket pair (%d, %d)", echo_server.management_socket_pair[0],
+                                                             echo_server.management_socket_pair[1]);
+
         /* Create the TCP socket for the incoming connection */
 	echo_server.tcp_server_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 	if (echo_server.tcp_server_socket == -1)
-	{
-		LOG_ERROR("Error creating incoming TCP socket");
-		return -1;
-	}
+		ERROR_OUT("Error creating incoming TCP socket");
 
         if (setsockopt(echo_server.tcp_server_socket, SOL_SOCKET, SO_REUSEADDR, &(int){1}, sizeof(int)) < 0)
-        {
-                LOG_ERROR("setsockopt(SO_REUSEADDR) failed: error %d\n", errno);
-		close(echo_server.tcp_server_socket);
-		return -1;
-        }
+        	ERROR_OUT("setsockopt(SO_REUSEADDR) failed: error %d\n", errno);
 
 	/* Configure TCP server */
 	echo_server.listening_port = config->listening_port;
@@ -328,23 +527,16 @@ int tcp_echo_server_run(tcp_echo_server_config const* config)
 
 	/* Bind server socket to its destined IPv4 address */
 	if (bind(echo_server.tcp_server_socket, (struct sockaddr*) &bind_addr, sizeof(bind_addr)) == -1)
-	{
-		LOG_ERROR("Cannot bind socket %d to %s:%d: error %d\n",
-                        echo_server.tcp_server_socket, config->own_ip_address, config->listening_port, errno);
-		close(echo_server.tcp_server_socket);
-		return -1;
-	}
+		ERROR_OUT("Cannot bind socket %d to %s:%d: error %d\n",
+                          echo_server.tcp_server_socket, config->own_ip_address, config->listening_port, errno);
 
 	/* If a random port have been used, obtain the actually selected one */
 	if (config->listening_port == 0)
 	{
 		socklen_t sockaddr_len = sizeof(bind_addr);
 		if (getsockname(echo_server.tcp_server_socket, (struct sockaddr*)&bind_addr, &sockaddr_len) < 0)
-		{
-			LOG_ERROR("getsockname failed with errno: %d", errno);
-			close(echo_server.tcp_server_socket);
-			return -1;
-		}
+			ERROR_OUT("getsockname failed with errno: %d", errno);
+
 		echo_server.listening_port = ntohs(bind_addr.sin_port);
 	}
 
@@ -355,17 +547,13 @@ int tcp_echo_server_run(tcp_echo_server_config const* config)
 	setblocking(echo_server.tcp_server_socket, false);
 
 	/* Add new server to the poll_set */
-	int ret = poll_set_add_fd(&echo_server.poll_set, echo_server.tcp_server_socket, POLLIN);
+	ret = poll_set_add_fd(&echo_server.poll_set, echo_server.tcp_server_socket, POLLIN);
 	if (ret != 0)
-	{
-		LOG_ERROR("Error adding socket to poll_set");
-		close(echo_server.tcp_server_socket);
-		return -1;
-	}
+		ERROR_OUT("Error adding socket to poll_set");
 
         /* Init main backend */
 	pthread_attr_init(&echo_server.thread_attr);
-	pthread_attr_setdetachstate(&echo_server.thread_attr, PTHREAD_CREATE_DETACHED);
+	pthread_attr_setdetachstate(&echo_server.thread_attr, PTHREAD_CREATE_JOINABLE);
 
 #if defined(__ZEPHYR__)
 	/* We have to properly set the attributes with the stack to use for Zephyr. */
@@ -374,16 +562,16 @@ int tcp_echo_server_run(tcp_echo_server_config const* config)
 
         /* Create the new thread */
 	ret = pthread_create(&echo_server.thread, &echo_server.thread_attr, tcp_echo_server_main_thread, &echo_server);
-	if (ret == 0)
-	{
-		LOG_INFO("TCP echo server main thread started");
-	}
-	else
-	{
-		LOG_ERROR("Error starting TCP echo server thread: %s", strerror(ret));
-	}
+	if (ret != 0)
+		ERROR_OUT("Error starting TCP echo server thread: %s", strerror(ret));
+
+	LOG_INFO("TCP echo server main thread started");
 
 	return ret;
+
+cleanup:
+	echo_server_cleanup(&echo_server);
+	return -1;
 }
 
 
@@ -393,10 +581,35 @@ int tcp_echo_server_run(tcp_echo_server_config const* config)
  */
 int tcp_echo_server_get_status(tcp_echo_server_status* status)
 {
-	/* Copy information */
-	status->is_running = echo_server.running;
-	status->listening_port = echo_server.listening_port;
-	status->num_connections = echo_server.num_clients;
+	/* Create the STATUS_REQUEST message. Object is used for the response, too. */
+        tcp_echo_server_management_message message = {
+                .type = MANAGEMENT_MSG_STATUS_REQUEST,
+                .payload.status_ptr = status,
+        };
+
+        /* Send request */
+        int ret = send_management_message(echo_server.management_socket_pair[0], &message);
+        if (ret < 0)
+        {
+                return -1;
+        }
+
+        /* Wait for response */
+        ret = read_management_message(echo_server.management_socket_pair[0], &message);
+        if (ret < 0)
+        {
+                return -1;
+        }
+        else if (message.type != MANAGEMENT_RESPONSE)
+        {
+                LOG_ERROR("Received invalid response");
+                return -1;
+        }
+        else if (message.payload.response_code < 0)
+        {
+                LOG_ERROR("Error obtaining status (error %d)", message.payload.response_code);
+                return -1;
+        }
 
 	return 0;
 }
@@ -408,27 +621,45 @@ int tcp_echo_server_get_status(tcp_echo_server_status* status)
  */
 int tcp_echo_server_terminate(void)
 {
-	if (echo_server.running == false)
+	if ((echo_server.running == false) ||
+	    (echo_server.management_socket_pair[0] < 0) ||
+	    (echo_server.management_socket_pair[1] < 0))
 	{
 		LOG_INFO("TCP echo server is not running");
 		return 0;
 	}
 
-	/* Stop the main thread */
-	pthread_cancel(echo_server.thread);
+	/* Send shutdown message to the management socket */
+	tcp_echo_server_management_message msg = {
+		.type = MANAGEMENT_MSG_SHUTDOWN,
+		.payload.dummy_unused = 0,
+	};
+	/* Send request */
+        int ret = send_management_message(echo_server.management_socket_pair[0], &msg);
+        if (ret < 0)
+        {
+                return -1;
+        }
 
-	/* Stop all running client connections */
-	for (int i = 0; i < MAX_CLIENTS; i++)
-	{
-                client_cleanup(&client_pool[i]);
-	}
+        /* Wait for response */
+        ret = read_management_message(echo_server.management_socket_pair[0], &msg);
+        if (ret < 0)
+        {
+                return -1;
+        }
+        else if (msg.type != MANAGEMENT_RESPONSE)
+        {
+                LOG_ERROR("Received invalid response");
+                return -1;
+        }
+        else if (msg.payload.response_code < 0)
+        {
+                LOG_ERROR("Error stopping backend (error %d)", msg.payload.response_code);
+                return -1;
+        }
 
-	/* Stop the listening socket */
-	if (echo_server.tcp_server_socket > 0)
-	{
-		close(echo_server.tcp_server_socket);
-		echo_server.tcp_server_socket = -1;
-	}
+	/* Wait until the main thread is terminated */
+	pthread_join(echo_server.thread, NULL);
 
 	return 0;
 }

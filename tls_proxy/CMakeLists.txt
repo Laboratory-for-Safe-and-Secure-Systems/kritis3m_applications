@@ -4,7 +4,7 @@ add_library(kritis3m_applications_proxy STATIC
         ${CMAKE_CURRENT_SOURCE_DIR}/src/proxy_backend.c
         ${CMAKE_CURRENT_SOURCE_DIR}/src/proxy_management.c
         ${CMAKE_CURRENT_SOURCE_DIR}/src/proxy_connection.c
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/proxy.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/proxy_api.c
 )
 
 # Public include directories

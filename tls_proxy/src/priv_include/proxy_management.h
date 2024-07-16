@@ -5,13 +5,18 @@
 
 #include "tls_proxy.h"
 
-enum tls_proxy_management_message_type
+enum proxy_management_message_type
 {
         REVERSE_PROXY_START_REQUEST,
         FORWARD_PROXY_START_REQUEST,
+
         PROXY_STATUS_REQUEST,
+
+        CONNECTION_STOP_REQUEST,
         PROXY_STOP_REQUEST,
-        PROXY_RESPONSE,
+        BACKEND_STOP_REQUEST,
+
+        RESPONSE,
 };
 
 
@@ -23,26 +28,27 @@ typedef struct proxy_status_request
 proxy_status_request;
 
 
-typedef struct tls_proxy_management_message
+typedef struct proxy_management_message
 {
-        enum tls_proxy_management_message_type type;
+        enum proxy_management_message_type type;
 
-        union tls_proxy_management_message_payload
+        union proxy_management_message_payload
         {
                 proxy_config reverse_proxy_config;      /* REVERSE_PROXY_START_REQUEST */
                 proxy_config forward_proxy_config;      /* FORWARD_PROXY_START_REQUEST */
                 proxy_status_request status_req;        /* PROXY_STATUS_REQUEST */
                 int proxy_id;	                        /* PROXY_STOP_REQUEST */
+                int dummy_unused;                       /* CONNECTION_STOP_REQUEST, BACKEND_STOP_REQUEST */
                 int response_code;                      /* RESPONSE */
         }
         payload;
 }
-tls_proxy_management_message;
+proxy_management_message;
 
 
-int send_management_message(int socket, tls_proxy_management_message const* msg);
+int send_management_message(int socket, proxy_management_message const* msg);
 
-int read_management_message(int socket, tls_proxy_management_message* msg);
+int read_management_message(int socket, proxy_management_message* msg);
 
 
 #endif /* PROXY_MANAGEMENT_H */

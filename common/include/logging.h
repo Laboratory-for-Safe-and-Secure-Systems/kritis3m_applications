@@ -45,6 +45,7 @@ log_module;
 #define LOG_DEBUG_EX(module, fmt, ...) log_message(&module, LOG_LVL_DEBUG, fmt, ##__VA_ARGS__)
 
 #define LOG_LVL_SET(level) log_level_set(&log_inst, level)
+#define LOG_LVL_GET() log_inst.level
 
 
 void log_message(log_module const* module, int32_t level, char const* fmt, ...);

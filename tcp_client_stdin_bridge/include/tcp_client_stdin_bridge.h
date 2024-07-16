@@ -3,14 +3,23 @@
 
 #include <stdint.h>
 #include <stdlib.h>
+#include <stdbool.h>
 
 
 typedef struct tcp_client_stdin_bridge_config
 {
         char const* target_ip_address;
         uint16_t target_port;
+        int32_t log_level;
 }
 tcp_client_stdin_bridge_config;
+
+
+typedef struct tcp_client_stdin_bridge_status
+{
+        bool is_running;
+}
+tcp_client_stdin_bridge_status;
 
 
 /* Start a new thread and run the TCP client stdin bridge application.
@@ -18,6 +27,13 @@ tcp_client_stdin_bridge_config;
  * Returns 0 on success, -1 on failure (error message is printed to console).
  */
 int tcp_client_stdin_bridge_run(tcp_client_stdin_bridge_config const* config);
+
+
+/* Querry status information from the TCP STDIN bridge.
+ *
+ * Returns 0 on success, -1 on failure (error message is printed to console).
+ */
+int tcp_client_stdin_bridge_get_status(tcp_client_stdin_bridge_status* status);
 
 
 /* Terminate the tcp_client_stdin_bridge application.
