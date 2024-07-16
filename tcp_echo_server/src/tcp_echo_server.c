@@ -1,6 +1,7 @@
 #include <errno.h>
 #include <pthread.h>
 #include <sys/socket.h>
+#include <netinet/tcp.h>
 #include <unistd.h>
 #include <stdint.h>
 #include <stdbool.h>
@@ -281,6 +282,13 @@ static echo_client* add_new_client(int client_socket,
         client->socket = client_socket;
 
 	setblocking(client->socket, false);
+
+	if (setsockopt(client->socket, IPPROTO_TCP, TCP_NODELAY, &(int){1}, sizeof(int)) < 0)
+	{
+		LOG_ERROR("setsockopt(TCP_NODELAY) for client socket failed: error %d", errno);
+		client_cleanup(client);
+		return NULL;
+	}
 
         /* Print info */
 	struct sockaddr_in* client_data = (struct sockaddr_in*) client_addr;
