@@ -628,5 +628,9 @@ static void* connection_handler_thread(void *ptr)
 
         proxy_connection_cleanup(connection);
 
-        return NULL;
+        /* Detach the thread here, as it is terminating by itself. With that,
+         * the thread resources are freed immediatelly. */
+        pthread_detach(pthread_self());
+
+        pthread_exit(NULL);
 }

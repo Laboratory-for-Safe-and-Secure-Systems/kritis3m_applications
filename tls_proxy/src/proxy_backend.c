@@ -648,7 +648,7 @@ void* proxy_backend_thread(void* ptr)
                                                 ret = proxy_connection_detach_handling(proxy_connection);
                                                 if (ret != 0)
                                                 {
-                                                        LOG_ERROR("Error starting client handler thread: %d (%s)", errno, strerror(errno));
+                                                        LOG_ERROR("Error starting client handler thread: %d (%s)", ret, strerror(ret));
                                                         proxy_connection_cleanup(proxy_connection);
                                                 }
                                         }
@@ -689,6 +689,10 @@ void* proxy_backend_thread(void* ptr)
 
         proxy_backend_cleanup(backend);
 
-        return NULL;
+        /* Detach the thread here, as it is terminating by itself. With that,
+         * the thread resources are freed immediatelly. */
+        pthread_detach(pthread_self());
+
+        pthread_exit(NULL);
 }
 
