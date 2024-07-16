@@ -193,8 +193,8 @@ int proxy_connection_detach_handling(proxy_connection* connection)
         /* Store the pointer to the related stack for the client handler thread
          * (started after the TLS handshake). */
         pthread_attr_setstack(&connection->thread_attr,
-                              connection_handler_stack_pool[freeSlotConnectionPool],
-                              K_THREAD_STACK_SIZEOF(connection_handler_stack_pool[freeSlotConnectionPool]));
+                              connection_handler_stack_pool[connection->slot],
+                              K_THREAD_STACK_SIZEOF(connection_handler_stack_pool[connection->slot]));
 #endif
 
         /* Set the priority of the client handler thread to be one higher than the backend thread.
