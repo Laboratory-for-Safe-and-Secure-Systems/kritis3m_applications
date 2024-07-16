@@ -580,6 +580,13 @@ cleanup:
  */
 int tcp_echo_server_get_status(tcp_echo_server_status* status)
 {
+	if ((echo_server.management_socket_pair[0] < 0) ||
+	    (echo_server.management_socket_pair[1] < 0))
+	{
+		LOG_INFO("TCP echo server is not running");
+		return 0;
+	}
+
 	/* Create the STATUS_REQUEST message. Object is used for the response, too. */
         tcp_echo_server_management_message message = {
                 .type = MANAGEMENT_MSG_STATUS_REQUEST,
@@ -624,7 +631,7 @@ int tcp_echo_server_terminate(void)
 	    (echo_server.management_socket_pair[0] < 0) ||
 	    (echo_server.management_socket_pair[1] < 0))
 	{
-		LOG_INFO("TCP echo server is not running");
+		LOG_DEBUG("TCP echo server is not running");
 		return 0;
 	}
 

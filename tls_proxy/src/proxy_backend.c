@@ -321,15 +321,17 @@ static int handle_management_message(proxy_backend* backend, int socket, proxy_m
                 {
                         /* Add a new reverse proxy */
                         int proxy_id = add_new_proxy(REVERSE_PROXY, &msg->payload.reverse_proxy_config);
-
-                        /* Add proxy to the poll_set */
-                        proxy* new_proxy = find_proxy_by_id(proxy_id);
-                        int ret = poll_set_add_fd(&backend->poll_set, new_proxy->incoming_sock, POLLIN);
-                        if (ret != 0)
+                        if (proxy_id > 0)
                         {
-                                LOG_ERROR("Error adding new proxy to poll_set");
-                                kill_proxy(new_proxy);
-                                proxy_id = -1;
+                                /* Add proxy to the poll_set */
+                                proxy* new_proxy = find_proxy_by_id(proxy_id);
+                                int ret = poll_set_add_fd(&backend->poll_set, new_proxy->incoming_sock, POLLIN);
+                                if (ret != 0)
+                                {
+                                        LOG_ERROR("Error adding new proxy to poll_set");
+                                        kill_proxy(new_proxy);
+                                        proxy_id = -1;
+                                }
                         }
 
                         /* Send response */
@@ -344,15 +346,17 @@ static int handle_management_message(proxy_backend* backend, int socket, proxy_m
                 {
                         /* Add a new forward proxy */
                         int proxy_id = add_new_proxy(FORWARD_PROXY, &msg->payload.forward_proxy_config);
-
-                        /* Add proxy to the poll_set */
-                        proxy* new_proxy = find_proxy_by_id(proxy_id);
-                        int ret = poll_set_add_fd(&backend->poll_set, new_proxy->incoming_sock, POLLIN);
-                        if (ret != 0)
+                        if (proxy_id > 0)
                         {
-                                LOG_ERROR("Error adding new proxy to poll_set");
-                                kill_proxy(new_proxy);
-                                proxy_id = -1;
+                                /* Add proxy to the poll_set */
+                                proxy* new_proxy = find_proxy_by_id(proxy_id);
+                                int ret = poll_set_add_fd(&backend->poll_set, new_proxy->incoming_sock, POLLIN);
+                                if (ret != 0)
+                                {
+                                        LOG_ERROR("Error adding new proxy to poll_set");
+                                        kill_proxy(new_proxy);
+                                        proxy_id = -1;
+                                }
                         }
 
                         /* Send response */

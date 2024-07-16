@@ -437,7 +437,7 @@ int tcp_client_stdin_bridge_get_status(tcp_client_stdin_bridge_status* status)
         if ((client_stdin_bridge.management_socket_pair[0] < 0) ||
             (client_stdin_bridge.management_socket_pair[0] < 0))
         {
-                LOG_ERROR("Bridge thread not running");
+                LOG_DEBUG("Bridge thread not running");
                 return -1;
         }
 
@@ -489,7 +489,7 @@ int tcp_client_stdin_bridge_terminate(void)
         if ((client_stdin_bridge.management_socket_pair[0] < 0) ||
             (client_stdin_bridge.management_socket_pair[0] < 0))
         {
-                LOG_ERROR("Bridge thread not running");
+                LOG_DEBUG("Bridge thread not running");
                 return -1;
         }
 
