@@ -34,6 +34,8 @@ log_module;
                                                 .level = log_level \
                                         }
 
+#define LOG_MODULE_GET() &log_inst
+
 #define LOG_INFO(fmt, ...) log_message(&log_inst, LOG_LVL_INFO, fmt, ##__VA_ARGS__)
 #define LOG_WARN(fmt, ...) log_message(&log_inst, LOG_LVL_WARN, fmt, ##__VA_ARGS__)
 #define LOG_ERROR(fmt, ...) log_message(&log_inst, LOG_LVL_ERROR, fmt, ##__VA_ARGS__)
