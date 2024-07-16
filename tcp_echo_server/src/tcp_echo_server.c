@@ -390,7 +390,6 @@ static int handle_management_message(tcp_echo_server* server, int socket)
 {
 	/* Read message from the management socket. */
 	tcp_echo_server_management_message msg;
-	uint8_t msg_byte;
 	int ret = read_management_message(socket, &msg);
 	if (ret < 0)
 	{
