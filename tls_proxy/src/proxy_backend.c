@@ -689,6 +689,8 @@ void* proxy_backend_thread(void* ptr)
 
         proxy_backend_cleanup(backend);
 
+        asl_cleanup();
+
         /* Detach the thread here, as it is terminating by itself. With that,
          * the thread resources are freed immediatelly. */
         pthread_detach(pthread_self());
