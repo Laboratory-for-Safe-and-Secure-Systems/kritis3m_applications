@@ -36,7 +36,7 @@ static proxy proxy_pool[MAX_PROXYS];
 
 #if defined(__ZEPHYR__)
 
-#define BACKEND_STACK_SIZE (127*1024)
+#define BACKEND_STACK_SIZE (32*1024)
 Z_KERNEL_STACK_DEFINE_IN(backend_stack, BACKEND_STACK_SIZE, \
                 __attribute__((section(CONFIG_RAM_SECTION_STACKS_2))));
 #endif
