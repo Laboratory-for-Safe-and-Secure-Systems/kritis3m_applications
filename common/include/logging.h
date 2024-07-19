@@ -29,7 +29,7 @@ log_module;
                                                 .level = LOG_LVL_WARN \
                                         }
 
-#define LOG_MODULE_CREATE_EX(module_name, log_level) static log_moduel log_inst = { \
+#define LOG_MODULE_CREATE_EX(module_name, log_level) static log_module log_inst = { \
                                                 .name = #module_name, \
                                                 .level = log_level \
                                         }
