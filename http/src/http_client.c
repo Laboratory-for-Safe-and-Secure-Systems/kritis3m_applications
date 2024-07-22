@@ -10,22 +10,31 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(net_http_client, CONFIG_NET_HTTP_LOG_LEVEL);
-
-#include <zephyr/kernel.h>
 #include <string.h>
 #include <strings.h>
 #include <errno.h>
 #include <stdbool.h>
 #include <stdlib.h>
 
-#include <zephyr/net/net_ip.h>
-#include <zephyr/net/socket.h>
-// #include <zephyr/net/http/client.h>
-#include "http_client.h"
+/********************************************
+ *              PLATFORM SPECIFIC			*
+ *******************************************/
 
-#include "net_private.h"
+/********************************************
+ * 			    ZEPHYR				  	    *
+ * *****************************************/
+#if defined (__ZEPYHR__)
+#include <zephyr/kernel.h>
+#endif 
+
+#include <netinet/in.h>
+#include <sys/socket.h>
+
+
+#include "http_client.h"
+#include "logging.h"
+
+LOG_MODULE_CREATE(http);
 
 #define HTTP_CONTENT_LEN_SIZE 11
 #define MAX_SEND_BUF_LEN 192
@@ -96,13 +105,12 @@ static int http_send_data(int sock, char *send_buf,
 				end_of_send += to_be_copied;
 				end_of_data += to_be_copied;
 				remaining_len -= to_be_copied;
-
-				LOG_HEXDUMP_DBG(send_buf, end_of_send,
-						"Data to send");
+				// LOG_HEXDUMP_DBG(send_buf, end_of_send,
+				// 		"Data to send");
 
 				ret = sendall(sock, send_buf, end_of_send, req_end_timepoint);
 				if (ret < 0) {
-					NET_DBG("Cannot send %d bytes (%d)",
+					LOG_DEBUG("Cannot send %d bytes (%d)",
 						end_of_send, ret);
 					goto err;
 				}
@@ -124,7 +132,7 @@ static int http_send_data(int sock, char *send_buf,
 	va_end(va);
 
 	if (end_of_send > (int)send_buf_max_len) {
-		NET_ERR("Sending overflow (%d > %zd)", end_of_send,
+		LOG_ERROR("Sending overflow (%d > %zd)", end_of_send,
 			send_buf_max_len);
 		return -EMSGSIZE;
 	}
@@ -144,7 +152,7 @@ static int http_flush_data(int sock, const char *send_buf, size_t send_buf_len,
 {
 	int ret;
 
-	LOG_HEXDUMP_DBG(send_buf, send_buf_len, "Data to send");
+	// LOG_HEXDUMP_DBG(send_buf, send_buf_len, "Data to send");
 
 	ret = sendall(sock, send_buf, send_buf_len, req_end_timepoint);
 	if (ret < 0) {
@@ -169,7 +177,7 @@ static void print_header_field(size_t len, const char *str)
 
 		snprintk(output, len + 1, "%s", str);
 
-		NET_DBG("[%zd] %s", len, output);
+		LOG_DEBUG("[%zd] %s", len, output);
 	}
 }
 
@@ -201,7 +209,7 @@ static int on_status(struct http_parser *parser, const char *at, size_t length)
 	req->internal.response.http_status_code =
 		(uint16_t)parser->status_code;
 
-	NET_DBG("HTTP response status %d %s", parser->status_code,
+	LOG_DEBUG("HTTP response status %d %s", parser->status_code,
 		req->internal.response.http_status);
 
 	if (req->internal.response.http_cb &&
@@ -285,7 +293,7 @@ static int on_body(struct http_parser *parser, const char *at, size_t length)
 	req->internal.response.body_found = 1;
 	req->internal.response.processed += length;
 
-	NET_DBG("Processed %zd length %zd", req->internal.response.processed,
+	LOG_DEBUG("Processed %zd length %zd", req->internal.response.processed,
 		length);
 
 	if (req->internal.response.http_cb &&
@@ -317,17 +325,17 @@ static int on_headers_complete(struct http_parser *parser)
 	}
 
 	if (parser->status_code >= 500 && parser->status_code < 600) {
-		NET_DBG("Status %d, skipping body", parser->status_code);
+		LOG_DEBUG("Status %d, skipping body", parser->status_code);
 		return 1;
 	}
 
 	if ((req->method == HTTP_HEAD || req->method == HTTP_OPTIONS) &&
 	    req->internal.response.content_length > 0) {
-		NET_DBG("No body expected");
+		LOG_DEBUG("No body expected");
 		return 1;
 	}
 
-	NET_DBG("Headers complete");
+	LOG_DEBUG("Headers complete");
 
 	return 0;
 }
@@ -343,7 +351,7 @@ static int on_message_begin(struct http_parser *parser)
 		req->internal.response.http_cb->on_message_begin(parser);
 	}
 
-	NET_DBG("-- HTTP %s response (headers) --",
+	LOG_DEBUG("-- HTTP %s response (headers) --",
 		http_method_str(req->method));
 
 	return 0;
@@ -360,7 +368,7 @@ static int on_message_complete(struct http_parser *parser)
 		req->internal.response.http_cb->on_message_complete(parser);
 	}
 
-	NET_DBG("-- HTTP %s response (complete) --",
+	LOG_DEBUG("-- HTTP %s response (complete) --",
 		http_method_str(req->method));
 
 	req->internal.response.message_complete = 1;
@@ -420,7 +428,7 @@ static void http_client_init_parser(struct http_parser *parser,
 static void http_report_null(struct http_request *req)
 {
 	if (req->internal.response.cb) {
-		NET_DBG("Calling callback for Final Data"
+		LOG_DEBUG("Calling callback for Final Data"
 			"(NULL HTTP response)");
 
 		/* Status code 0 representing a null response */
@@ -442,7 +450,7 @@ static void http_report_null(struct http_request *req)
 static void http_report_complete(struct http_request *req)
 {
 	if (req->internal.response.cb) {
-		NET_DBG("Calling callback for %zd len data", req->internal.response.data_len);
+		LOG_DEBUG("Calling callback for %zd len data", req->internal.response.data_len);
 		req->internal.response.cb(&req->internal.response, HTTP_DATA_FINAL,
 					  req->internal.user_data);
 	}
@@ -452,7 +460,7 @@ static void http_report_complete(struct http_request *req)
 static void http_report_progress(struct http_request *req)
 {
 	if (req->internal.response.cb) {
-		NET_DBG("Calling callback for partitioned %zd len data",
+		LOG_DEBUG("Calling callback for partitioned %zd len data",
 			req->internal.response.data_len);
 
 		req->internal.response.cb(&req->internal.response, HTTP_DATA_MORE,
@@ -478,7 +486,7 @@ static int http_wait_data(int sock, struct http_request *req, const k_timepoint_
 
 		ret = zsock_poll(fds, nfds, req_timeout_ms);
 		if (ret == 0) {
-			LOG_DBG("Timeout");
+			LOG_DEBUG("Timeout");
 			ret = -ETIMEDOUT;
 			goto error;
 		} else if (ret < 0) {
@@ -533,7 +541,7 @@ static int http_wait_data(int sock, struct http_request *req, const k_timepoint_
 	return total_received;
 
 closed:
-	LOG_DBG("Connection closed");
+	LOG_DEBUG("Connection closed");
 
 	/* If connection was closed with no data sent, this is a NULL response, and is a special
 	 * case valid response.
@@ -549,7 +557,7 @@ closed:
 	ret = -ECONNRESET;
 
 error:
-	LOG_DBG("Connection error (%d)", ret);
+	LOG_DEBUG("Connection error (%d)", ret);
 	return ret;
 }
 
@@ -742,7 +750,7 @@ int http_client_req(int sock, struct http_request *req,
 		total_sent += ret;
 	}
 
-	NET_DBG("Sent %d bytes", total_sent);
+	LOG_DEBUG("Sent %d bytes", total_sent);
 
 	http_client_init_parser(&req->internal.parser,
 				&req->internal.parser_settings);
@@ -750,12 +758,12 @@ int http_client_req(int sock, struct http_request *req,
 	/* Request is sent, now wait data to be received */
 	total_recv = http_wait_data(sock, req, req_end_timepoint);
 	if (total_recv < 0) {
-		NET_DBG("Wait data failure (%d)", total_recv);
+		LOG_DEBUG("Wait data failure (%d)", total_recv);
 		ret = total_recv;
 		goto out;
 	}
 
-	NET_DBG("Received %d bytes", total_recv);
+	LOG_DEBUG("Received %d bytes", total_recv);
 
 	return total_sent;
 

@@ -32,7 +32,6 @@
 
 #include <zephyr/sys/__assert.h>
 #include "http_parser_url.h"
-// #include <zephyr/toolchain.h>
 
 
 #ifndef BIT_AT
