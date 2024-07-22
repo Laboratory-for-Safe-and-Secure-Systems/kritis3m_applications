@@ -2,6 +2,7 @@
 option(ENABLE_TCP_ECHO_SERVER "Enable TCP echo server" ON)
 option(ENABLE_TCP_CLIENT_STDIN_BRIDGE "Enable TCP client stdin bridge" ON)
 option(ENABLE_TLS_PROXY "Enable TLS proxy" ON)
+option(ENABLE_HTTP "Enable HTTP" ON)
 
 # Common files
 add_subdirectory(common)
@@ -20,3 +21,10 @@ endif()
 if (ENABLE_TLS_PROXY)
         add_subdirectory(tls_proxy)
 endif()
+
+# Enable HTTP
+if (ENABLE_HTTP)
+        add_subdirectory(http)
+endif()
+
+
