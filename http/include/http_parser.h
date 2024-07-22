@@ -20,8 +20,8 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
  * IN THE SOFTWARE.
  */
-#ifndef ZEPHYR_INCLUDE_NET_HTTP_PARSER_H_
-#define ZEPHYR_INCLUDE_NET_HTTP_PARSER_H_
+#ifndef __HTTP_PARSER_H__
+#define __HTTP_PARSER_H__ 
 
 /* Also update SONAME in the Makefile whenever you change these. */
 #define HTTP_PARSER_VERSION_MAJOR 2
@@ -45,9 +45,8 @@ typedef unsigned __int64 uint64_t;
 #include <zephyr/types.h>
 #include <stddef.h>
 #endif
-#include <zephyr/net/http/method.h>
-#include <zephyr/net/http/parser_state.h>
-#include <zephyr/net/http/parser_url.h>
+#include "http_parser_state.h"
+#include "http_parser_url.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -258,4 +257,4 @@ int http_body_is_final(const struct http_parser *parser);
 #ifdef __cplusplus
 }
 #endif
-#endif
+#endif //__HTTP_PARSER_H__

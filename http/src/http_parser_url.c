@@ -31,7 +31,7 @@
 // #include <zephyr/net/http/parser_url.h>
 
 #include <zephyr/sys/__assert.h>
-#include "parser_url.h"
+#include "http_parser_url.h"
 // #include <zephyr/toolchain.h>
 
 

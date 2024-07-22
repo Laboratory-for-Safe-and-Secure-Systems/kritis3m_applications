@@ -20,8 +20,8 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
  * IN THE SOFTWARE.
  */
-#ifndef ZEPHYR_INCLUDE_NET_HTTP_PARSER_STATE_H_
-#define ZEPHYR_INCLUDE_NET_HTTP_PARSER_STATE_H_
+#ifndef __HTTP_PARSER_STATE_H__ 
+#define __HTTP_PARSER_STATE_H__
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -98,4 +98,4 @@ enum state {
 #ifdef __cplusplus
 }
 #endif
-#endif
+#endif //__PARSER_STATE_H__

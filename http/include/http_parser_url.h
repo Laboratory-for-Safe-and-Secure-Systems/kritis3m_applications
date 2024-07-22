@@ -20,13 +20,17 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
  * IN THE SOFTWARE.
  */
-#ifndef ZEPHYR_INCLUDE_NET_HTTP_PARSER_URL_H_
-#define ZEPHYR_INCLUDE_NET_HTTP_PARSER_URL_H_
+#ifndef __HTTP_PARSER_URL_H__ 
+#define __HTTP_PARSER_URL_H__
 
 #include <sys/types.h>
-#include <zephyr/types.h>
 #include <stddef.h>
-#include <zephyr/net/http/parser_state.h>
+
+#if defined (__ZEPYHR__)
+#include <zephyr/types.h>
+#endif 
+
+#include "http_parser_state.h" 
 
 #ifdef __cplusplus
 extern "C" {
@@ -74,4 +78,4 @@ int http_parser_parse_url(const char *buf, size_t buflen,
 #ifdef __cplusplus
 }
 #endif
-#endif
+#endif //__HTTP_PARSER_URL_H__
