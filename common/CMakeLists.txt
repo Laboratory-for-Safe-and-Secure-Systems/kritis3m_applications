@@ -10,6 +10,3 @@ add_library(kritis3m_applications_common STATIC
 target_include_directories(kritis3m_applications_common PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
-
-# Link the library to the main target
-target_link_libraries(${TARGET} PRIVATE kritis3m_applications_common)
