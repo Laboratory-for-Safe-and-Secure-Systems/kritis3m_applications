@@ -19,6 +19,3 @@ target_include_directories(kritis3m_applications_proxy PRIVATE
 
 # Link the common KRITIS3M application library
 target_link_libraries(kritis3m_applications_proxy PRIVATE kritis3m_applications_common)
-
-# Link the library to the main target
-target_link_libraries(${TARGET} PRIVATE kritis3m_applications_proxy)
