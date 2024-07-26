@@ -87,6 +87,7 @@ enum Kritis3mProto {
 enum Kritis3mHelperApplicationtype {
     ECHO_TCP_SERVER = 0,
     ECHO_UDP_SERVER = 1,
+    STD_IN_BRIDGE = 2
 };
 
 struct Kritis3mHelperApplication{

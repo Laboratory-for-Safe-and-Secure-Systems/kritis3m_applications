@@ -6,6 +6,9 @@ add_library(kritis3m_service STATIC
         ${CMAKE_CURRENT_SOURCE_DIR}/src/http_parser.c
         ${CMAKE_CURRENT_SOURCE_DIR}/src/cJSON.c
         ${CMAKE_CURRENT_SOURCE_DIR}/src/cJSON_Utils.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/kritis3m_scale_service.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/kritis3m_application_manager.c
+
 )
 
 # Public include directories

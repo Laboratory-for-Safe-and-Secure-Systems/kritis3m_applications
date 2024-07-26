@@ -23,12 +23,13 @@
 /********************************************
  * 			    ZEPHYR				  	    *
  * *****************************************/
-#if defined (__ZEPYHR__)
+#if defined(__ZEPYHR__)
 #include <zephyr/kernel.h>
-#endif 
+#endif
 
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <sys/poll.h>
 
 
 #include "http_client.h"
@@ -39,30 +40,45 @@ LOG_MODULE_CREATE(http);
 #define HTTP_CONTENT_LEN_SIZE 11
 #define MAX_SEND_BUF_LEN 192
 
-static int sendall(int sock, const void *buf, size_t len,
-			const k_timepoint_t req_end_timepoint)
+/***
+ * This function can be used to send data (http fraction or full http request) to an endpoint
+ * @param req_end_timepoint - is the timeout value in ms used in poll()
+ */
+static int sendall(int sock,
+				   const void *buf,
+				   size_t len,
+				   const k_timepoint_t req_end_timepoint)
 {
-	while (len) {
-		ssize_t out_len = zsock_send(sock, buf, len, 0);
+	while (len)
+	{
+		ssize_t out_len = send(sock, buf, len, 0);
 
-		if ((out_len == 0) || (out_len < 0 && errno == EAGAIN)) {
-			struct zsock_pollfd pfd;
+		if ((out_len == 0) || (out_len < 0 && errno == EAGAIN))
+		{
+			struct pollfd pfd;
 			int pollres;
 			k_ticks_t req_timeout_ticks =
 				sys_timepoint_timeout(req_end_timepoint).ticks;
 			int req_timeout_ms = k_ticks_to_ms_floor32(req_timeout_ticks);
 
 			pfd.fd = sock;
-			pfd.events = ZSOCK_POLLOUT;
-			pollres = zsock_poll(&pfd, 1, req_timeout_ms);
-			if (pollres == 0) {
+			pfd.events = POLLOUT;
+			pollres = poll(&pfd, 1, req_timeout_ms);
+			if (pollres == 0)
+			{
 				return -ETIMEDOUT;
-			} else if (pollres > 0) {
+			}
+			else if (pollres > 0)
+			{
 				continue;
-			} else {
+			}
+			else
+			{
 				return -errno;
 			}
-		} else if (out_len < 0) {
+		}
+		else if (out_len < 0)
+		{
 			return -errno;
 		}
 
@@ -74,9 +90,9 @@ static int sendall(int sock, const void *buf, size_t len,
 }
 
 static int http_send_data(int sock, char *send_buf,
-			  size_t send_buf_max_len, size_t *send_buf_pos,
-			  const k_timepoint_t req_end_timepoint,
-			  ...)
+						  size_t send_buf_max_len, size_t *send_buf_pos,
+						  const k_timepoint_t req_end_timepoint,
+						  ...)
 {
 	const char *data;
 	va_list va;
@@ -88,19 +104,22 @@ static int http_send_data(int sock, char *send_buf,
 
 	data = va_arg(va, const char *);
 
-	while (data) {
+	while (data)
+	{
 		end_of_data = 0;
 
-		do {
+		do
+		{
 			int to_be_copied;
 
 			remaining_len = strlen(data + end_of_data);
 			to_be_copied = send_buf_max_len - end_of_send;
 
-			if (remaining_len > to_be_copied) {
+			if (remaining_len > to_be_copied)
+			{
 				strncpy(send_buf + end_of_send,
-					data + end_of_data,
-					to_be_copied);
+						data + end_of_data,
+						to_be_copied);
 
 				end_of_send += to_be_copied;
 				end_of_data += to_be_copied;
@@ -109,18 +128,21 @@ static int http_send_data(int sock, char *send_buf,
 				// 		"Data to send");
 
 				ret = sendall(sock, send_buf, end_of_send, req_end_timepoint);
-				if (ret < 0) {
+				if (ret < 0)
+				{
 					LOG_DEBUG("Cannot send %d bytes (%d)",
-						end_of_send, ret);
+							  end_of_send, ret);
 					goto err;
 				}
 				sent += end_of_send;
 				end_of_send = 0;
 				continue;
-			} else {
+			}
+			else
+			{
 				strncpy(send_buf + end_of_send,
-					data + end_of_data,
-					remaining_len);
+						data + end_of_data,
+						remaining_len);
 				end_of_send += remaining_len;
 				remaining_len = 0;
 			}
@@ -131,9 +153,10 @@ static int http_send_data(int sock, char *send_buf,
 
 	va_end(va);
 
-	if (end_of_send > (int)send_buf_max_len) {
+	if (end_of_send > (int)send_buf_max_len)
+	{
 		LOG_ERROR("Sending overflow (%d > %zd)", end_of_send,
-			send_buf_max_len);
+				  send_buf_max_len);
 		return -EMSGSIZE;
 	}
 
@@ -148,14 +171,15 @@ err:
 }
 
 static int http_flush_data(int sock, const char *send_buf, size_t send_buf_len,
-				const k_timepoint_t req_end_timepoint)
+						   const k_timepoint_t req_end_timepoint)
 {
 	int ret;
 
 	// LOG_HEXDUMP_DBG(send_buf, send_buf_len, "Data to send");
 
 	ret = sendall(sock, send_buf, send_buf_len, req_end_timepoint);
-	if (ret < 0) {
+	if (ret < 0)
+	{
 		return ret;
 	}
 
@@ -164,14 +188,16 @@ static int http_flush_data(int sock, const char *send_buf, size_t send_buf_len,
 
 static void print_header_field(size_t len, const char *str)
 {
-	if (IS_ENABLED(CONFIG_NET_HTTP_LOG_LEVEL_DBG)) {
+	if (IS_ENABLED(CONFIG_NET_HTTP_LOG_LEVEL_DBG))
+	{
 #define MAX_OUTPUT_LEN 128
 		char output[MAX_OUTPUT_LEN];
 
 		/* The value of len does not count \0 so we need to increase it
 		 * by one.
 		 */
-		if ((len + 1) > sizeof(output)) {
+		if ((len + 1) > sizeof(output))
+		{
 			len = sizeof(output) - 1;
 		}
 
@@ -184,12 +210,13 @@ static void print_header_field(size_t len, const char *str)
 static int on_url(struct http_parser *parser, const char *at, size_t length)
 {
 	struct http_request *req = CONTAINER_OF(parser,
-						struct http_request,
-						internal.parser);
+											struct http_request,
+											internal.parser);
 	print_header_field(length, at);
 
 	if (req->internal.response.http_cb &&
-	    req->internal.response.http_cb->on_url) {
+		req->internal.response.http_cb->on_url)
+	{
 		req->internal.response.http_cb->on_url(parser, at, length);
 	}
 
@@ -199,8 +226,8 @@ static int on_url(struct http_parser *parser, const char *at, size_t length)
 static int on_status(struct http_parser *parser, const char *at, size_t length)
 {
 	struct http_request *req = CONTAINER_OF(parser,
-						struct http_request,
-						internal.parser);
+											struct http_request,
+											internal.parser);
 	uint16_t len;
 
 	len = MIN(length, sizeof(req->internal.response.http_status) - 1);
@@ -210,10 +237,11 @@ static int on_status(struct http_parser *parser, const char *at, size_t length)
 		(uint16_t)parser->status_code;
 
 	LOG_DEBUG("HTTP response status %d %s", parser->status_code,
-		req->internal.response.http_status);
+			  req->internal.response.http_status);
 
 	if (req->internal.response.http_cb &&
-	    req->internal.response.http_cb->on_status) {
+		req->internal.response.http_cb->on_status)
+	{
 		req->internal.response.http_cb->on_status(parser, at, length);
 	}
 
@@ -221,49 +249,54 @@ static int on_status(struct http_parser *parser, const char *at, size_t length)
 }
 
 static int on_header_field(struct http_parser *parser, const char *at,
-			   size_t length)
+						   size_t length)
 {
 	struct http_request *req = CONTAINER_OF(parser,
-						struct http_request,
-						internal.parser);
+											struct http_request,
+											internal.parser);
 	const char *content_len = "Content-Length";
 	uint16_t len;
 
 	len = strlen(content_len);
-	if (length >= len && strncasecmp(at, content_len, len) == 0) {
+	if (length >= len && strncasecmp(at, content_len, len) == 0)
+	{
 		req->internal.response.cl_present = true;
 	}
 
 	print_header_field(length, at);
 
 	if (req->internal.response.http_cb &&
-	    req->internal.response.http_cb->on_header_field) {
+		req->internal.response.http_cb->on_header_field)
+	{
 		req->internal.response.http_cb->on_header_field(parser, at,
-								length);
+														length);
 	}
 
 	return 0;
 }
 
-#define MAX_NUM_DIGITS	16
+#define MAX_NUM_DIGITS 16
 
 static int on_header_value(struct http_parser *parser, const char *at,
-			   size_t length)
+						   size_t length)
 {
 	struct http_request *req = CONTAINER_OF(parser,
-						struct http_request,
-						internal.parser);
+											struct http_request,
+											internal.parser);
 	char str[MAX_NUM_DIGITS];
 
-	if (req->internal.response.cl_present) {
-		if (length <= MAX_NUM_DIGITS - 1) {
+	if (req->internal.response.cl_present)
+	{
+		if (length <= MAX_NUM_DIGITS - 1)
+		{
 			long int num;
 
 			memcpy(str, at, length);
 			str[length] = 0;
 
 			num = strtol(str, NULL, 10);
-			if (num == LONG_MIN || num == LONG_MAX) {
+			if (num == LONG_MIN || num == LONG_MAX)
+			{
 				return -EINVAL;
 			}
 
@@ -274,9 +307,10 @@ static int on_header_value(struct http_parser *parser, const char *at,
 	}
 
 	if (req->internal.response.http_cb &&
-	    req->internal.response.http_cb->on_header_value) {
+		req->internal.response.http_cb->on_header_value)
+	{
 		req->internal.response.http_cb->on_header_value(parser, at,
-								length);
+														length);
 	}
 
 	print_header_field(length, at);
@@ -287,28 +321,30 @@ static int on_header_value(struct http_parser *parser, const char *at,
 static int on_body(struct http_parser *parser, const char *at, size_t length)
 {
 	struct http_request *req = CONTAINER_OF(parser,
-						struct http_request,
-						internal.parser);
+											struct http_request,
+											internal.parser);
 
 	req->internal.response.body_found = 1;
 	req->internal.response.processed += length;
 
 	LOG_DEBUG("Processed %zd length %zd", req->internal.response.processed,
-		length);
+			  length);
 
 	if (req->internal.response.http_cb &&
-	    req->internal.response.http_cb->on_body) {
+		req->internal.response.http_cb->on_body)
+	{
 		req->internal.response.http_cb->on_body(parser, at, length);
 	}
 
 	/* Reset the body_frag_start pointer for each fragment. */
-	if (!req->internal.response.body_frag_start) {
+	if (!req->internal.response.body_frag_start)
+	{
 		req->internal.response.body_frag_start = (uint8_t *)at;
 	}
 
 	/* Calculate the length of the body contained in the recv_buf */
 	req->internal.response.body_frag_len = req->internal.response.data_len -
-		(req->internal.response.body_frag_start - req->internal.response.recv_buf);
+										   (req->internal.response.body_frag_start - req->internal.response.recv_buf);
 
 	return 0;
 }
@@ -316,21 +352,24 @@ static int on_body(struct http_parser *parser, const char *at, size_t length)
 static int on_headers_complete(struct http_parser *parser)
 {
 	struct http_request *req = CONTAINER_OF(parser,
-						struct http_request,
-						internal.parser);
+											struct http_request,
+											internal.parser);
 
 	if (req->internal.response.http_cb &&
-	    req->internal.response.http_cb->on_headers_complete) {
+		req->internal.response.http_cb->on_headers_complete)
+	{
 		req->internal.response.http_cb->on_headers_complete(parser);
 	}
 
-	if (parser->status_code >= 500 && parser->status_code < 600) {
+	if (parser->status_code >= 500 && parser->status_code < 600)
+	{
 		LOG_DEBUG("Status %d, skipping body", parser->status_code);
 		return 1;
 	}
 
 	if ((req->method == HTTP_HEAD || req->method == HTTP_OPTIONS) &&
-	    req->internal.response.content_length > 0) {
+		req->internal.response.content_length > 0)
+	{
 		LOG_DEBUG("No body expected");
 		return 1;
 	}
@@ -343,16 +382,17 @@ static int on_headers_complete(struct http_parser *parser)
 static int on_message_begin(struct http_parser *parser)
 {
 	struct http_request *req = CONTAINER_OF(parser,
-						struct http_request,
-						internal.parser);
+											struct http_request,
+											internal.parser);
 
 	if (req->internal.response.http_cb &&
-	    req->internal.response.http_cb->on_message_begin) {
+		req->internal.response.http_cb->on_message_begin)
+	{
 		req->internal.response.http_cb->on_message_begin(parser);
 	}
 
 	LOG_DEBUG("-- HTTP %s response (headers) --",
-		http_method_str(req->method));
+			  http_method_str(req->method));
 
 	return 0;
 }
@@ -360,16 +400,17 @@ static int on_message_begin(struct http_parser *parser)
 static int on_message_complete(struct http_parser *parser)
 {
 	struct http_request *req = CONTAINER_OF(parser,
-						struct http_request,
-						internal.parser);
+											struct http_request,
+											internal.parser);
 
 	if (req->internal.response.http_cb &&
-	    req->internal.response.http_cb->on_message_complete) {
+		req->internal.response.http_cb->on_message_complete)
+	{
 		req->internal.response.http_cb->on_message_complete(parser);
 	}
 
 	LOG_DEBUG("-- HTTP %s response (complete) --",
-		http_method_str(req->method));
+			  http_method_str(req->method));
 
 	req->internal.response.message_complete = 1;
 
@@ -379,11 +420,12 @@ static int on_message_complete(struct http_parser *parser)
 static int on_chunk_header(struct http_parser *parser)
 {
 	struct http_request *req = CONTAINER_OF(parser,
-						struct http_request,
-						internal.parser);
+											struct http_request,
+											internal.parser);
 
 	if (req->internal.response.http_cb &&
-	    req->internal.response.http_cb->on_chunk_header) {
+		req->internal.response.http_cb->on_chunk_header)
+	{
 		req->internal.response.http_cb->on_chunk_header(parser);
 	}
 
@@ -393,11 +435,12 @@ static int on_chunk_header(struct http_parser *parser)
 static int on_chunk_complete(struct http_parser *parser)
 {
 	struct http_request *req = CONTAINER_OF(parser,
-						struct http_request,
-						internal.parser);
+											struct http_request,
+											internal.parser);
 
 	if (req->internal.response.http_cb &&
-	    req->internal.response.http_cb->on_chunk_complete) {
+		req->internal.response.http_cb->on_chunk_complete)
+	{
 		req->internal.response.http_cb->on_chunk_complete(parser);
 	}
 
@@ -405,7 +448,7 @@ static int on_chunk_complete(struct http_parser *parser)
 }
 
 static void http_client_init_parser(struct http_parser *parser,
-				    struct http_parser_settings *settings)
+									struct http_parser_settings *settings)
 {
 	http_parser_init(parser, HTTP_RESPONSE);
 
@@ -427,9 +470,10 @@ static void http_client_init_parser(struct http_parser *parser,
  */
 static void http_report_null(struct http_request *req)
 {
-	if (req->internal.response.cb) {
+	if (req->internal.response.cb)
+	{
 		LOG_DEBUG("Calling callback for Final Data"
-			"(NULL HTTP response)");
+				  "(NULL HTTP response)");
 
 		/* Status code 0 representing a null response */
 		req->internal.response.http_status_code = 0;
@@ -442,29 +486,31 @@ static void http_report_null(struct http_request *req)
 		memset(req->internal.response.http_status, 0, HTTP_STATUS_STR_SIZE);
 
 		req->internal.response.cb(&req->internal.response, HTTP_DATA_FINAL,
-					  req->internal.user_data);
+								  req->internal.user_data);
 	}
 }
 
 /* Report a completed HTTP transaction (with no error) to the caller */
 static void http_report_complete(struct http_request *req)
 {
-	if (req->internal.response.cb) {
+	if (req->internal.response.cb)
+	{
 		LOG_DEBUG("Calling callback for %zd len data", req->internal.response.data_len);
 		req->internal.response.cb(&req->internal.response, HTTP_DATA_FINAL,
-					  req->internal.user_data);
+								  req->internal.user_data);
 	}
 }
 
 /* Report that some data has been received, but the HTTP transaction is still ongoing. */
 static void http_report_progress(struct http_request *req)
 {
-	if (req->internal.response.cb) {
+	if (req->internal.response.cb)
+	{
 		LOG_DEBUG("Calling callback for partitioned %zd len data",
-			req->internal.response.data_len);
+				  req->internal.response.data_len);
 
 		req->internal.response.cb(&req->internal.response, HTTP_DATA_MORE,
-					  req->internal.user_data);
+								  req->internal.user_data);
 	}
 }
 
@@ -479,36 +525,50 @@ static int http_wait_data(int sock, struct http_request *req, const k_timepoint_
 	fds[0].fd = sock;
 	fds[0].events = ZSOCK_POLLIN;
 
-	do {
+	do
+	{
 		k_ticks_t req_timeout_ticks =
 			sys_timepoint_timeout(req_end_timepoint).ticks;
 		int req_timeout_ms = k_ticks_to_ms_floor32(req_timeout_ticks);
 
 		ret = zsock_poll(fds, nfds, req_timeout_ms);
-		if (ret == 0) {
+		if (ret == 0)
+		{
 			LOG_DEBUG("Timeout");
 			ret = -ETIMEDOUT;
 			goto error;
-		} else if (ret < 0) {
+		}
+		else if (ret < 0)
+		{
 			ret = -errno;
 			goto error;
 		}
-		if (fds[0].revents & (ZSOCK_POLLERR | ZSOCK_POLLNVAL)) {
+		if (fds[0].revents & (ZSOCK_POLLERR | ZSOCK_POLLNVAL))
+		{
 			ret = -errno;
 			goto error;
-		} else if (fds[0].revents & ZSOCK_POLLHUP) {
+		}
+		else if (fds[0].revents & ZSOCK_POLLHUP)
+		{
 			/* Connection closed */
 			goto closed;
-		} else if (fds[0].revents & ZSOCK_POLLIN) {
+		}
+		else if (fds[0].revents & ZSOCK_POLLIN)
+		{
 			received = zsock_recv(sock, req->internal.response.recv_buf + offset,
-					      req->internal.response.recv_buf_len - offset, 0);
-			if (received == 0) {
+								  req->internal.response.recv_buf_len - offset, 0);
+			if (received == 0)
+			{
 				/* Connection closed */
 				goto closed;
-			} else if (received < 0) {
+			}
+			else if (received < 0)
+			{
 				ret = -errno;
 				goto error;
-			} else {
+			}
+			else
+			{
 				req->internal.response.data_len += received;
 
 				(void)http_parser_execute(
@@ -519,14 +579,18 @@ static int http_wait_data(int sock, struct http_request *req, const k_timepoint_
 			total_received += received;
 			offset += received;
 
-			if (offset >= req->internal.response.recv_buf_len) {
+			if (offset >= req->internal.response.recv_buf_len)
+			{
 				offset = 0;
 			}
 
-			if (req->internal.response.message_complete) {
+			if (req->internal.response.message_complete)
+			{
 				http_report_complete(req);
 				break;
-			} else if (offset == 0) {
+			}
+			else if (offset == 0)
+			{
 				http_report_progress(req);
 
 				/* Re-use the result buffer and start to fill it again */
@@ -546,7 +610,8 @@ closed:
 	/* If connection was closed with no data sent, this is a NULL response, and is a special
 	 * case valid response.
 	 */
-	if (total_received == 0) {
+	if (total_received == 0)
+	{
 		http_report_null(req);
 		return total_received;
 	}
@@ -562,7 +627,7 @@ error:
 }
 
 int http_client_req(int sock, struct http_request *req,
-		    int32_t timeout, void *user_data)
+					int32_t timeout, void *user_data)
 {
 	/* Utilize the network usage by sending data in bigger blocks */
 	char send_buf[MAX_SEND_BUF_LEN];
@@ -575,7 +640,8 @@ int http_client_req(int sock, struct http_request *req,
 	k_timepoint_t req_end_timepoint = sys_timepoint_calc(req_timeout);
 
 	if (sock < 0 || req == NULL || req->response == NULL ||
-	    req->recv_buf == NULL || req->recv_buf_len == 0) {
+		req->recv_buf == NULL || req->recv_buf_len == 0)
+	{
 		return -EINVAL;
 	}
 
@@ -591,40 +657,48 @@ int http_client_req(int sock, struct http_request *req,
 	method = http_method_str(req->method);
 
 	ret = http_send_data(sock, send_buf, send_buf_max_len, &send_buf_pos,
-				req_end_timepoint, method,
-				" ", req->url, " ", req->protocol,
-				HTTP_CRLF, NULL);
-	if (ret < 0) {
+						 req_end_timepoint, method,
+						 " ", req->url, " ", req->protocol,
+						 HTTP_CRLF, NULL);
+	if (ret < 0)
+	{
 		goto out;
 	}
 
 	total_sent += ret;
 
-	if (req->port) {
+	if (req->port)
+	{
 		ret = http_send_data(sock, send_buf, send_buf_max_len,
-					&send_buf_pos, req_end_timepoint, "Host", ": ", req->host,
-					":", req->port, HTTP_CRLF, NULL);
+							 &send_buf_pos, req_end_timepoint, "Host", ": ", req->host,
+							 ":", req->port, HTTP_CRLF, NULL);
 
-		if (ret < 0) {
+		if (ret < 0)
+		{
 			goto out;
 		}
 
 		total_sent += ret;
-	} else {
+	}
+	else
+	{
 		ret = http_send_data(sock, send_buf, send_buf_max_len,
-				     &send_buf_pos, req_end_timepoint, "Host", ": ", req->host,
-				     HTTP_CRLF, NULL);
+							 &send_buf_pos, req_end_timepoint, "Host", ": ", req->host,
+							 HTTP_CRLF, NULL);
 
-		if (ret < 0) {
+		if (ret < 0)
+		{
 			goto out;
 		}
 
 		total_sent += ret;
 	}
 
-	if (req->optional_headers_cb) {
+	if (req->optional_headers_cb)
+	{
 		ret = http_flush_data(sock, send_buf, send_buf_pos, req_end_timepoint);
-		if (ret < 0) {
+		if (ret < 0)
+		{
 			goto out;
 		}
 
@@ -632,18 +706,23 @@ int http_client_req(int sock, struct http_request *req,
 		total_sent += ret;
 
 		ret = req->optional_headers_cb(sock, req, user_data);
-		if (ret < 0) {
+		if (ret < 0)
+		{
 			goto out;
 		}
 
 		total_sent += ret;
-	} else {
+	}
+	else
+	{
 		for (i = 0; req->optional_headers && req->optional_headers[i];
-		     i++) {
+			 i++)
+		{
 			ret = http_send_data(sock, send_buf, send_buf_max_len,
-					     &send_buf_pos, req_end_timepoint,
-					     req->optional_headers[i], NULL);
-			if (ret < 0) {
+								 &send_buf_pos, req_end_timepoint,
+								 req->optional_headers[i], NULL);
+			if (ret < 0)
+			{
 				goto out;
 			}
 
@@ -651,99 +730,123 @@ int http_client_req(int sock, struct http_request *req,
 		}
 	}
 
-	for (i = 0; req->header_fields && req->header_fields[i]; i++) {
+	for (i = 0; req->header_fields && req->header_fields[i]; i++)
+	{
 		ret = http_send_data(sock, send_buf, send_buf_max_len,
-				     &send_buf_pos, req_end_timepoint, req->header_fields[i],
-				     NULL);
-		if (ret < 0) {
+							 &send_buf_pos, req_end_timepoint, req->header_fields[i],
+							 NULL);
+		if (ret < 0)
+		{
 			goto out;
 		}
 
 		total_sent += ret;
 	}
 
-	if (req->content_type_value) {
+	if (req->content_type_value)
+	{
 		ret = http_send_data(sock, send_buf, send_buf_max_len,
-				     &send_buf_pos, req_end_timepoint, "Content-Type", ": ",
-				     req->content_type_value, HTTP_CRLF, NULL);
-		if (ret < 0) {
+							 &send_buf_pos, req_end_timepoint, "Content-Type", ": ",
+							 req->content_type_value, HTTP_CRLF, NULL);
+		if (ret < 0)
+		{
 			goto out;
 		}
 
 		total_sent += ret;
 	}
 
-	if (req->payload || req->payload_cb) {
-		if (req->payload_len) {
+	if (req->payload || req->payload_cb)
+	{
+		if (req->payload_len)
+		{
 			char content_len_str[HTTP_CONTENT_LEN_SIZE];
 
 			ret = snprintk(content_len_str, HTTP_CONTENT_LEN_SIZE,
-				       "%zd", req->payload_len);
-			if (ret <= 0 || ret >= HTTP_CONTENT_LEN_SIZE) {
+						   "%zd", req->payload_len);
+			if (ret <= 0 || ret >= HTTP_CONTENT_LEN_SIZE)
+			{
 				ret = -ENOMEM;
 				goto out;
 			}
 
 			ret = http_send_data(sock, send_buf, send_buf_max_len,
-						&send_buf_pos, req_end_timepoint,
-						"Content-Length", ": ",
-						content_len_str, HTTP_CRLF,
-						HTTP_CRLF, NULL);
-		} else {
+								 &send_buf_pos, req_end_timepoint,
+								 "Content-Length", ": ",
+								 content_len_str, HTTP_CRLF,
+								 HTTP_CRLF, NULL);
+		}
+		else
+		{
 			ret = http_send_data(sock, send_buf, send_buf_max_len,
-				     &send_buf_pos, req_end_timepoint, HTTP_CRLF, NULL);
+								 &send_buf_pos, req_end_timepoint, HTTP_CRLF, NULL);
 		}
 
-		if (ret < 0) {
+		if (ret < 0)
+		{
 			goto out;
 		}
 
 		total_sent += ret;
 
 		ret = http_flush_data(sock, send_buf, send_buf_pos, req_end_timepoint);
-		if (ret < 0) {
+		if (ret < 0)
+		{
 			goto out;
 		}
 
 		send_buf_pos = 0;
 		total_sent += ret;
 
-		if (req->payload_cb) {
+		if (req->payload_cb)
+		{
 			ret = req->payload_cb(sock, req, user_data);
-			if (ret < 0) {
+			if (ret < 0)
+			{
 				goto out;
 			}
 
 			total_sent += ret;
-		} else {
+		}
+		else
+		{
 			uint32_t length;
 
-			if (req->payload_len == 0) {
+			if (req->payload_len == 0)
+			{
 				length = strlen(req->payload);
-			} else {
+			}
+			else
+			{
 				length = req->payload_len;
 			}
 
 			ret = sendall(sock, req->payload, length, req_end_timepoint);
-			if (ret < 0) {
+			if (ret < 0)
+			{
 				goto out;
 			}
 
 			total_sent += length;
 		}
-	} else {
+	}
+	else
+	{
 		ret = http_send_data(sock, send_buf, send_buf_max_len,
-				     &send_buf_pos, req_end_timepoint, HTTP_CRLF, NULL);
-		if (ret < 0) {
+							 &send_buf_pos, req_end_timepoint, HTTP_CRLF, NULL);
+		if (ret < 0)
+		{
 			goto out;
 		}
 
 		total_sent += ret;
 	}
 
-	if (send_buf_pos > 0) {
+	if (send_buf_pos > 0)
+	{
 		ret = http_flush_data(sock, send_buf, send_buf_pos, req_end_timepoint);
-		if (ret < 0) {
+		if (ret < 0)
+		{
 			goto out;
 		}
 
@@ -753,11 +856,12 @@ int http_client_req(int sock, struct http_request *req,
 	LOG_DEBUG("Sent %d bytes", total_sent);
 
 	http_client_init_parser(&req->internal.parser,
-				&req->internal.parser_settings);
+							&req->internal.parser_settings);
 
 	/* Request is sent, now wait data to be received */
 	total_recv = http_wait_data(sock, req, req_end_timepoint);
-	if (total_recv < 0) {
+	if (total_recv < 0)
+	{
 		LOG_DEBUG("Wait data failure (%d)", total_recv);
 		ret = total_recv;
 		goto out;
