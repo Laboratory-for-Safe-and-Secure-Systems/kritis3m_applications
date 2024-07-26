@@ -90,6 +90,11 @@ enum Kritis3mHelperApplicationtype {
     STD_IN_BRIDGE = 2
 };
 
+enum ApplicationStatus{
+    APK_ERR = -1,
+    APK_OK =1,
+};
+
 struct Kritis3mHelperApplication{
     char listening_ip_port[IPv4_PORT_LEN];
     Kritis3mHelperApplicationtype application_type;
