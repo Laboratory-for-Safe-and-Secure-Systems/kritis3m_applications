@@ -1,8 +1,13 @@
 #ifndef KRITIS3M_APPLICATION_MANAGER_H
 #define KRITIS3M_APPLICATION_MANAGER_H
-#include "poll_set.h"
 
 #include "kritis3m_configuration.h"
+
+#include "tls_proxy.h"
+#include "tcp_echo_server.h"
+#include "poll_set.h"
+
+
 
 struct application_manager
 {

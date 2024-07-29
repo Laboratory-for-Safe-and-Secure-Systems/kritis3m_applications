@@ -3,7 +3,6 @@
 
 #include <stdint.h>
 #include <time.h>
-#include <netinet/in.h>
 
 //lengths 
 #define IPv4_LEN 16

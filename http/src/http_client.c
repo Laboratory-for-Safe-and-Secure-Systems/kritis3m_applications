@@ -29,7 +29,7 @@
 
 #include <netinet/in.h>
 #include <sys/socket.h>
-#include <sys/poll.h>
+#include <poll.h>
 
 
 #include "http_client.h"

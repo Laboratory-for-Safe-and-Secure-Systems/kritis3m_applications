@@ -17,6 +17,9 @@ target_include_directories(kritis3m_service PUBLIC
 )
 
 # Link the common KRITIS3M application library
+# target_link_libraries(kritis3m_service PRIVATE kritis3m_applications_tcp_client_stdin_bridge)
+target_link_libraries(kritis3m_service PRIVATE kritis3m_applications_tcp_echo_server)
+target_link_libraries(kritis3m_service PRIVATE kritis3m_applications_proxy)
 target_link_libraries(kritis3m_service PRIVATE kritis3m_applications_common)
 
 # Link the library to the main target
