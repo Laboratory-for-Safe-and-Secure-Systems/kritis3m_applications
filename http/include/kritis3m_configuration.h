@@ -2,6 +2,8 @@
 #define KRITIS3M_CONFIGURATION_H
 
 #include <stdint.h>
+#include "asl.h"
+#include <stdbool.h>
 #include <time.h>
 
 //lengths 
@@ -13,6 +15,7 @@
 #define NUMBER_CRYPTOPROFILE 20 
 #define NUMBER_PROXIES 7
 #define NUMBER_STD_APK 4
+#define HARDBEAT_DEFAULT_S 24*60*60
 
 /** defining supported applications for Kritis3m Gateway
  * DTLS_R_Proxy
@@ -94,6 +97,19 @@ enum ApplicationStatus{
     APK_OK =1,
 };
 
+/****************** CRYPTO PROVILE DEFINITIONS ******************/
+enum CertificatID{
+    PQC =0,
+    HYBRID_CLASSIC = 1,
+    HYBRID_PQC = 2,
+    CLASSIC = 3
+};
+#define N_PQC "PQC"
+#define N_HB_CLASSIC "HYBRID_CLASSIC"
+#define N_HB_PQC "HYBRID_PQC"
+#define N_CLASSIC "CLASSIC"
+
+
 struct Kritis3mHelperApplication{
     char listening_ip_port[IPv4_PORT_LEN];
     Kritis3mHelperApplicationtype application_type;
@@ -103,8 +119,11 @@ struct CryptoProfile{
     char ID[ID_LEN]; // ID of the configuration
     char name[NAME_LEN]; // Name of Crypto Profile
     char description[DESCRIPTION_LEN]; // Description of the Crypto Profile. We can log that
-    char certificate_ID[ID_LEN];// certificate ID
-    int smartcard_enable;
+    int certificate_ID;// certificate ID
+    bool use_secure_element; // Use of Secure Element
+    bool secure_element_import_keys;
+    enum asl_hybrid_signature_mode hybrid_signature_mode;
+
 };
 
 // Structure for JS_ProxyApplication
