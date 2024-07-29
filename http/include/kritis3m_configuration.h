@@ -6,23 +6,23 @@
 #include <stdbool.h>
 #include <time.h>
 
-//lengths 
+// lengths
 #define IPv4_LEN 16
 #define ID_LEN 256
 #define NAME_LEN 256
 #define DESCRIPTION_LEN 256
 #define IPv4_PORT_LEN 40
-#define NUMBER_CRYPTOPROFILE 20 
+#define NUMBER_CRYPTOPROFILE 20
 #define NUMBER_PROXIES 7
 #define NUMBER_STD_APK 4
-#define HARDBEAT_DEFAULT_S 24*60*60
+#define HARDBEAT_DEFAULT_S 24 * 60 * 60
 
 /** defining supported applications for Kritis3m Gateway
  * DTLS_R_Proxy
  * DTLS_F_Proxy
  * TLS_F_PROXY
  * TLS_R_PROXY
-*/
+ */
 typedef enum Kritis3mApplicationtype Kritis3mApplicationtype;
 
 /**
@@ -68,38 +68,80 @@ enum Kritis3mHelperApplicationtype;
 typedef struct Kritis3mHelperApplication Kritis3mHelperApplication;
 struct Kritis3mHelperApplication;
 
-struct ConnectionWhitelist{
+struct ConnectionWhitelist
+{
     char allowed_client_ip_port[IPv4_PORT_LEN];
-    int num_allowed;
+    int number_connections;
 };
 
-enum Kritis3mApplicationtype {
-    DTLS_R_Proxy = 0 ,
+/**
+ * @note when extending Kritis3mApplicationtype: DTLS_R_PROXY = MIN && TLS_R_PROXY = MAX
+ * @example extension:
+ * num Kritis3mApplicationtype
+ * {
+ *     DTLS_R_Proxy = 0,
+ *     DTLS_F_Proxy = 1,
+ *     DTLS_TUNNEL = 2
+ *     TLS_F_PROXY = 3,
+ *     TLS_R_PROXY = 4
+ * };
+ *
+ */
+enum Kritis3mApplicationtype
+{
+    DTLS_R_Proxy = 0,
     DTLS_F_Proxy = 1,
     TLS_F_PROXY = 2,
-    TLS_R_PROXY= 3
+    TLS_R_PROXY = 3
 };
 
-enum Kritis3mProto {
-    DTLS= 0,
+/**
+ * @note when extending Kritis3mProto: DTLS = MIN && UDP = MAX
+ * @example extension:
+ *enum Kritis3mProto
+ *{
+ *    DTLS = 0,
+ *    TLS = 1,
+ *    TCP = 2,
+ *    MACSEC = 3,
+ *    UDP = 4
+ *};
+ */
+enum Kritis3mProto
+{
+    DTLS = 0,
     TLS = 1,
     TCP = 2,
     UDP = 3
 };
-enum Kritis3mHelperApplicationtype {
+
+/**
+* @note when extending Kritis3mHelper Applicaitontype: ECHO_TCP_SERVER = minimal number and L2_BRIDGE = maximal number
+* @example extension:
+* enum Kritis3mHelperApplicationtype {
+*    ECHO_TCP_SERVER = 0,
+*    ECHO_UDP_SERVER = 1,
+*    EXAMPLE_STANDARD_APPL = 2,
+*    L2_BRIDGE =3,
+};
+ */
+enum Kritis3mHelperApplicationtype
+{
     ECHO_TCP_SERVER = 0,
     ECHO_UDP_SERVER = 1,
-    STD_IN_BRIDGE = 2
+    L2_BRIDGE = 2,
 };
 
-enum ApplicationStatus{
+enum ApplicationStatus
+{
     APK_ERR = -1,
-    APK_OK =1,
+    APK_OK = 1,
 };
 
 /****************** CRYPTO PROVILE DEFINITIONS ******************/
-enum CertificatID{
-    PQC =0,
+enum CertificatID
+{
+    PQC = 0,
     HYBRID_CLASSIC = 1,
     HYBRID_PQC = 2,
     CLASSIC = 3
@@ -109,25 +151,26 @@ enum CertificatID{
 #define N_HB_PQC "HYBRID_PQC"
 #define N_CLASSIC "CLASSIC"
 
-
-struct Kritis3mHelperApplication{
+struct Kritis3mHelperApplication
+{
     char listening_ip_port[IPv4_PORT_LEN];
     Kritis3mHelperApplicationtype application_type;
 };
 
-struct CryptoProfile{
-    char ID[ID_LEN]; // ID of the configuration
-    char name[NAME_LEN]; // Name of Crypto Profile
+struct CryptoProfile
+{
+    char ID[ID_LEN];                   // ID of the configuration
+    char name[NAME_LEN];               // Name of Crypto Profile
     char description[DESCRIPTION_LEN]; // Description of the Crypto Profile. We can log that
-    int certificate_ID;// certificate ID
-    bool use_secure_element; // Use of Secure Element
+    int certificate_ID;                // certificate ID
+    bool use_secure_element;           // Use of Secure Element
     bool secure_element_import_keys;
     enum asl_hybrid_signature_mode hybrid_signature_mode;
-
 };
 
 // Structure for JS_ProxyApplication
-typedef struct {
+typedef struct
+{
     char listening_ip_port[IPv4_PORT_LEN];
     char target_ip_port[IPv4_PORT_LEN];
     Kritis3mApplicationtype application_type;
@@ -139,16 +182,15 @@ typedef struct {
     ConnectionWhitelist connection_whitelist;
 } ProxyApplication;
 
-
-struct SystemConfiguration{
+struct SystemConfiguration
+{
     int number_crypto_profiles;
     int hardbeat_interval_s;
-    CryptoProfile crypto_profile[NUMBER_CRYPTOPROFILE]; 
+    CryptoProfile crypto_profile[NUMBER_CRYPTOPROFILE];
     int number_proxy_applications;
     ProxyApplication proxy_applications[NUMBER_PROXIES];
     int number_standard_applications;
     Kritis3mHelperApplication standard_applications[NUMBER_STD_APK];
-
 };
 
-#endif //KRITIS3M_CONFIGURATION_H
+#endif // KRITIS3M_CONFIGURATION_H
