@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <unistd.h>
+#include <string.h>
 
 #include "proxy_management.h"
 #include "proxy_backend.h"
@@ -103,10 +104,10 @@ int tls_reverse_proxy_start(proxy_config const* config)
         }
 
         /* Create a START_REQUEST message */
-        proxy_management_message request = {
-                .type = REVERSE_PROXY_START_REQUEST,
-                .payload.reverse_proxy_config = *config,
-        };
+        proxy_management_message request;
+        memset(&request, 0, sizeof(request));
+        request.type = REVERSE_PROXY_START_REQUEST;
+        request.payload.reverse_proxy_config = *config;
 
         return tls_proxy_start_helper(&request);
 }
@@ -126,10 +127,10 @@ int tls_forward_proxy_start(proxy_config const* config)
         }
 
         /* Create a START_REQUEST message */
-        proxy_management_message request = {
-                .type = FORWARD_PROXY_START_REQUEST,
-                .payload.forward_proxy_config = *config,
-        };
+        proxy_management_message request;
+        memset(&request, 0, sizeof(request));
+        request.type = FORWARD_PROXY_START_REQUEST;
+        request.payload.forward_proxy_config = *config;
 
         return tls_proxy_start_helper(&request);
 }
