@@ -596,10 +596,10 @@ int tcp_echo_server_get_status(tcp_echo_server_status* status)
 	}
 
 	/* Create the STATUS_REQUEST message. Object is used for the response, too. */
-        tcp_echo_server_management_message message = {
-                .type = MANAGEMENT_MSG_STATUS_REQUEST,
-                .payload.status_ptr = status,
-        };
+	tcp_echo_server_management_message message;
+	memset(&message, 0, sizeof(message));
+	message.type = MANAGEMENT_MSG_STATUS_REQUEST;
+	message.payload.status_ptr = status;
 
         /* Send request */
         int ret = send_management_message(echo_server.management_socket_pair[0], &message);
@@ -644,10 +644,11 @@ int tcp_echo_server_terminate(void)
 	}
 
 	/* Send shutdown message to the management socket */
-	tcp_echo_server_management_message msg = {
-		.type = MANAGEMENT_MSG_SHUTDOWN,
-		.payload.dummy_unused = 0,
-	};
+	tcp_echo_server_management_message msg;
+	memset(&msg, 0, sizeof(msg));
+	msg.type = MANAGEMENT_MSG_SHUTDOWN;
+	msg.payload.dummy_unused = 0;
+
 	/* Send request */
         int ret = send_management_message(echo_server.management_socket_pair[0], &msg);
         if (ret < 0)
