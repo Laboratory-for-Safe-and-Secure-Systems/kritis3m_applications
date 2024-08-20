@@ -31,7 +31,7 @@
 #include <sys/socket.h>
 #include <poll.h>
 
-
+#include "asl.h"
 #include "http_client.h"
 #include "logging.h"
 
@@ -39,6 +39,112 @@ LOG_MODULE_CREATE(http);
 
 #define HTTP_CONTENT_LEN_SIZE 11
 #define MAX_SEND_BUF_LEN 192
+
+/***
+ * This function can be used to send data (http fraction or full http request) to an endpoint
+ * @param req_end_timepoint - is the timeout value in ms used in poll()
+ * @todo timeout
+ */
+static int asl_sendall(asl_session *session,
+					   const void *buf,
+					   size_t len,
+					   const k_timepoint_t req_end_timepoint)
+{
+	int ret = 0;
+	ret = asl_send(session, buf, len);
+	switch (ret)
+	{
+	case ASL_SUCCESS:
+		return 0;
+		break;
+	case ASL_ARGUMENT_ERROR:
+		LOG_ERROR("asl error");
+		break;
+	case ASL_WANT_READ:
+		LOG_ERROR("asl error");
+		break;
+	}
+}
+
+static int https_send_data(asl_session *session, char *send_buf,
+						   size_t send_buf_max_len, size_t *send_buf_pos,
+						   const k_timepoint_t req_end_timepoint,
+						   ...)
+{
+	const char *data;
+	va_list va;
+	int ret, end_of_send = *send_buf_pos;
+	int end_of_data, remaining_len;
+	int sent = 0;
+
+	va_start(va, req_end_timepoint);
+
+	data = va_arg(va, const char *);
+
+	while (data)
+	{
+		end_of_data = 0;
+
+		do
+		{
+			int to_be_copied;
+
+			remaining_len = strlen(data + end_of_data);
+			to_be_copied = send_buf_max_len - end_of_send;
+
+			if (remaining_len > to_be_copied)
+			{
+				strncpy(send_buf + end_of_send,
+						data + end_of_data,
+						to_be_copied);
+
+				end_of_send += to_be_copied;
+				end_of_data += to_be_copied;
+				remaining_len -= to_be_copied;
+				// LOG_HEXDUMP_DBG(send_buf, end_of_send,
+				// 		"Data to send");
+				ret = asl_sendall(session, send_buf, end_of_send, req_end_timepoint);
+				if (ret < 0)
+				{
+					LOG_DEBUG("Cannot send %d bytes (%d)",
+							  end_of_send, ret);
+					goto err;
+				}
+				sent += end_of_send;
+				end_of_send = 0;
+				continue;
+			}
+			else
+			{
+				strncpy(send_buf + end_of_send,
+						data + end_of_data,
+						remaining_len);
+				end_of_send += remaining_len;
+				remaining_len = 0;
+			}
+		} while (remaining_len > 0);
+
+		data = va_arg(va, const char *);
+	}
+
+	va_end(va);
+
+	if (end_of_send > (int)send_buf_max_len)
+	{
+		LOG_ERROR("Sending overflow (%d > %zd)", end_of_send,
+				  send_buf_max_len);
+		return -EMSGSIZE;
+	}
+
+	*send_buf_pos = end_of_send;
+
+	return sent;
+
+err:
+	va_end(va);
+
+	return ret;
+}
 
 /***
  * This function can be used to send data (http fraction or full http request) to an endpoint
@@ -168,6 +274,27 @@ err:
 	va_end(va);
 
 	return ret;
+}
+
+static int https_flush_data(asl_session *session, const char *send_buf, size_t send_buf_len,
+							const k_timepoint_t req_end_timepoint)
+{
+	int ret;
+
+	// LOG_HEXDUMP_DBG(send_buf, send_buf_len, "Data to send");
+	ret = asl_sendall(session, send_buf, send_buf_len, req_end_timepoint);
+	/**
+	 * @todo test if workaround is sufficient
+	 */
+	// ret = sendall(sock, send_buf, send_buf_len, req_end_timepoint);
+	if (ret < 0)
+
+	{
+		LOG_ERROR("couldnt sendall ");
+		return ret;
+	}
+
+	return (int)send_buf_len;
 }
 
 static int http_flush_data(int sock, const char *send_buf, size_t send_buf_len,
@@ -470,6 +597,9 @@ static void http_client_init_parser(struct http_parser *parser,
  */
 static void http_report_null(struct http_request *req)
 {
+	/********
+	 *  @todo probably need to add asl support
+	 */
 	if (req->internal.response.cb)
 	{
 		LOG_DEBUG("Calling callback for Final Data"
@@ -512,6 +642,126 @@ static void http_report_progress(struct http_request *req)
 		req->internal.response.cb(&req->internal.response, HTTP_DATA_MORE,
 								  req->internal.user_data);
 	}
+}
+static int https_wait_data(int sock, asl_session *session,
+						   struct http_request *req,
+						   const k_timepoint_t req_end_timepoint)
+{
+	int total_received = 0;
+	size_t offset = 0;
+	int received, ret;
+	struct zsock_pollfd fds[1];
+	int nfds = 1;
+
+	fds[0].fd = sock;
+	fds[0].events = ZSOCK_POLLIN;
+
+	do
+	{
+		k_ticks_t req_timeout_ticks =
+			sys_timepoint_timeout(req_end_timepoint).ticks;
+		int req_timeout_ms = k_ticks_to_ms_floor32(req_timeout_ticks);
+
+		ret = zsock_poll(fds, nfds, req_timeout_ms);
+		if (ret == 0)
+		{
+			LOG_DEBUG("Timeout");
+			ret = -ETIMEDOUT;
+			goto error;
+		}
+		else if (ret < 0)
+		{
+			ret = -errno;
+			goto error;
+		}
+		if (fds[0].revents & (ZSOCK_POLLERR | ZSOCK_POLLNVAL))
+		{
+			ret = -errno;
+			goto error;
+		}
+		else if (fds[0].revents & ZSOCK_POLLHUP)
+		{
+			/* Connection closed */
+			goto closed;
+		}
+		else if (fds[0].revents & ZSOCK_POLLIN)
+		{
+			// asl_receive(session, req)
+			received = asl_receive(sock, req->internal.response.recv_buf + offset,
+								   req->internal.response.recv_buf_len - offset);
+			switch (received)
+			{
+			case ASL_CONN_CLOSED:
+				goto closed;
+				break;
+			case ASL_WANT_READ:
+				break;
+			case ASL_ARGUMENT_ERROR:
+				LOG_ERROR("wrong params");
+				break;
+			case ASL_INTERNAL_ERROR:
+				ret = -errno;
+				goto error;
+				break;
+				return -1;
+			default:
+				// my logic goes here:
+
+				req->internal.response.data_len += received;
+				(void)http_parser_execute(
+					&req->internal.parser, &req->internal.parser_settings,
+					req->internal.response.recv_buf + offset, received);
+				break;
+			}
+
+			total_received += received;
+			offset += received;
+
+			if (offset >= req->internal.response.recv_buf_len)
+			{
+				offset = 0;
+			}
+
+			if (req->internal.response.message_complete)
+			{
+				http_report_complete(req);
+				break;
+			}
+			else if (offset == 0)
+			{
+				http_report_progress(req);
+
+				/* Re-use the result buffer and start to fill it again */
+				req->internal.response.data_len = 0;
+				req->internal.response.body_frag_start = NULL;
+				req->internal.response.body_frag_len = 0;
+			}
+		}
+
+	} while (true);
+
+	return total_received;
+
+closed:
+	LOG_DEBUG("Connection closed");
+
+	/* If connection was closed with no data sent, this is a NULL response, and is a special
+	 * case valid response.
+	 */
+	if (total_received == 0)
+	{
+		http_report_null(req);
+		return total_received;
+	}
+
+	/* Otherwise, connection was closed mid-way through response, and this should be
+	 * considered an error.
+	 */
+	ret = -ECONNRESET;
+
+error:
+	LOG_DEBUG("Connection error (%d)", ret);
+	return ret;
 }
 
 static int http_wait_data(int sock, struct http_request *req, const k_timepoint_t req_end_timepoint)
@@ -859,6 +1109,257 @@ int http_client_req(int sock, struct http_request *req,
 							&req->internal.parser_settings);
 
 	/* Request is sent, now wait data to be received */
+	total_recv = http_wait_data(sock, req, req_end_timepoint);
+	if (total_recv < 0)
+	{
+		LOG_DEBUG("Wait data failure (%d)", total_recv);
+		ret = total_recv;
+		goto out;
+	}
+
+	LOG_DEBUG("Received %d bytes", total_recv);
+
+	return total_sent;
+
+out:
+	return ret;
+}
+
+int https_client_req(int sock, asl_session *session, struct http_request *req,
+					 int32_t timeout, void *user_data)
+{
+	/* Utilize the network usage by sending data in bigger blocks */
+	char send_buf[MAX_SEND_BUF_LEN];
+	const size_t send_buf_max_len = sizeof(send_buf);
+	size_t send_buf_pos = 0;
+	int total_sent = 0;
+	int ret, total_recv, i;
+	const char *method;
+	k_timeout_t req_timeout = K_MSEC(timeout);
+	k_timepoint_t req_end_timepoint = sys_timepoint_calc(req_timeout);
+
+	if (sock < 0 || session == NULL || req == NULL || req->response == NULL ||
+		req->recv_buf == NULL || req->recv_buf_len == 0)
+	{
+		return -EINVAL;
+	}
+
+	memset(&req->internal.response, 0, sizeof(req->internal.response));
+
+	req->internal.response.http_cb = req->http_cb;
+	req->internal.response.cb = req->response;
+	req->internal.response.recv_buf = req->recv_buf;
+	req->internal.response.recv_buf_len = req->recv_buf_len;
+	req->internal.user_data = user_data;
+	req->internal.sock = sock;
+
+	method = http_method_str(req->method);
+
+	ret = https_send_data(session, send_buf, send_buf_max_len, &send_buf_pos,
+						  req_end_timepoint, method,
+						  " ", req->url, " ", req->protocol,
+						  HTTP_CRLF, NULL);
+	if (ret < 0)
+	{
+		goto out;
+	}
+
+	total_sent += ret;
+
+	if (req->port)
+	{
+		ret = https_send_data(session, send_buf, send_buf_max_len,
+							  &send_buf_pos, req_end_timepoint, "Host", ": ", req->host,
+							  ":", req->port, HTTP_CRLF, NULL);
+
+		if (ret < 0)
+		{
+			goto out;
+		}
+
+		total_sent += ret;
+	}
+	else
+	{
+		ret = https_send_data(session, send_buf, send_buf_max_len,
+							  &send_buf_pos, req_end_timepoint, "Host", ": ", req->host,
+							  HTTP_CRLF, NULL);
+
+		if (ret < 0)
+		{
+			goto out;
+		}
+
+		total_sent += ret;
+	}
+
+	if (req->optional_headers_cb)
+	{
+		ret = https_flush_data(session, send_buf, send_buf_pos, req_end_timepoint);
+		if (ret < 0)
+		{
+			goto out;
+		}
+
+		send_buf_pos = 0;
+		total_sent += ret;
+
+		LOG_ERROR("optional headers_cb for https must use asl");
+		ret = req->optional_headers_cb(sock, req, user_data);
+		if (ret < 0)
+		{
+			goto out;
+		}
+
+		total_sent += ret;
+	}
+	else
+	{
+		for (i = 0; req->optional_headers && req->optional_headers[i];
+			 i++)
+		{
+			ret = https_send_data(session, send_buf, send_buf_max_len,
+								  &send_buf_pos, req_end_timepoint,
+								  req->optional_headers[i], NULL);
+			if (ret < 0)
+			{
+				goto out;
+			}
+
+			total_sent += ret;
+		}
+	}
+
+	for (i = 0; req->header_fields && req->header_fields[i]; i++)
+	{
+		ret = https_send_data(session, send_buf, send_buf_max_len,
+							  &send_buf_pos, req_end_timepoint, req->header_fields[i],
+							  NULL);
+		if (ret < 0)
+		{
+			goto out;
+		}
+
+		total_sent += ret;
+	}
+
+	if (req->content_type_value)
+	{
+		ret = https_send_data(session, send_buf, send_buf_max_len,
+							  &send_buf_pos, req_end_timepoint, "Content-Type", ": ",
+							  req->content_type_value, HTTP_CRLF, NULL);
+		if (ret < 0)
+		{
+			goto out;
+		}
+
+		total_sent += ret;
+	}
+
+	if (req->payload || req->payload_cb)
+	{
+		if (req->payload_len)
+		{
+			char content_len_str[HTTP_CONTENT_LEN_SIZE];
+
+			ret = snprintk(content_len_str, HTTP_CONTENT_LEN_SIZE,
+						   "%zd", req->payload_len);
+			if (ret <= 0 || ret >= HTTP_CONTENT_LEN_SIZE)
+			{
+				ret = -ENOMEM;
+				goto out;
+			}
+
+			ret = https_send_data(session, send_buf, send_buf_max_len,
+								  &send_buf_pos, req_end_timepoint,
+								  "Content-Length", ": ",
+								  content_len_str, HTTP_CRLF,
+								  HTTP_CRLF, NULL);
+		}
+		else
+		{
+			ret = https_send_data(session, send_buf, send_buf_max_len,
+								  &send_buf_pos, req_end_timepoint, HTTP_CRLF, NULL);
+		}
+
+		if (ret < 0)
+		{
+			goto out;
+		}
+
+		total_sent += ret;
+
+		ret = https_flush_data(sock, send_buf, send_buf_pos, req_end_timepoint);
+		if (ret < 0)
+		{
+			goto out;
+		}
+
+		send_buf_pos = 0;
+		total_sent += ret;
+
+		if (req->payload_cb)
+		{
+			ret = req->payload_cb(sock, req, user_data);
+			if (ret < 0)
+			{
+				goto out;
+			}
+
+			total_sent += ret;
+		}
+		else
+		{
+			uint32_t length;
+
+			if (req->payload_len == 0)
+			{
+				length = strlen(req->payload);
+			}
+			else
+			{
+				length = req->payload_len;
+			}
+
+			ret = asl_sendall(session, req->payload, length, req_end_timepoint);
+			if (ret < 0)
+			{
+				goto out;
+			}
+
+			total_sent += length;
+		}
+	}
+	else
+	{
+		ret = https_send_data(session, send_buf, send_buf_max_len,
+							  &send_buf_pos, req_end_timepoint, HTTP_CRLF, NULL);
+		if (ret < 0)
+		{
+			goto out;
+		}
+
+		total_sent += ret;
+	}
+
+	if (send_buf_pos > 0)
+	{
+		ret = https_flush_data(session, send_buf, send_buf_pos, req_end_timepoint);
+		if (ret < 0)
+		{
+			goto out;
+		}
+
+		total_sent += ret;
+	}
+
+	LOG_DEBUG("Sent %d bytes", total_sent);
+
+	http_client_init_parser(&req->internal.parser,
+							&req->internal.parser_settings);
+
+	/* Request is sent, now wait data to be received */
+	total_recv = https_wait_data(asl_session * session, req, req_end_timepoint);
 	total_recv = http_wait_data(sock, req, req_end_timepoint);
 	if (total_recv < 0)
 	{
