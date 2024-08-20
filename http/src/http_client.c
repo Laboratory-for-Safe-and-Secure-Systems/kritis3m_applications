@@ -31,7 +31,6 @@
 #include <sys/socket.h>
 #include <poll.h>
 
-#include "asl.h"
 #include "http_client.h"
 #include "logging.h"
 
@@ -687,7 +686,7 @@ static int https_wait_data(int sock, asl_session *session,
 		else if (fds[0].revents & ZSOCK_POLLIN)
 		{
 			// asl_receive(session, req)
-			received = asl_receive(sock, req->internal.response.recv_buf + offset,
+			received = asl_receive(session, req->internal.response.recv_buf + offset,
 								   req->internal.response.recv_buf_len - offset);
 			switch (received)
 			{
@@ -1289,7 +1288,7 @@ int https_client_req(int sock, asl_session *session, struct http_request *req,
 
 		total_sent += ret;
 
-		ret = https_flush_data(sock, send_buf, send_buf_pos, req_end_timepoint);
+		ret = https_flush_data(session, send_buf, send_buf_pos, req_end_timepoint);
 		if (ret < 0)
 		{
 			goto out;
@@ -1359,8 +1358,14 @@ int https_client_req(int sock, asl_session *session, struct http_request *req,
 							&req->internal.parser_settings);
 
 	/* Request is sent, now wait data to be received */
-	total_recv = https_wait_data(asl_session * session, req, req_end_timepoint);
-	total_recv = http_wait_data(sock, req, req_end_timepoint);
+	/***
+	 * @todo this functionality must be tested
+	 */
+	total_recv = https_wait_data(sock, session, req, req_end_timepoint);
+	/** 
+	 * @todo error handling
+	 */
+	// total_recv = http_wait_data(sock, req, req_end_timepoint);
 	if (total_recv < 0)
 	{
 		LOG_DEBUG("Wait data failure (%d)", total_recv);
