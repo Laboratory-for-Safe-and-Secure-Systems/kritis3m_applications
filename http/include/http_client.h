@@ -41,6 +41,7 @@
 #endif // __ZEPHYR__
 
 #include "http_parser.h"
+#include "asl.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -344,6 +345,9 @@ struct http_request {
  * @return <0 if error, >=0 amount of data sent to the server
  */
 int http_client_req(int sock, struct http_request *req,
+		    int32_t timeout, void *user_data);
+
+int https_client_req(int sock, asl_session* session, struct http_request *req,
 		    int32_t timeout, void *user_data);
 
 #ifdef __cplusplus

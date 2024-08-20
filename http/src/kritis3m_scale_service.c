@@ -10,9 +10,12 @@
 #include <poll.h>
 #include <sys/socket.h>
 #include <sys/errno.h>
+#include <mgmt_certs.h>
 
 #include "poll_set.h"
+#include "asl.h"
 #include "logging.h"
+#include "hb_service.h"
 LOG_MODULE_CREATE(log_kritis3m_service);
 
 #if defined(__ZEPHYR__)
@@ -27,12 +30,14 @@ typedef struct mgmt_container mgmt_container;
 struct mgmt_container
 {
   poll_set poll_set;
-  int hb_fd; // timer file descripor
-  int hb_response_fd; //hardbeat file descriptor
-  int policy_fd; //call distribution service file descriptor
+  int hb_fd;          // timer file descripor
+  int hb_response_fd; // hardbeat file descriptor
+  int policy_fd;      // call distribution service file descriptor
 
   pthread_t thread;
   pthread_attr_t thread_attr;
+
+  asl_endpoint *endpoint;
 };
 
 /****************** FORWARD DECLARATIONS ****************/
@@ -50,9 +55,40 @@ void *mgmt_main_thread(void *ptr);
 static mgmt_container mgmt = {0};
 K_TIMER_DEFINE(hb_timer, hb_timer_event_handler, NULL);
 
+void mgmt_crypto_cfg_init(asl_endpoint_configuration *cfg)
+{
+  cfg->mutual_authentication = true;
+  cfg->use_secure_element = false;
+  cfg->secure_element_import_keys = false;
+
+  cfg->private_key.buffer = mgmt_classic_server_privateKey;
+  cfg->private_key.size = sizeof(mgmt_classic_server_privateKey);
+  cfg->private_key.additional_key_buffer = NULL;
+  cfg->private_key.additional_key_size = 0;
+
+  cfg->root_certificate.buffer = mgmt_classic_root_cert;
+  cfg->root_certificate.size = sizeof(mgmt_classic_root_cert);
+
+  cfg->device_certificate_chain.buffer = mgmt_classic_server_cert_chain;
+  cfg->device_certificate_chain.size = sizeof(mgmt_classic_server_cert_chain);
+}
+
 int management_service_run()
 {
   int ret = 0;
+
+  /********** CRXPTO INITIALISATION ********************/
+  memset(&mgmt, 0, sizeof(mgmt_container));
+  asl_endpoint_configuration cfg = {0};
+  mgmt_crypto_cfg_init(&cfg);
+  asl_endpoint *endpoint = asl_setup_client_endpoint(&cfg);
+  if (endpoint == NULL)
+  {
+    LOG_ERROR("can't init asl");
+    return -1;
+  }
+  mgmt.endpoint = endpoint;
+
   poll_set_init(&mgmt.poll_set);
   pthread_attr_init(&mgmt.thread_attr);
   pthread_attr_setdetachstate(&mgmt.thread_attr, PTHREAD_CREATE_DETACHED);
@@ -67,17 +103,20 @@ int management_service_run()
   return 0;
 }
 
+/** @brief This funciton handles the connection to the management server.
+ * The communication is based on https.
+ */
 void *mgmt_main_thread(void *ptr)
 {
   int ret = -1;
   uint32_t hb_iv_seconds = 60;
-  mgmt_container *mgmt = (mgmt_container *)ptr;
+  mgmt_container *l_mgmt = (mgmt_container *)ptr;
 
 #if !defined(__ZEPHYR__)
   LOG_INFO("MGMT service started");
 #endif
 
-  ret = init_hardbeat_service(mgmt, hb_iv_seconds);
+  ret = init_hardbeat_service(l_mgmt, hb_iv_seconds);
   if (ret < 0)
   {
     goto shutdown;
@@ -86,8 +125,8 @@ void *mgmt_main_thread(void *ptr)
   while (1)
   {
     // waiting for ever
-    ret = poll(mgmt->poll_set.fds,
-               mgmt->poll_set.num_fds,
+    ret = poll(&l_mgmt->poll_set.fds[0],
+               l_mgmt->poll_set.num_fds,
                -1);
     if (ret < 0)
     {
@@ -99,7 +138,7 @@ void *mgmt_main_thread(void *ptr)
       // no event occured
       continue;
     }
-    if (number_events > mgmt->poll_set.num_fds)
+    if (number_events > l_mgmt->poll_set.num_fds)
     {
       LOG_ERROR("to many events-> PANIC");
     }
@@ -107,35 +146,48 @@ void *mgmt_main_thread(void *ptr)
     // for each event, the matching fd is searched
     for (int i = 0; i < number_events; i++)
     {
-      struct pollfd pfd = mgmt->poll_set.fds[i];
+      struct pollfd pfd = l_mgmt->poll_set.fds[i];
       // event exists?
       if (pfd.revents == 0)
       {
         continue;
       }
-      if (pfd.fd == mgmt->hb_fd){
-          //do_hardbeat_request(...); 
-          //handle_hb_request();
-      }
-
-      if (pfd.fd == mgmt->hb_response_fd){
-        LOG_INFO("handle hb response"); 
-        //handle_hardbeat_rq_response(); 
-      }
-
-      if (pfd.fd == mgmt->policy_fd){
-        if (pfd.fd & POLLIN){
-          //handle_policy_rq_response();
+      int event_ret = -1;
+      if (pfd.fd == l_mgmt->policy_fd)
+      {
+        // event_ret = handle_policy_event(mgmt, pfd.fd);
+        if (ret < 0)
+        {
+          LOG_ERROR("error policy event");
         }
-
       }
-
-
-
-      // fd matches management
+      else if (pfd.fd == l_mgmt->hb_fd)
+      {
+        HardbeatInstructions _instruction = handle_hb_event(&pfd, l_mgmt->endpoint);
+        // ret = handle_hb_instruction(instruction);
+        // if (ret < 0)
+        // {
+        //   LOG_ERROR("err hb event");
+        // }
+      }
+      else
+      {
+        LOG_INFO("not found");
+      }
+      switch (event_ret)
+      {
+      case ASL_SUCCESS:
+        break;
+      case ASL_WANT_WRITE:
+        break;
+      case ASL_WANT_READ:
+        break;
+      default:
+        break;
+      }
     }
   }
-  return 1;
+
 shutdown:
   LOG_ERROR("Error occured in mgmt_module.\n Shut DOWN!");
   return 0;
@@ -653,7 +705,7 @@ int init_hardbeat_service(mgmt_container *mgmt, uint32_t hb_iv_seconds)
     LOG_ERROR("Failed to create eventfd\n");
     return -1;
   }
-  mgmt->mgmt_fd = efd;
+  mgmt->hb_fd = efd;
 
   k_timer_user_data_set(&hb_timer, &efd);
   // timout = first offset
