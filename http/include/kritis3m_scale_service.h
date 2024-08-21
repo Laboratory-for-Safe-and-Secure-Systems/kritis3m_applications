@@ -5,12 +5,8 @@
 
 #include <netinet/in.h>
 #include "kritis3m_configuration.h"
-
-
-
-
-
-
+#include "kritis3m_distribution_service.h"
+#include "hb_service.h"
 
 static SystemConfiguration system_configuration = {0};
 
@@ -24,7 +20,7 @@ int start_management_service(struct sockaddr_in);
  *              CONFIGURATION DISTRIBUTION
  */
 
-int do_policy_request(struct sockaddr_in *server_addr, int server_addr_len, int server_port);
+
 int handle_policy_rq_response(char *response, int response_len, SystemConfiguration *configuration);
 
 int parse_configuration(char *response, int response_len);
@@ -32,9 +28,6 @@ int parse_configuration(char *response, int response_len);
 /**********************************************************
  *                      Hardbeat Service
  */
-
-
-
 
 #define HTTP_OK 200
 #define HTTP_CREATED 201
@@ -49,7 +42,6 @@ int parse_configuration(char *response, int response_len);
 #define HTTP_BAD_GATEWAY 502
 #define HTTP_SERVICE_UNAVAILABLE 503
 #define HTTP_GATEWAY_TIMEOUT 504
-
 
 /**********ERROR MSGS **********/
 #define HTTP_OK_MSG "OK"

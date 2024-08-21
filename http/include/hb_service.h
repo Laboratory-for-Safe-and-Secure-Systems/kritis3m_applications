@@ -11,6 +11,7 @@
 #define HB_SERVERADDR "192.168.3.3"
 #define HB_SERVERPORT "1231"
 #define HB_RESPONSE_SIZE 400
+#define HB_MAX_INSTRUCTIONS 4
 #define HB_URL (HB_SERVERADDR ":" HB_SERVERPORT "/hb_service/moin/")
 
 typedef struct HardbeatResponse HardbeatResponse;
@@ -30,7 +31,8 @@ enum HardbeatInstructions
 };
 
 struct HardbeatResponse{
-    HardbeatInstructions HardbeatInstruction;
+    HardbeatInstructions HardbeatInstruction[HB_MAX_INSTRUCTIONS];
+    int hb_instructions_count;
     uint64_t HardbeatInterval_s;
 };
 

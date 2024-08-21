@@ -17,7 +17,9 @@
 #define NUMBER_STD_APK 4
 #define HARDBEAT_DEFAULT_S 24 * 60 * 60
 #define HARDBEAT_MIN_S 20
-#define HARDBEAT_MAX_S 60*60*24 
+#define HARDBEAT_MAX_S 60 * 60 * 24
+
+#define MAX_CONS 5
 
 /** defining supported applications for Kritis3m Gateway
  * DTLS_R_Proxy
@@ -72,11 +74,12 @@ struct Kritis3mHelperApplication;
 
 struct ConnectionWhitelist
 {
-    char allowed_client_ip_port[IPv4_PORT_LEN];
+    char allowed_client_ip_port[IPv4_PORT_LEN][MAX_CONS];
     int number_connections;
 };
 
 /**
+ * @warning !READ! Min and Max are used as boundaries in the parser
  * @note when extending Kritis3mApplicationtype: DTLS_R_PROXY = MIN && TLS_R_PROXY = MAX
  * @example extension:
  * num Kritis3mApplicationtype
@@ -98,6 +101,7 @@ enum Kritis3mApplicationtype
 };
 
 /**
+ * @warning !READ! Min and Max are used as boundaries in the parser
  * @note when extending Kritis3mProto: DTLS = MIN && UDP = MAX
  * @example extension:
  *enum Kritis3mProto
@@ -118,6 +122,7 @@ enum Kritis3mProto
 };
 
 /**
+ * @warning !READ! Min and Max are used as boundaries in the parser
 * @note when extending Kritis3mHelper Applicaitontype: ECHO_TCP_SERVER = minimal number and L2_BRIDGE = maximal number
 * @example extension:
 * enum Kritis3mHelperApplicationtype {
@@ -140,7 +145,10 @@ enum ApplicationStatus
     APK_OK = 1,
 };
 
-/****************** CRYPTO PROVILE DEFINITIONS ******************/
+/****************** CRYPTO PROVILE DEFINITIONS ******************
+ * @warning !READ! Min and Max are used as boundaries in the parser
+ *
+ */
 enum CertificatID
 {
     PQC = 0,
@@ -195,4 +203,4 @@ struct SystemConfiguration
     Kritis3mHelperApplication standard_applications[NUMBER_STD_APK];
 };
 
-#endif // KRITIS3M_CONFIGURATION_H
+#endif //KRITIS3M_CONFIGURATION_H
