@@ -16,6 +16,8 @@
 #define NUMBER_PROXIES 7
 #define NUMBER_STD_APK 4
 #define HARDBEAT_DEFAULT_S 24 * 60 * 60
+#define HARDBEAT_MIN_S 20
+#define HARDBEAT_MAX_S 60*60*24 
 
 /** defining supported applications for Kritis3m Gateway
  * DTLS_R_Proxy

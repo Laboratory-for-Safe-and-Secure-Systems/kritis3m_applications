@@ -43,6 +43,7 @@ LOG_MODULE_CREATE(http);
  * This function can be used to send data (http fraction or full http request) to an endpoint
  * @param req_end_timepoint - is the timeout value in ms used in poll()
  * @todo timeout
+ * @todo remove function, since asl_send is already sendall
  */
 static int asl_sendall(asl_session *session,
 					   const void *buf,
@@ -58,11 +59,14 @@ static int asl_sendall(asl_session *session,
 		break;
 	case ASL_ARGUMENT_ERROR:
 		LOG_ERROR("asl error");
+		return -1;
 		break;
 	case ASL_WANT_READ:
 		LOG_ERROR("asl error");
+		return -1;
 		break;
 	}
+	return -1;
 }
 
 static int https_send_data(asl_session *session, char *send_buf,
@@ -1362,7 +1366,7 @@ int https_client_req(int sock, asl_session *session, struct http_request *req,
 	 * @todo this functionality must be tested
 	 */
 	total_recv = https_wait_data(sock, session, req, req_end_timepoint);
-	/** 
+	/**
 	 * @todo error handling
 	 */
 	// total_recv = http_wait_data(sock, req, req_end_timepoint);

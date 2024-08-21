@@ -51,9 +51,45 @@ int init_hardbeat_service(mgmt_container *mgmt_container, uint32_t hb_iv_seconds
 // mgmt service:
 void *mgmt_main_thread(void *ptr);
 
+
 // GLOBALS
 static mgmt_container mgmt = {0};
 K_TIMER_DEFINE(hb_timer, hb_timer_event_handler, NULL);
+
+
+/**
+ * @brief this function is used to reset the timer and use the new hardbeat interval provided from the server
+ * @todo this function must be tested
+ */
+int set_hardbeat_interval(struct mgmt_container *l_mgmnt, uint64_t hb_iv_s)
+{
+  uint32_t t_hb_iv_s = 0;
+  if ((hb_iv_s <= HARDBEAT_MIN_S) || (hb_iv_s > HARDBEAT_MAX_S))
+  {
+    t_hb_iv_s = HARDBEAT_DEFAULT_S;
+    LOG_ERROR("coudlnt reset hardbeat clock");
+  }
+  else
+  {
+    t_hb_iv_s = hb_iv_s;
+  }
+
+  close(l_mgmnt->hb_fd);
+  poll_set_remove_fd(&l_mgmnt->poll_set, l_mgmnt->hb_fd);
+  int efd = zvfs_eventfd(0, EFD_NONBLOCK);
+  if (efd < 0)
+  {
+    LOG_ERROR("Failed to create eventfd\n");
+    return -1;
+  }
+  l_mgmnt->hb_fd = efd;
+  k_timer_stop(&hb_timer);
+  k_timer_user_data_set(&hb_timer, &efd);
+  k_timer_start(&hb_timer, K_SECONDS(15), K_SECONDS(t_hb_iv_s));
+  poll_set_add_fd(&l_mgmnt->poll_set, efd, POLLIN | POLLERR);
+  return 1;
+}
+
 
 void mgmt_crypto_cfg_init(asl_endpoint_configuration *cfg)
 {
@@ -163,12 +199,15 @@ void *mgmt_main_thread(void *ptr)
       }
       else if (pfd.fd == l_mgmt->hb_fd)
       {
-        HardbeatInstructions _instruction = handle_hb_event(&pfd, l_mgmt->endpoint);
-        // ret = handle_hb_instruction(instruction);
-        // if (ret < 0)
-        // {
-        //   LOG_ERROR("err hb event");
-        // }
+        HardbeatResponse rsp = {0};
+        ret = handle_hb_event(&pfd, l_mgmt->endpoint, &rsp);
+        if (ret > 0)
+        {
+          set_hardbeat_interval(l_mgmt, rsp.HardbeatInterval_s);
+          // Hardbeat request was succesfull.
+          //  Set new hardbeat interval
+          //  perform hardbeat instruction
+        }
       }
       else
       {
