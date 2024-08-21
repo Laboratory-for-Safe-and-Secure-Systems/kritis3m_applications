@@ -8,33 +8,8 @@
 #include "cJSON.h"
 LOG_MODULE_CREATE(hb_service);
 
-#define HB_SERVERADDR "192.168.3.3"
-#define HB_SERVERPORT "1231"
-#define HB_RESPONSE_SIZE 400
-#define HB_URL (HB_SERVERADDR ":" HB_SERVERPORT "/hb_service/moin/")
-
 /*********** FORWARD DECLARATIONS ******************/
 int call_hb_server(asl_endpoint *ep, HardbeatResponse *rsp);
-
-int parse_hb_response(uint8_t *hb_response, int size)
-{
-    int ret = -1;
-    cJSON *json = cJSON_ParseWithLength(hb_response, size);
-    if (json == NULL)
-    {
-        const char *error_ptr = cJSON_GetErrorPtr();
-        if (error_ptr != NULL)
-        {
-            fprintf(stderr, "Error before: %s\n", error_ptr);
-        }
-        return -1;
-    }
-    /**********
-     * @todo implementing hardbeat parser!!
-     */
-
-    return 0;
-}
 
 struct http_user_data
 {
@@ -72,6 +47,7 @@ static void hb_response_cb(struct http_response *rsp,
                     LOG_ERROR("Error before: %s\n", error_ptr);
                 }
                 user_status->error_occured = true;
+                cJSON_Delete(json);
                 return;
 
                 cJSON *js_hardbeat_rsp = cJSON_GetObjectItemCaseSensitive(json, "HB_response");
@@ -89,6 +65,7 @@ static void hb_response_cb(struct http_response *rsp,
                         else
                         {
                             user_status->error_occured = true;
+                            cJSON_Delete(json);
                             return;
                         }
                     }
@@ -108,9 +85,11 @@ static void hb_response_cb(struct http_response *rsp,
                         else
                         {
                             user_status->error_occured = true;
+                            cJSON_Delete(json);
                             return;
                         }
                     }
+                    cJSON_Delete(json);
                     user_status->error_occured = false;
                 }
                 break;

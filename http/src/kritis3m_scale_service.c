@@ -51,11 +51,9 @@ int init_hardbeat_service(mgmt_container *mgmt_container, uint32_t hb_iv_seconds
 // mgmt service:
 void *mgmt_main_thread(void *ptr);
 
-
 // GLOBALS
 static mgmt_container mgmt = {0};
 K_TIMER_DEFINE(hb_timer, hb_timer_event_handler, NULL);
-
 
 /**
  * @brief this function is used to reset the timer and use the new hardbeat interval provided from the server
@@ -89,7 +87,6 @@ int set_hardbeat_interval(struct mgmt_container *l_mgmnt, uint64_t hb_iv_s)
   poll_set_add_fd(&l_mgmnt->poll_set, efd, POLLIN | POLLERR);
   return 1;
 }
-
 
 void mgmt_crypto_cfg_init(asl_endpoint_configuration *cfg)
 {
@@ -201,12 +198,22 @@ void *mgmt_main_thread(void *ptr)
       {
         HardbeatResponse rsp = {0};
         ret = handle_hb_event(&pfd, l_mgmt->endpoint, &rsp);
+        // Hardbeat request was succesfull.
+        //  Set new hardbeat interval
+        //  perform hardbeat instruction
         if (ret > 0)
         {
-          set_hardbeat_interval(l_mgmt, rsp.HardbeatInterval_s);
-          // Hardbeat request was succesfull.
-          //  Set new hardbeat interval
-          //  perform hardbeat instruction
+          ret = set_hardbeat_interval(l_mgmt, rsp.HardbeatInterval_s);
+          if (ret < 0)
+          {
+            LOG_ERROR("couldn't set timer interval");
+            goto shutdown;
+          }
+          /**
+           * @todo hardbeat instruction
+           */
+
+          //ret = handle_hardbeat_instruction
         }
       }
       else
