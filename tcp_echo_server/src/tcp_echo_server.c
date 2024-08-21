@@ -397,7 +397,7 @@ static int read_management_message(int socket, tcp_echo_server_management_messag
 static int handle_management_message(tcp_echo_server* server, int socket)
 {
 	/* Read message from the management socket. */
-	tcp_echo_server_management_message msg;
+	tcp_echo_server_management_message msg = {0};
 	int ret = read_management_message(socket, &msg);
 	if (ret < 0)
 	{
@@ -596,8 +596,7 @@ int tcp_echo_server_get_status(tcp_echo_server_status* status)
 	}
 
 	/* Create the STATUS_REQUEST message. Object is used for the response, too. */
-	tcp_echo_server_management_message message;
-	memset(&message, 0, sizeof(message));
+	tcp_echo_server_management_message message = {0};
 	message.type = MANAGEMENT_MSG_STATUS_REQUEST;
 	message.payload.status_ptr = status;
 
@@ -644,8 +643,7 @@ int tcp_echo_server_terminate(void)
 	}
 
 	/* Send shutdown message to the management socket */
-	tcp_echo_server_management_message msg;
-	memset(&msg, 0, sizeof(msg));
+	tcp_echo_server_management_message msg = {0};
 	msg.type = MANAGEMENT_MSG_SHUTDOWN;
 	msg.payload.dummy_unused = 0;
 
