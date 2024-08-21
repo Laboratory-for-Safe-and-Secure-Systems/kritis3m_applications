@@ -59,7 +59,7 @@ int tls_proxy_backend_run(proxy_backend_config const* config)
 
 int tls_proxy_start_helper(proxy_management_message const* request)
 {
-        proxy_management_message response;
+        proxy_management_message response = {0};
 
         /* Send request */
         int ret = send_management_message(the_backend.management_socket_pair[0], request);
@@ -104,8 +104,7 @@ int tls_reverse_proxy_start(proxy_config const* config)
         }
 
         /* Create a START_REQUEST message */
-        proxy_management_message request;
-        memset(&request, 0, sizeof(request));
+        proxy_management_message request = {0};
         request.type = REVERSE_PROXY_START_REQUEST;
         request.payload.reverse_proxy_config = *config;
 
@@ -127,7 +126,7 @@ int tls_forward_proxy_start(proxy_config const* config)
         }
 
         /* Create a START_REQUEST message */
-        proxy_management_message request;
+        proxy_management_message request = {0};
         memset(&request, 0, sizeof(request));
         request.type = FORWARD_PROXY_START_REQUEST;
         request.payload.forward_proxy_config = *config;
@@ -203,7 +202,7 @@ int tls_proxy_stop(int id)
                 .type = PROXY_STOP_REQUEST,
                 .payload.proxy_id = id,
         };
-        proxy_management_message response;
+        proxy_management_message response = {0};
 
         /* Send request */
         int ret = send_management_message(the_backend.management_socket_pair[0], &request);
@@ -250,7 +249,7 @@ int tls_proxy_backend_terminate(void)
                 .type = BACKEND_STOP_REQUEST,
                 .payload.dummy_unused = 0,
         };
-        proxy_management_message response;
+        proxy_management_message response = {0};
 
         /* Send request */
         int ret = send_management_message(the_backend.management_socket_pair[0], &request);
