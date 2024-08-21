@@ -54,33 +54,45 @@ static void hb_response_cb(struct http_response *rsp,
                 if (cJSON_IsObject(js_hardbeat_rsp))
                 {
                     /****************** GET Hardbeat Instruction ************************/
-                    cJSON *js_item = cJSON_GetObjectItemCaseSensitive(js_hardbeat_rsp, "HB_instruction");
-                    if (cJSON_IsNumber(js_item))
+                    cJSON *hb_instructions = cJSON_GetObjectItemCaseSensitive(js_hardbeat_rsp, "HB_instructions");
+                    if (cJSON_IsArray(hb_instructions))
                     {
-                        int t_hb_instruction = js_item->valueint;
-                        if ((t_hb_instruction <= HB_SET_DEBUG_LEVEL) && (t_hb_instruction >= HB_ERROR))
+
+                        int hb_instructions_count = cJSON_GetArraySize(hb_instructions);
+                        user_status->response.hb_instructions_count = hb_instructions_count;
+                        for (int i = 0; i < hb_instructions_count; i++)
                         {
-                            user_status->response.HardbeatInstruction = js_item->valueint;
-                        }
-                        else
-                        {
-                            user_status->error_occured = true;
-                            cJSON_Delete(json);
-                            return;
+
+                            cJSON *hb_instruction = cJSON_GetArrayItem(hb_instructions, i);
+                            if (cJSON_IsNumber(hb_instruction))
+                            {
+                                int t_hb_instruction = hb_instruction->valueint;
+                                if ((t_hb_instruction <= HB_SET_DEBUG_LEVEL) && (t_hb_instruction >= HB_ERROR))
+                                {
+                                    user_status->response.HardbeatInstruction[i] = t_hb_instruction;
+                                }
+                                else
+                                {
+                                    user_status->error_occured = true;
+                                    cJSON_Delete(json);
+                                    return;
+                                }
+                            }
                         }
                     }
+
                     /****************** GET HB Interval************************/
-                    js_item = cJSON_GetObjectItemCaseSensitive(js_hardbeat_rsp, "HB_interval_s");
-                    if (cJSON_IsNumber(js_item))
+                    cJSON *js_iv = cJSON_GetObjectItemCaseSensitive(js_hardbeat_rsp, "HB_interval_s");
+                    if (cJSON_IsNumber(js_iv))
                     {
-                        uint64_t t_hb_interval = js_item->valueint;
+                        uint64_t t_hb_interval = js_iv->valueint;
                         /*********
                          * @todo check if parsing works for large integer values
                          *
                          */
                         if (t_hb_interval > 0)
                         {
-                            user_status->response.HardbeatInterval_s = js_item->valueint;
+                            user_status->response.HardbeatInterval_s =t_hb_interval;
                         }
                         else
                         {
