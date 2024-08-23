@@ -64,7 +64,7 @@ typedef struct network_tester
         int iterations;
         asl_endpoint* tls_endpoint;
         asl_session* tls_session;
-        timing_metrics* handshake_time;
+        timing_metrics* handshake_times;
         pthread_t thread;
         pthread_attr_t thread_attr;
         int management_socket_pair[2];
@@ -82,7 +82,7 @@ static network_tester the_tester = {
         .iterations = 0,
         .tls_endpoint = NULL,
         .tls_session = NULL,
-        .handshake_time = NULL,
+        .handshake_times = NULL,
         .management_socket_pair = {-1, -1},
 };
 
@@ -180,7 +180,7 @@ static void* network_tester_main_thread(void* ptr)
         setblocking(tester->management_socket_pair[1], false);
 
         /* Create the timing metrics */
-        tester->handshake_time = timing_metrics_create(config->output_path, "handshake_time.csv", LOG_MODULE_GET());
+        tester->handshake_times = timing_metrics_create("handshake_time", config->iterations, LOG_MODULE_GET());
 
         /* Initialize the Agile Security Library */
         if (config->use_tls == true)
@@ -223,9 +223,8 @@ static void* network_tester_main_thread(void* ptr)
                 ERROR_OUT("Error sending response");
         }
 
-        LOG_INFO("Starting test...");
-
-        printf("\r\n"); /* New line necessary for proper progress print */
+        if (!config->silent_test)
+                printf("\r\n"); /* New line necessary for proper progress print */
 
         /* Main loop */
         for (int i = 0; i < config->iterations; i++)
@@ -248,7 +247,7 @@ static void* network_tester_main_thread(void* ptr)
                                 ERROR_OUT("Error creating TLS session");
                 }
 
-                timing_metrics_start_measurement(tester->handshake_time);
+                timing_metrics_start_measurement(tester->handshake_times);
 
                 /* Connect to the peer */
                 LOG_DEBUG("Establishing TCP connection");
@@ -297,8 +296,7 @@ static void* network_tester_main_thread(void* ptr)
                 if ((ret != sizeof(test_message)) || (memcmp(test_message, tester->recv_buffer, sizeof(test_message)) != 0))
                         ERROR_OUT("Echo NOT successfull");
 
-                timing_metrics_end_measurement(tester->handshake_time);
-                timing_metrics_print(tester->handshake_time);
+                timing_metrics_end_measurement(tester->handshake_times);
 
                 /* Close connection */
                 if (config->use_tls)
@@ -312,7 +310,8 @@ static void* network_tester_main_thread(void* ptr)
                 tester->tcp_socket = -1;
 
                 /* Print progress bar to the console */
-                print_progress(i+1, tester);
+                if (!config->silent_test)
+                        print_progress(i+1, tester);
 
                 /* Check if we have received a management message */
                 ret = handle_management_message(tester, tester->management_socket_pair[1]);
@@ -328,7 +327,27 @@ static void* network_tester_main_thread(void* ptr)
                 }
         }
 
-        LOG_DEBUG("Terminating...");
+        /* Print results */
+        timing_metrics_results results;
+        timing_metrics_get_results(tester->handshake_times, &results);
+
+        LOG_INFO("Handshake time");
+        LOG_INFO("Number of measurements: %lu", results.num_measurements);
+        LOG_INFO("Minimum: %lldus", results.min);
+        LOG_INFO("Maximum: %lldus", results.max);
+        LOG_INFO("Average: %.2fus", results.avg);
+        LOG_INFO("Standard deviation: %.2fus", results.std_dev);
+        LOG_INFO("Median: %.2fus", results.median);
+        LOG_INFO("90th percentile: %.0fus", results.percentile_90);
+        LOG_INFO("99th percentile: %.0fus", results.percentile_99);
+
+        /* Store results in file */
+        if (config->output_path != NULL)
+        {
+                ret = timing_metrics_write_to_file(tester->handshake_times, config->output_path);
+                if (ret < 0)
+                        ERROR_OUT("Error writing results to file");
+        }
 
 cleanup:
         /* Cleanup */
@@ -485,7 +504,7 @@ static void tester_cleanup(network_tester* tester)
                 close(tester->tcp_socket);
         }
 
-        timing_metrics_destroy(&tester->handshake_time);
+        timing_metrics_destroy(&tester->handshake_times);
 
         /* Close the management socket pair */
         if (tester->management_socket_pair[0] != -1)
