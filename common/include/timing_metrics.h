@@ -9,24 +9,53 @@
 #include "logging.h"
 
 
-typedef struct timing_metrics
+/* Forward declaration. Full declaration is hidden in source file */
+typedef struct timing_metrics timing_metrics;
+
+
+typedef struct timing_metrics_results
 {
-    struct timespec start_time;
-    struct timespec end_time;
-
-    char* file;
-    log_module* log_module;
+        size_t num_measurements;
+        uint32_t min;
+        uint32_t max;
+        double avg;
+        double std_dev;
+        double median;
+        double percentile_90;
+        double percentile_99;
 }
-timing_metrics;
+timing_metrics_results;
 
 
-timing_metrics* timing_metrics_create(char const* output_path, char const* filename, log_module* log_module);
+/* Create a new timing_metrics object.
+ *
+ * Returns NULL on failure.
+ */
+timing_metrics* timing_metrics_create(char const* name, size_t max_measurements,
+                                      log_module* log_module);
 
+
+/* Start the next measurement */
 void timing_metrics_start_measurement(timing_metrics* metrics);
+
+
+/* Stop the current measurement and store the data */
 void timing_metrics_end_measurement(timing_metrics* metrics);
 
-void timing_metrics_print(timing_metrics* metrics);
 
+/* Calculate the results of the measurement */
+void timing_metrics_get_results(timing_metrics* metrics, timing_metrics_results* results);
+
+
+/* Write the measured values in CSV format to a file in given `path` that is
+ * named after the `name` of the metrics object.
+ *
+ * Returns 0 on success, -1 on failure.
+ */
+int timing_metrics_write_to_file(timing_metrics* metrics, char const* path);
+
+
+/* Destroy the timing_metrics object and free all memory */
 void timing_metrics_destroy(timing_metrics** metrics);
 
 

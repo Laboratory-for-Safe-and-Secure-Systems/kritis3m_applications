@@ -19,6 +19,8 @@ typedef struct network_tester_config
         char* target_ip;
         uint16_t target_port;
 
+        bool silent_test;
+
         bool use_tls;
         asl_endpoint_configuration tls_config;
 }
