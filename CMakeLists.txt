@@ -1,5 +1,5 @@
 
-option(ENABLE_TCP_ECHO_SERVER "Enable TCP echo server" ON)
+option(ENABLE_ECHO_SERVER "Enable echo server" ON)
 option(ENABLE_TCP_CLIENT_STDIN_BRIDGE "Enable TCP client stdin bridge" ON)
 option(ENABLE_TLS_PROXY "Enable TLS proxy" ON)
 option(ENABLE_NETWORK_TESTER "Enable network tester" ON)
@@ -7,9 +7,9 @@ option(ENABLE_NETWORK_TESTER "Enable network tester" ON)
 # Common files
 add_subdirectory(common)
 
-# TCP echo server application
-if (ENABLE_TCP_ECHO_SERVER)
-        add_subdirectory(tcp_echo_server)
+# Echo server application
+if (ENABLE_ECHO_SERVER)
+        add_subdirectory(echo_server)
 endif()
 
 # TCP client stdin bridge application

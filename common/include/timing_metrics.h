@@ -47,12 +47,22 @@ void timing_metrics_end_measurement(timing_metrics* metrics);
 void timing_metrics_get_results(timing_metrics* metrics, timing_metrics_results* results);
 
 
-/* Write the measured values in CSV format to a file in given `path` that is
- * named after the `name` of the metrics object.
+/* Prepare the output file. This creates a new CSV file at `path` that is named
+ * after the `name` argument passed to `timing_metrics_create()`. The final file
+ * path is stored in the timing_metrics object.
+ * If a file with the same name already exists, an incremental number is added to
+ * the new file name.
  *
  * Returns 0 on success, -1 on failure.
  */
-int timing_metrics_write_to_file(timing_metrics* metrics, char const* path);
+int timing_metrics_prepare_output_file(timing_metrics* metrics, char const* path);
+
+
+/* Write the measured values in CSV format to the prepared output file.
+ *
+ * Returns 0 on success, -1 on failure.
+ */
+int timing_metrics_write_to_file(timing_metrics* metrics);
 
 
 /* Destroy the timing_metrics object and free all memory */
