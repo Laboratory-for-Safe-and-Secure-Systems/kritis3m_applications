@@ -247,8 +247,13 @@ static void* network_tester_main_thread(void* ptr)
                 if (tester->tcp_socket == -1)
                         ERROR_OUT("Error creating TCP socket");
 
+                /* Set TCP_NODELAY option to disable Nagle algorithm */
                 if (setsockopt(tester->tcp_socket, IPPROTO_TCP, TCP_NODELAY, &(int){1}, sizeof(int)) < 0)
                         ERROR_OUT("setsockopt(TCP_NODELAY) failed: error %d", errno);
+
+                /* Set retry count to send a total of 3 SYN packets => Timeout ~7s */
+                if (setsockopt(tester->tcp_socket, IPPROTO_TCP, TCP_SYNCNT, &(int){2}, sizeof(int)) < 0)
+                        ERROR_OUT("setsockopt(TCP_SYNCNT) failed: error %d", errno);
 
                 /* Create the TLS session */
                 if (config->use_tls == true)
