@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <stdint.h>
 #include <string.h>
+#include <netinet/tcp.h>
 
 #include "tcp_client_stdin_bridge.h"
 
@@ -387,6 +388,14 @@ int tcp_client_stdin_bridge_run(tcp_client_stdin_bridge_config const* config)
 
         /* Set the new socket to non-blocking */
         setblocking(client_stdin_bridge.tcp_socket, false);
+
+        /* Set TCP_NODELAY option to disable Nagle algorithm */
+        if (setsockopt(client_stdin_bridge.tcp_socket, IPPROTO_TCP, TCP_NODELAY, &(int){1}, sizeof(int)) < 0)
+                ERROR_OUT("setsockopt(TCP_NODELAY) failed: error %d", errno);
+
+        /* Set retry count to send a total of 3 SYN packets => Timeout ~7s */
+        if (setsockopt(client_stdin_bridge.tcp_socket, IPPROTO_TCP, TCP_SYNCNT, &(int){2}, sizeof(int)) < 0)
+                ERROR_OUT("setsockopt(TCP_SYNCNT) failed: error %d", errno);
 
         /* Connect to the peer */
         ret = connect(client_stdin_bridge.tcp_socket, (struct sockaddr*) &target_addr, sizeof(target_addr));

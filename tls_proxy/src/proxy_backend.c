@@ -622,6 +622,13 @@ void* proxy_backend_thread(void* ptr)
                         /* Check all proxy connections (that are in the TLS handshake) */
                         else if ((proxy_connection = find_proxy_connection_by_fd(fd)) != NULL)
                         {
+                                if ((event & POLLERR) || (event & POLLHUP))
+                                {
+                                        LOG_ERROR("Socket error");
+                                        poll_set_remove_fd(&backend->poll_set, fd);
+                                        proxy_connection_cleanup(proxy_connection);
+                                        continue;
+                                }
                                 if ((event & POLLIN) || (event & POLLOUT))
                                 {
                                         /* Continue with the handshake */
@@ -669,13 +676,6 @@ void* proxy_backend_thread(void* ptr)
                                                 proxy_connection_cleanup(proxy_connection);
                                                 continue;
                                         }
-                                }
-                                if ((event & POLLERR) || (event & POLLHUP))
-                                {
-                                        LOG_ERROR("Socket error");
-                                        poll_set_remove_fd(&backend->poll_set, fd);
-                                        proxy_connection_cleanup(proxy_connection);
-                                        continue;
                                 }
                         }
                         else
