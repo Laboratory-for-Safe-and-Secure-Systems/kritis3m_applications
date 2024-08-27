@@ -36,8 +36,8 @@ static proxy proxy_pool[MAX_PROXYS];
 
 #if defined(__ZEPHYR__)
 
-#define BACKEND_STACK_SIZE (32*1024)
-Z_KERNEL_STACK_DEFINE_IN(backend_stack, BACKEND_STACK_SIZE, \
+#define TESTER_STACK_SIZE (32*1024)
+Z_KERNEL_STACK_DEFINE_IN(tester_stack, TESTER_STACK_SIZE, \
                 __attribute__((section(CONFIG_RAM_SECTION_STACKS_2))));
 #endif
 
@@ -88,7 +88,7 @@ int proxy_backend_init(proxy_backend* backend, proxy_backend_config const* confi
 
 #if defined(__ZEPHYR__)
         /* We have to properly set the attributes with the stack to use for Zephyr. */
-        pthread_attr_setstack(&backend->thread_attr, &backend_stack, K_THREAD_STACK_SIZEOF(backend_stack));
+        pthread_attr_setstack(&backend->thread_attr, &tester_stack, K_THREAD_STACK_SIZEOF(tester_stack));
 #endif
 
         /* Set the priority of the client handler thread to be one higher than the backend thread.

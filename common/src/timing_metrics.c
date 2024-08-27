@@ -3,7 +3,12 @@
 #include <string.h>
 #include <unistd.h>
 #include <math.h>
+
+#if !defined(__ZEPHYR__)
+
 #include <linux/limits.h>
+
+#endif
 
 #include "timing_metrics.h"
 
@@ -21,6 +26,8 @@ struct timing_metrics
 
         char const* name;
         log_module* log_module;
+
+        char* output_file;
 };
 
 
@@ -56,6 +63,8 @@ timing_metrics* timing_metrics_create(char const* name, size_t max_measurements,
 
                 self->name = name;
                 self->log_module = log_module;
+
+                self->output_file = NULL;
         }
 
         return self;
@@ -174,12 +183,15 @@ void timing_metrics_get_results(timing_metrics* metrics, timing_metrics_results*
 }
 
 
-/* Write the measured values in CSV format to a file in given `path` that is
- * named after the `name` of the metrics object.
+/* Prepare the output file. This creates a new CSV file at `path` that is named
+ * after the `name` argument passed to `timing_metrics_create()`. The final file
+ * path is stored in the timing_metrics object.
+ * If a file with the same name already exists, an incremental number is added to
+ * the new file name.
  *
  * Returns 0 on success, -1 on failure.
  */
-int timing_metrics_write_to_file(timing_metrics* metrics, char const* path)
+int timing_metrics_prepare_output_file(timing_metrics* metrics, char const* path)
 {
 #if defined(__ZEPHYR__)
         /* Not supported on Zephyr */
@@ -190,23 +202,26 @@ int timing_metrics_write_to_file(timing_metrics* metrics, char const* path)
 
         int ret = 0;
 
+        if (metrics->output_file != NULL)
+                free(metrics->output_file);
+
         /* Generate the full output filename */
-        char* filename = (char*) malloc(PATH_MAX);
-        if (filename == NULL)
+        metrics->output_file = (char*) malloc(PATH_MAX);
+        if (metrics->output_file == NULL)
                 ERROR_OUT("Failed to allocate memory for file path.");
 
-        strcpy(filename, path);
-        strcat(filename, "/");
-        strcat(filename, metrics->name);
-        strcat(filename, ".csv");
+        strcpy(metrics->output_file, path);
+        strcat(metrics->output_file, "/");
+        strcat(metrics->output_file, metrics->name);
+        strcat(metrics->output_file, ".csv");
 
         /* Check if the file already exists */
         int i = 1;
-        while (access(filename, F_OK) == 0)
+        while (access(metrics->output_file, F_OK) == 0)
         {
-                LOG_INFO_EX(*metrics->log_module ,"File %s already exists", filename);
+                LOG_INFO_EX(*metrics->log_module ,"File %s already exists", metrics->output_file);
 
-                char* extension = strstr(filename, ".csv");
+                char* extension = strstr(metrics->output_file, ".csv");
                 if (extension == NULL)
                         ERROR_OUT("Failed to find extension in filename.");
 
@@ -215,12 +230,49 @@ int timing_metrics_write_to_file(timing_metrics* metrics, char const* path)
                 i += 1;
         }
 
-        FILE* fptr = fopen(filename, "w");
+        /* Write initial information to the file to test if writing is possible */
+        FILE* fptr = fopen(metrics->output_file, "w");
         if (fptr == NULL)
-                ERROR_OUT("Failed to open file %s.", filename);
+                ERROR_OUT("Failed to open file %s.", metrics->output_file);
 
         fprintf(fptr, "# name: %s\n", metrics->name);
         fprintf(fptr, "# all measurements are in microseconds\n");
+
+cleanup:
+        if (fptr != NULL)
+                fclose(fptr);
+
+        return ret;
+#endif
+}
+
+
+/* Write the measured values in CSV format to the prepared output file.
+ *
+ * Returns 0 on success, -1 on failure.
+ */
+int timing_metrics_write_to_file(timing_metrics* metrics)
+{
+#if defined(__ZEPHYR__)
+        /* Not supported on Zephyr */
+        return 0;
+#else
+        if (metrics == NULL || metrics->output_file == NULL)
+                return -1;
+
+        int ret = 0;
+
+        /* Check if the file still exists */
+        if (access(metrics->output_file, F_OK) != 0)
+        {
+                ERROR_OUT("File %s doesn't exist", metrics->output_file);
+
+        }
+
+        FILE* fptr = fopen(metrics->output_file, "a");
+        if (fptr == NULL)
+                ERROR_OUT("Failed to open file %s.", metrics->output_file);
+
         fprintf(fptr, "# measurements_count: %d\n", metrics->measurements_count);
 
         /* Get the results of the measurement */
@@ -244,8 +296,6 @@ int timing_metrics_write_to_file(timing_metrics* metrics, char const* path)
         }
 
 cleanup:
-        if (filename != NULL)
-                free(filename);
         if (fptr != NULL)
                 fclose(fptr);
 
@@ -260,6 +310,9 @@ void timing_metrics_destroy(timing_metrics** metrics)
         if (metrics != NULL && *metrics != NULL)
         {
                 free((*metrics)->measurements);
+
+                if ((*metrics)->output_file != NULL)
+                        free((*metrics)->output_file);
 
                 free(*metrics);
                 *metrics = NULL;

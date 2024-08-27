@@ -30,6 +30,13 @@ LOG_MODULE_CREATE(network_tester);
 
 #define RECV_BUFFER_SIZE 1024
 
+#if defined(__ZEPHYR__)
+
+#define BACKEND_STACK_SIZE (32*1024)
+Z_KERNEL_STACK_DEFINE_IN(backend_stack, BACKEND_STACK_SIZE, \
+                __attribute__((section(CONFIG_RAM_SECTION_STACKS_2))));
+#endif
+
 
 enum network_tester_management_message_type
 {
@@ -154,15 +161,13 @@ static void* network_tester_main_thread(void* ptr)
 {
         network_tester* tester = (network_tester*) ptr;
         network_tester_config* config = NULL;
-        bool shutdown = false;
         int ret = 0;
         uint8_t test_message[] = {0x55};
 
         tester->running = true;
 
         /* Read the START message with the configuration */
-        network_tester_management_message start_msg;
-        memset(&start_msg, 0, sizeof(start_msg));
+        network_tester_management_message start_msg = {0};
         ret = read_management_message(tester->management_socket_pair[1], &start_msg);
         if (ret != 0)
         {
@@ -221,6 +226,14 @@ static void* network_tester_main_thread(void* ptr)
         if (ret < 0)
         {
                 ERROR_OUT("Error sending response");
+        }
+
+        /* Create the output file (if requested) */
+        if (config->output_path != NULL)
+        {
+                ret = timing_metrics_prepare_output_file(tester->handshake_times, config->output_path);
+                if (ret < 0)
+                        ERROR_OUT("Error creating output file");
         }
 
         if (!config->silent_test)
@@ -333,18 +346,18 @@ static void* network_tester_main_thread(void* ptr)
 
         LOG_INFO("Handshake time");
         LOG_INFO("Number of measurements: %lu", results.num_measurements);
-        LOG_INFO("Minimum: %lldus", results.min);
-        LOG_INFO("Maximum: %lldus", results.max);
-        LOG_INFO("Average: %.2fus", results.avg);
-        LOG_INFO("Standard deviation: %.2fus", results.std_dev);
-        LOG_INFO("Median: %.2fus", results.median);
-        LOG_INFO("90th percentile: %.0fus", results.percentile_90);
-        LOG_INFO("99th percentile: %.0fus", results.percentile_99);
+        LOG_INFO("Minimum: %.3fms", (double) results.min / 1000);
+        LOG_INFO("Maximum: %.3fms", (double) results.max / 1000);
+        LOG_INFO("Average: %.3fms", results.avg / 1000);
+        LOG_INFO("Standard deviation: %.3fms", results.std_dev / 1000);
+        LOG_INFO("Median: %.3fms", results.median / 1000);
+        LOG_INFO("90th percentile: %.3fms", results.percentile_90 / 1000);
+        LOG_INFO("99th percentile: %.3fms", results.percentile_99 / 1000);
 
         /* Store results in file */
         if (config->output_path != NULL)
         {
-                ret = timing_metrics_write_to_file(tester->handshake_times, config->output_path);
+                ret = timing_metrics_write_to_file(tester->handshake_times);
                 if (ret < 0)
                         ERROR_OUT("Error writing results to file");
         }
@@ -352,6 +365,8 @@ static void* network_tester_main_thread(void* ptr)
 cleanup:
         /* Cleanup */
         tester_cleanup(tester);
+
+        LOG_DEBUG("Network tester thread terminated");
 
         /* Detach the thread here, as it is terminating by itself. With that,
          * the thread resources are freed immediatelly. */
@@ -557,8 +572,7 @@ int network_tester_run(network_tester_config const* config)
                 ERROR_OUT("Error starting network tester thread: %d (%s)", errno, strerror(errno));
 
         /* Create a START message */
-        network_tester_management_message msg;
-        memset(&msg, 0, sizeof(msg));
+        network_tester_management_message msg = {0};
         msg.type = MANAGEMENT_MSG_START;
         msg.payload.config = *config;
 
@@ -604,8 +618,7 @@ int network_tester_get_status(network_tester_status* status)
         }
 
         /* Create the STATUS_REQUEST message. Object is used for the response, too. */
-        network_tester_management_message msg;
-        memset(&msg, 0, sizeof(msg));
+        network_tester_management_message msg = {0};
         msg.type = MANAGEMENT_MSG_STATUS_REQUEST;
         msg.payload.status_ptr = status;
 
@@ -655,8 +668,7 @@ int network_tester_terminate(void)
         }
 
         /* Send shutdown message to the management socket */
-	network_tester_management_message msg;
-        memset(&msg, 0, sizeof(msg));
+	network_tester_management_message msg = {0};
         msg.type = MANAGEMENT_MSG_SHUTDOWN;
         msg.payload.dummy_unused = 0;
 

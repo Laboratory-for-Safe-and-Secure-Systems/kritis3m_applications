@@ -23,8 +23,8 @@ proxy_backend_config;
 
 typedef struct proxy_config
 {
-	char const* own_ip_address;
-	char const* target_ip_address;
+	char* own_ip_address;
+	char* target_ip_address;
 	uint16_t listening_port;
 	uint16_t target_port;
 	int32_t log_level;
