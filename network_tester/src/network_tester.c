@@ -251,9 +251,11 @@ static void* network_tester_main_thread(void* ptr)
                 if (setsockopt(tester->tcp_socket, IPPROTO_TCP, TCP_NODELAY, &(int){1}, sizeof(int)) < 0)
                         ERROR_OUT("setsockopt(TCP_NODELAY) failed: error %d", errno);
 
+        #if !defined(__ZEPHYR__)
                 /* Set retry count to send a total of 3 SYN packets => Timeout ~7s */
                 if (setsockopt(tester->tcp_socket, IPPROTO_TCP, TCP_SYNCNT, &(int){2}, sizeof(int)) < 0)
                         ERROR_OUT("setsockopt(TCP_SYNCNT) failed: error %d", errno);
+        #endif
 
                 /* Create the TLS session */
                 if (config->use_tls == true)
