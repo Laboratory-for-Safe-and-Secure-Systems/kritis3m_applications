@@ -513,16 +513,22 @@ static void* connection_handler_thread(void *ptr)
                                         /* We can send data on the tunnel connection now. Send remaining
                                          * data from the asset. */
                                         ret = asl_send(connection->tls_session,
-                                                           connection->ass2tun_buffer,
-                                                           connection->num_of_bytes_in_ass2tun_buffer);
+                                                       connection->ass2tun_buffer,
+                                                       connection->num_of_bytes_in_ass2tun_buffer);
 
-                                        if (ret == 0)
+                                        if (ret == ASL_SUCCESS)
                                         {
                                                 /* Wait again for incoming data on the asset socket and remove
                                                  * the writable indication from the tunnel socket. */
                                                 poll_set_remove_events(&poll_set, connection->tunnel_sock, POLLOUT);
                                                 poll_set_add_events(&poll_set, connection->asset_sock, POLLIN);
                                                 connection->num_of_bytes_in_ass2tun_buffer = 0;
+                                        }
+                                        else if (ret == ASL_WANT_WRITE)
+                                        {
+                                                /* We still have to wait until we can send data, just wait. Hence,
+                                                 * we have to clear the error condition */
+                                                ret = 0;
                                         }
                                 }
                                 if (event & POLLERR)
@@ -552,8 +558,8 @@ static void* connection_handler_thread(void *ptr)
 
                                                 /* Send received data to the other socket */
                                                 ret = asl_send(connection->tls_session,
-                                                                   connection->ass2tun_buffer,
-                                                                   connection->num_of_bytes_in_ass2tun_buffer);
+                                                               connection->ass2tun_buffer,
+                                                               connection->num_of_bytes_in_ass2tun_buffer);
 
                                                 if (ret == ASL_WANT_WRITE)
                                                 {
