@@ -139,18 +139,22 @@ proxy_connection* add_new_connection_to_proxy(proxy* proxy, int client_socket,
 
         if (connection->direction == FORWARD_PROXY)
         {
+        #if !defined(__ZEPHYR__)
                 /* Set retry count to send a total of 3 SYN packets => Timeout ~7s */
                 if (setsockopt(connection->tunnel_sock, IPPROTO_TCP, TCP_SYNCNT, &(int){2}, sizeof(int)) < 0)
                         ERROR_OUT_EX(proxy->log_module, "setsockopt(TCP_SYNCNT) tunnel_sock failed: error %d", errno);
+        #endif
 
                 /* Connect to the peer */
                 ret = connect(connection->tunnel_sock, (struct sockaddr*) &proxy->target_addr, sizeof(proxy->target_addr));
         }
         else if (connection->direction == REVERSE_PROXY)
         {
+        #if !defined(__ZEPHYR__)
                 /* Set retry count to send a total of 3 SYN packets => Timeout ~7s */
                 if (setsockopt(connection->asset_sock, IPPROTO_TCP, TCP_SYNCNT, &(int){2}, sizeof(int)) < 0)
                         ERROR_OUT_EX(proxy->log_module, "setsockopt(TCP_SYNCNT) asset_sock failed: error %d", errno);
+        #endif
 
                 /* Connect to the peer */
                 ret = connect(connection->asset_sock, (struct sockaddr*) &proxy->target_addr, sizeof(proxy->target_addr));
