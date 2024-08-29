@@ -32,6 +32,7 @@
 /* Structure declarations */
 typedef struct proxy_backend
 {
+        bool running;
         int management_socket_pair[2];
         pthread_t thread;
         pthread_attr_t thread_attr;

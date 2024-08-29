@@ -78,6 +78,7 @@ void init_proxy_pool(void)
 int proxy_backend_init(proxy_backend* backend, proxy_backend_config const* config)
 {
         /* Init app config */
+        backend->running = false;
         backend->management_socket_pair[0] = -1;
         backend->management_socket_pair[1] = -1;
 
@@ -471,6 +472,8 @@ void proxy_backend_cleanup(proxy_backend* backend)
                 close(backend->management_socket_pair[1]);
                 backend->management_socket_pair[1] = -1;
         }
+
+        backend->running = false;
 }
 
 
@@ -502,6 +505,7 @@ void* proxy_backend_thread(void* ptr)
 {
         proxy_backend* backend = (proxy_backend*) ptr;
         bool shutdown = false;
+        backend->running = true;
 
         LOG_INFO("Proxy backend thread started");
 
