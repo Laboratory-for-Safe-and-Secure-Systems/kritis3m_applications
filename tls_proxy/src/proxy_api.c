@@ -23,6 +23,12 @@ static proxy_backend the_backend;
  */
 int tls_proxy_backend_run(proxy_backend_config const* config)
 {
+        if (the_backend.running)
+        {
+                LOG_DEBUG("Proxy backend already running");
+                return 0;
+        }
+
         /* Set the log level */
         LOG_LVL_SET(config->log_level);
 
