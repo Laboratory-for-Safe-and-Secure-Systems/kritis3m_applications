@@ -28,7 +28,6 @@ LOG_MODULE_CREATE(network_tester);
 
 #define ERROR_OUT(...) { LOG_ERROR(__VA_ARGS__); ret = -1; goto cleanup; }
 
-#define RECV_BUFFER_SIZE 1024
 
 #if defined(__ZEPHYR__)
 
@@ -65,17 +64,20 @@ network_tester_management_message;
 typedef struct network_tester
 {
         bool running;
-        bool use_tls;
-        int tcp_socket;
         int progress_percent;
-        int iterations;
+        int total_iterations;
+        int tcp_socket;
+        struct sockaddr_in target_addr;
+        network_tester_config* config;
         asl_endpoint* tls_endpoint;
         asl_session* tls_session;
         timing_metrics* handshake_times;
+        timing_metrics* messsage_latency_times;
+        uint8_t* tx_buffer;
+        uint8_t* rx_buffer;
         pthread_t thread;
         pthread_attr_t thread_attr;
         int management_socket_pair[2];
-        uint8_t recv_buffer[RECV_BUFFER_SIZE];
 }
 network_tester;
 
@@ -83,20 +85,27 @@ network_tester;
 /* File global variables */
 static network_tester the_tester = {
         .running = false,
-        .use_tls = false,
-        .tcp_socket = -1,
         .progress_percent = 0,
-        .iterations = 0,
+        .total_iterations = 0,
+        .tcp_socket = -1,
+        .target_addr = {0},
+        .config = NULL,
         .tls_endpoint = NULL,
         .tls_session = NULL,
         .handshake_times = NULL,
+        .messsage_latency_times = NULL,
+        .tx_buffer = NULL,
+        .rx_buffer = NULL,
         .management_socket_pair = {-1, -1},
 };
 
 
 /* Internal method declarations */
 static void asl_log_callback(int32_t level, char const* message);
-static void print_progress(size_t count, network_tester* tester);
+static void print_progress(network_tester* tester, size_t count);
+static int network_init(network_tester* tester);
+static int connection_setup(network_tester* tester);
+static int test_echo_message(network_tester* tester, size_t num_of_bytes);
 static void* network_tester_main_thread(void* ptr);
 static int send_management_message(int socket, network_tester_management_message const* msg);
 static int read_management_message(int socket, network_tester_management_message* msg);
@@ -127,11 +136,11 @@ static void asl_log_callback(int32_t level, char const* message)
 }
 
 
-static void print_progress(size_t count, network_tester* tester)
+static void print_progress(network_tester* tester, size_t count)
 {
         const int bar_width = 50;
 
-        float progress = ((float) count) / tester->iterations;
+        float progress = ((float) count) / tester->total_iterations;
         int progress_percent = progress * 100;
         int bar_length = progress * bar_width;
 
@@ -157,38 +166,16 @@ static void print_progress(size_t count, network_tester* tester)
 }
 
 
-static void* network_tester_main_thread(void* ptr)
+static int network_init(network_tester* tester)
 {
-        network_tester* tester = (network_tester*) ptr;
-        network_tester_config* config = NULL;
         int ret = 0;
-        uint8_t test_message[] = {0x55};
 
-        tester->running = true;
-
-        /* Read the START message with the configuration */
-        network_tester_management_message start_msg = {0};
-        ret = read_management_message(tester->management_socket_pair[1], &start_msg);
-        if (ret != 0)
-        {
-                ERROR_OUT("Error reading start message");
-        }
-        else if (start_msg.type != MANAGEMENT_MSG_START)
-        {
-                ERROR_OUT("Received invalid start message");
-        }
-        config = &start_msg.payload.config;
-
-        tester->iterations = config->iterations;
-        tester->use_tls = config->use_tls;
-
+        /* After reading the initial start message, we set the management_socket
+         * to non-blocking. */
         setblocking(tester->management_socket_pair[1], false);
 
-        /* Create the timing metrics */
-        tester->handshake_times = timing_metrics_create("handshake_time", config->iterations, LOG_MODULE_GET());
-
         /* Initialize the Agile Security Library */
-        if (config->use_tls == true)
+        if (tester->config->use_tls == true)
         {
                 LOG_DEBUG("Initializing ASL");
 
@@ -203,23 +190,192 @@ static void* network_tester_main_thread(void* ptr)
         }
 
         /* Configure TCP destination */
-        struct sockaddr_in target_addr = {
-                        .sin_family = AF_INET,
-                        .sin_port = htons(config->target_port)
-        };
-        inet_pton(target_addr.sin_family, config->target_ip, &target_addr.sin_addr);
+        tester->target_addr.sin_family = AF_INET;
+        tester->target_addr.sin_port = htons(tester->config->target_port);
+        inet_pton(tester->target_addr.sin_family, tester->config->target_ip,
+                  &tester->target_addr.sin_addr);
 
         /* Configure TLS endpoint */
-        if (config->use_tls == true)
+        if (tester->config->use_tls == true)
         {
                 LOG_DEBUG("Setting up TLS client endpoint");
 
-                tester->tls_endpoint = asl_setup_client_endpoint(&config->tls_config);
+                tester->tls_endpoint = asl_setup_client_endpoint(&tester->config->tls_config);
                 if (tester->tls_endpoint == NULL)
                         ERROR_OUT("Error creating TLS endpoint");
         }
 
-        /* Send response */
+cleanup:
+        return ret;
+}
+
+
+static int connection_setup(network_tester* tester)
+{
+        int ret = 0;
+
+        /* Create the TCP socket for the outgoing connection */
+        tester->tcp_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (tester->tcp_socket == -1)
+                ERROR_OUT("Error creating TCP socket");
+
+        /* Set TCP_NODELAY option to disable Nagle algorithm */
+        if (setsockopt(tester->tcp_socket, IPPROTO_TCP, TCP_NODELAY, &(int){1}, sizeof(int)) < 0)
+                ERROR_OUT("setsockopt(TCP_NODELAY) failed: error %d", errno);
+
+#if !defined(__ZEPHYR__)
+        /* Set retry count to send a total of 3 SYN packets => Timeout ~7s */
+        if (setsockopt(tester->tcp_socket, IPPROTO_TCP, TCP_SYNCNT, &(int){2}, sizeof(int)) < 0)
+                ERROR_OUT("setsockopt(TCP_SYNCNT) failed: error %d", errno);
+#endif
+
+        /* Create the TLS session */
+        if (tester->config->use_tls == true)
+        {
+                LOG_DEBUG("Creating TLS session");
+
+                tester->tls_session = asl_create_session(tester->tls_endpoint, tester->tcp_socket);
+                if (tester->tls_session == NULL)
+                        ERROR_OUT("Error creating TLS session");
+        }
+
+cleanup:
+        return ret;
+}
+
+
+static int test_echo_message(network_tester* tester, size_t num_of_bytes)
+{
+        int ret = 0;
+
+        if (num_of_bytes > tester->config->message_latency_test.size)
+                ERROR_OUT("Message size too large");
+
+        /* Write message to the peer */
+        if (tester->config->use_tls)
+        {
+                ret = asl_send(tester->tls_session, tester->tx_buffer, num_of_bytes);
+                if (ret != ASL_SUCCESS)
+                        ERROR_OUT("Error sending message: %d (%s)", ret, asl_error_message(ret));
+        }
+        else
+        {
+                ret = send(tester->tcp_socket, tester->tx_buffer, num_of_bytes, 0);
+                if (ret == -1)
+                        ERROR_OUT("Error sending message: %d (%s)", ret, strerror(errno));
+        }
+
+        /* Read response */
+        if (tester->config->use_tls)
+        {
+                ret = asl_receive(tester->tls_session, tester->rx_buffer, num_of_bytes);
+                if (ret < 0)
+                        ERROR_OUT("Error receiving message: %d (%s)", ret, asl_error_message(ret));
+        }
+        else
+        {
+                ret = recv(tester->tcp_socket, tester->rx_buffer, num_of_bytes, 0);
+                if (ret == -1)
+                        ERROR_OUT("Error receiving message: %d (%s)", ret, strerror(errno));
+        }
+
+        if ((ret != num_of_bytes) || (memcmp(tester->tx_buffer, tester->rx_buffer, num_of_bytes) != 0))
+                ERROR_OUT("Echo NOT successfull");
+
+        ret = 0;
+
+cleanup:
+        return ret;
+}
+
+
+static void* network_tester_main_thread(void* ptr)
+{
+        network_tester* tester = (network_tester*) ptr;
+        int ret = 0;
+
+        tester->running = true;
+
+        /* Read the START message with the configuration */
+        network_tester_management_message start_msg = {0};
+        ret = read_management_message(tester->management_socket_pair[1], &start_msg);
+        if (ret != 0)
+                ERROR_OUT("Error reading start message");
+        if (start_msg.type != MANAGEMENT_MSG_START)
+                ERROR_OUT("Received invalid start message");
+
+        tester->config = &start_msg.payload.config;
+
+        /* Initialize all network related stuff */
+        ret = network_init(tester);
+        if (ret < 0)
+                ERROR_OUT("Error initializing network structures");
+
+        /* Allocate the buffers for the message exchange */
+        if (tester->config->message_latency_test.size <= 0)
+                ERROR_OUT("Invalid message size: %d", tester->config->message_latency_test.size);
+
+        tester->tx_buffer = (uint8_t*) malloc(tester->config->message_latency_test.size);
+        tester->rx_buffer = (uint8_t*) malloc(tester->config->message_latency_test.size);
+        if ((tester->tx_buffer == NULL) || (tester->rx_buffer == NULL))
+                ERROR_OUT("Error allocating memory for message buffers");
+
+        /* Fill the message buffer with a known pattern */
+        for (size_t i = 0; i < tester->config->message_latency_test.size; i++)
+        {
+                tester->tx_buffer[i] = i & 0xFF;
+        }
+
+        /* Calculate the number of total number of measurements we are taking for the
+         * message latencies (this is also needed for the progress bar). The total number
+         * of measurements we are taking is the number of message iterations multiplied
+         * with the number of handshakes (as we are taking `message_latency_test.iterations`
+         * measurements per handshake). As special cases, we have to consider when we don't
+         * want to measure either of the two types at all (and hence one of the iteration
+         * number is zero). */
+        if (tester->config->handshake_test.iterations == 0)
+                tester->total_iterations = tester->config->message_latency_test.iterations;
+        else if (tester->config->message_latency_test.iterations == 0)
+                tester->total_iterations = tester->config->handshake_test.iterations;
+        else
+                tester->total_iterations = tester->config->handshake_test.iterations *
+                                           tester->config->message_latency_test.iterations;
+
+        /* Create the timing metrics for the handshake measurements */
+        if (tester->config->handshake_test.iterations > 0)
+        {
+                tester->handshake_times = timing_metrics_create("handshake_time",
+                                                                tester->config->handshake_test.iterations,
+                                                                LOG_MODULE_GET());
+                if (tester->handshake_times == NULL)
+                        ERROR_OUT("Error creating handshake timing metrics");
+        }
+
+        /* Create the timing metrics for the message latency measurements. */
+        if (tester->config->message_latency_test.iterations > 0)
+        {
+                tester->messsage_latency_times = timing_metrics_create("message_latency_time",
+                                                                       tester->total_iterations,
+                                                                       LOG_MODULE_GET());
+                if (tester->messsage_latency_times == NULL)
+                        ERROR_OUT("Error creating message latency timing metrics");
+        }
+
+        /* Create the output file (if requested) */
+        if (tester->config->output_path != NULL)
+        {
+                ret = timing_metrics_prepare_output_file(tester->handshake_times,
+                                                         tester->config->output_path);
+                if (ret < 0)
+                        ERROR_OUT("Error creating output file");
+
+                ret = timing_metrics_prepare_output_file(tester->messsage_latency_times,
+                                                         tester->config->output_path);
+                if (ret < 0)
+                        ERROR_OUT("Error creating output file");
+        }
+
+        /* Send the response to the management interface */
         start_msg.type = MANAGEMENT_RESPONSE;
         start_msg.payload.response_code = 0;
         ret = send_management_message(tester->management_socket_pair[1], &start_msg);
@@ -228,55 +384,32 @@ static void* network_tester_main_thread(void* ptr)
                 ERROR_OUT("Error sending response");
         }
 
-        /* Create the output file (if requested) */
-        if (config->output_path != NULL)
-        {
-                ret = timing_metrics_prepare_output_file(tester->handshake_times, config->output_path);
-                if (ret < 0)
-                        ERROR_OUT("Error creating output file");
-        }
-
-        if (!config->silent_test)
+        if (tester->config->silent_test == false)
                 printf("\r\n"); /* New line necessary for proper progress print */
 
-        /* Main loop */
-        for (int i = 0; i < config->iterations; i++)
+
+        /* Loop over all handshake iterations we want to perform. We use a do {} while() loop here
+         * to make sure the handshake loop is executed at least once, also in case no handshake
+         * measurements should be taken (`handshake_test.iterations` is zero). */
+        int handshake_count = 0;
+        do
         {
-                /* Create the TCP socket for the outgoing connection */
-                tester->tcp_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-                if (tester->tcp_socket == -1)
-                        ERROR_OUT("Error creating TCP socket");
+                /* Setup the connection */
+                ret = connection_setup(tester);
+                if (ret < 0)
+                        ERROR_OUT("Error setting up connection");
 
-                /* Set TCP_NODELAY option to disable Nagle algorithm */
-                if (setsockopt(tester->tcp_socket, IPPROTO_TCP, TCP_NODELAY, &(int){1}, sizeof(int)) < 0)
-                        ERROR_OUT("setsockopt(TCP_NODELAY) failed: error %d", errno);
-
-        #if !defined(__ZEPHYR__)
-                /* Set retry count to send a total of 3 SYN packets => Timeout ~7s */
-                if (setsockopt(tester->tcp_socket, IPPROTO_TCP, TCP_SYNCNT, &(int){2}, sizeof(int)) < 0)
-                        ERROR_OUT("setsockopt(TCP_SYNCNT) failed: error %d", errno);
-        #endif
-
-                /* Create the TLS session */
-                if (config->use_tls == true)
-                {
-                        LOG_DEBUG("Creating TLS session");
-
-                        tester->tls_session = asl_create_session(tester->tls_endpoint, tester->tcp_socket);
-                        if (tester->tls_session == NULL)
-                                ERROR_OUT("Error creating TLS session");
-                }
-
+                /* Start the measurement of the handshake time */
                 timing_metrics_start_measurement(tester->handshake_times);
 
                 /* Connect to the peer */
                 LOG_DEBUG("Establishing TCP connection");
-                ret = connect(tester->tcp_socket, (struct sockaddr*) &target_addr, sizeof(target_addr));
+                ret = connect(tester->tcp_socket, (struct sockaddr*) &tester->target_addr, sizeof(tester->target_addr));
                 if ((ret != 0) && (errno != EINPROGRESS))
                         ERROR_OUT("Error establishing TCP connection to target peer");
 
                 /* Do TLS handshake */
-                if (config->use_tls == true)
+                if (tester->config->use_tls == true)
                 {
                         LOG_DEBUG("Performing TLS handshake");
 
@@ -285,41 +418,44 @@ static void* network_tester_main_thread(void* ptr)
                                 ERROR_OUT("Error performing TLS handshake: %d (%s)", ret, asl_error_message(ret));
                 }
 
-                /* Write message to the peer */
-                if (config->use_tls)
-                {
-                        ret = asl_send(tester->tls_session, test_message, sizeof(test_message));
-                        if (ret != ASL_SUCCESS)
-                                ERROR_OUT("Error sending message: %d (%s)", ret, asl_error_message(ret));
-                }
-                else
-                {
-                        ret = send(tester->tcp_socket, test_message, sizeof(test_message), 0);
-                        if (ret == -1)
-                                ERROR_OUT("Error sending message");
-                }
+                /* Check if the echo of a single bytes works. This means that the connection is fully established. */
+                ret = test_echo_message(tester, 1);
+                if (ret < 0)
+                        ERROR_OUT("Error testing echo message");
 
-                /* Read response */
-                if (config->use_tls)
-                {
-                        ret = asl_receive(tester->tls_session, tester->recv_buffer, sizeof(test_message));
-                        if (ret < 0)
-                                ERROR_OUT("Error receiving message: %d (%s)", ret, asl_error_message(ret));
-                }
-                else
-                {
-                        ret = recv(tester->tcp_socket, tester->recv_buffer, sizeof(test_message), 0);
-                        if (ret == -1)
-                                ERROR_OUT("Error receiving message");
-                }
-
-                if ((ret != sizeof(test_message)) || (memcmp(test_message, tester->recv_buffer, sizeof(test_message)) != 0))
-                        ERROR_OUT("Echo NOT successfull");
-
+                /* As soon as the echo of a single byte is done, we consider the handshake done and stop the measurement. */
                 timing_metrics_end_measurement(tester->handshake_times);
 
+                /* Loop over all requested message latency measurements per handshake */
+                for (int message_count = 0; message_count < tester->config->message_latency_test.iterations; message_count++)
+                {
+                        /* Start the measurement of the message latency */
+                        timing_metrics_start_measurement(tester->messsage_latency_times);
+
+                        /* Send the requested number of bytes and wait for the echo */
+                        ret = test_echo_message(tester, tester->config->message_latency_test.size);
+                        if (ret < 0)
+                                ERROR_OUT("Error testing echo message");
+
+                        /* End the measurement of the message latency */
+                        timing_metrics_end_measurement(tester->messsage_latency_times);
+
+                        /* Print progress bar to the console */
+                        if (tester->config->silent_test == false)
+                                print_progress(tester,
+                                               (handshake_count * tester->config->message_latency_test.iterations)
+                                                        + message_count + 1);
+
+                        /* ToDo: Check fo a management message here?! Does that influece the results? */
+
+                        if (tester->config->message_latency_test.delay_us > 0)
+                        {
+                                usleep(tester->config->message_latency_test.delay_us);
+                        }
+                }
+
                 /* Close connection */
-                if (config->use_tls)
+                if (tester->config->use_tls)
                 {
                         asl_close_session(tester->tls_session);
                         asl_free_session(tester->tls_session);
@@ -330,8 +466,15 @@ static void* network_tester_main_thread(void* ptr)
                 tester->tcp_socket = -1;
 
                 /* Print progress bar to the console */
-                if (!config->silent_test)
-                        print_progress(i+1, tester);
+                if (tester->config->silent_test == false)
+                {
+                        if (tester->config->handshake_test.iterations == 0)
+                                print_progress(tester, tester->config->message_latency_test.iterations);
+                        else if (tester->config->message_latency_test.iterations == 0)
+                                print_progress(tester, handshake_count+1);
+                        else
+                                print_progress(tester, (handshake_count+1) * tester->config->message_latency_test.iterations);
+                }
 
                 /* Check if we have received a management message */
                 ret = handle_management_message(tester, tester->management_socket_pair[1]);
@@ -341,33 +484,57 @@ static void* network_tester_main_thread(void* ptr)
                         break;
                 }
 
-                if (config->delay > 0)
+                if (tester->config->handshake_test.delay_ms > 0)
                 {
-                        usleep(config->delay * 1000);
+                        usleep(tester->config->handshake_test.delay_ms * 1000);
                 }
+
+                handshake_count += 1;
         }
+        while (handshake_count < tester->config->handshake_test.iterations);
 
         /* Print results */
         timing_metrics_results results;
-        timing_metrics_get_results(tester->handshake_times, &results);
 
-        LOG_INFO("Handshake time");
-        LOG_INFO("Number of measurements: %lu", results.num_measurements);
-        LOG_INFO("Minimum: %.3fms", (double) results.min / 1000);
-        LOG_INFO("Maximum: %.3fms", (double) results.max / 1000);
-        LOG_INFO("Average: %.3fms", results.avg / 1000);
-        LOG_INFO("Standard deviation: %.3fms", results.std_dev / 1000);
-        LOG_INFO("Median: %.3fms", results.median / 1000);
-        LOG_INFO("90th percentile: %.3fms", results.percentile_90 / 1000);
-        LOG_INFO("99th percentile: %.3fms", results.percentile_99 / 1000);
-
-        /* Store results in file */
-        if (config->output_path != NULL)
+        if (tester->config->handshake_test.iterations > 0)
         {
-                ret = timing_metrics_write_to_file(tester->handshake_times);
-                if (ret < 0)
-                        ERROR_OUT("Error writing results to file");
+                timing_metrics_get_results(tester->handshake_times, &results);
+
+                LOG_INFO("\nHandshake time");
+                LOG_INFO("Number of measurements: %lu", results.num_measurements);
+                LOG_INFO("Minimum: %.3fms", (double) results.min / 1000);
+                LOG_INFO("Maximum: %.3fms", (double) results.max / 1000);
+                LOG_INFO("Average: %.3fms", results.avg / 1000);
+                LOG_INFO("Standard deviation: %.3fms", results.std_dev / 1000);
+                LOG_INFO("Median: %.3fms", results.median / 1000);
+                LOG_INFO("90th percentile: %.3fms", results.percentile_90 / 1000);
+                LOG_INFO("99th percentile: %.3fms", results.percentile_99 / 1000);
         }
+
+        if (tester->config->message_latency_test.iterations > 0)
+        {
+                timing_metrics_get_results(tester->messsage_latency_times, &results);
+
+                LOG_INFO("\nMessage latency");
+                LOG_INFO("Number of measurements: %lu", results.num_measurements);
+                LOG_INFO("Minimum: %.3fus", (double) results.min);
+                LOG_INFO("Maximum: %.3fus", (double) results.max);
+                LOG_INFO("Average: %.3fus", results.avg);
+                LOG_INFO("Standard deviation: %.3fus", results.std_dev);
+                LOG_INFO("Median: %.3fus", results.median);
+                LOG_INFO("90th percentile: %.3fus", results.percentile_90);
+                LOG_INFO("99th percentile: %.3fus", results.percentile_99);
+        }
+
+        /* Store results in file (when no output is requested, the fails gracefully) */
+        ret = timing_metrics_write_to_file(tester->handshake_times);
+        if (ret < 0)
+                ERROR_OUT("Error writing results to file");
+
+        /* Store results in file (when no output is requested, the fails gracefully) */
+        ret = timing_metrics_write_to_file(tester->messsage_latency_times);
+        if (ret < 0)
+                ERROR_OUT("Error writing results to file");
 
 cleanup:
         /* Cleanup */
@@ -512,11 +679,11 @@ static int handle_management_message(network_tester* tester, int socket)
 static void tester_cleanup(network_tester* tester)
 {
         /* Clean up */
-        if ((tester->use_tls == true) && (tester->tls_session != NULL))
+        if ((tester->config->use_tls == true) && (tester->tls_session != NULL))
         {
                 asl_free_session(tester->tls_session);
         }
-        if ((tester->use_tls == true) && (tester->tls_endpoint != NULL))
+        if ((tester->config->use_tls == true) && (tester->tls_endpoint != NULL))
         {
                 asl_free_endpoint(tester->tls_endpoint);
                 asl_cleanup();
@@ -541,6 +708,47 @@ static void tester_cleanup(network_tester* tester)
         }
 
         tester->running = false;
+}
+
+
+/* Create the default config for the network_tester */
+network_tester_config network_tester_default_config(void)
+{
+        network_tester_config default_config = {0};
+
+        /* Network tester config */
+        default_config.log_level = LOG_LVL_WARN;
+        default_config.output_path = NULL;
+
+        default_config.handshake_test.iterations = 1;
+        default_config.handshake_test.delay_ms = 0;
+
+        default_config.message_latency_test.iterations = 0;
+        default_config.message_latency_test.delay_us = 0;
+        default_config.message_latency_test.size = 100;
+
+        default_config.target_ip = NULL;
+        default_config.target_port = 0;
+
+        default_config.use_tls = true;
+
+        /* TLS endpoint config */
+        default_config.tls_config.mutual_authentication = true;
+        default_config.tls_config.no_encryption = false;
+        default_config.tls_config.hybrid_signature_mode = ASL_HYBRID_SIGNATURE_MODE_DEFAULT;
+        default_config.tls_config.key_exchange_method = ASL_KEX_DEFAULT;
+        default_config.tls_config.secure_element_middleware_path = NULL;
+        default_config.tls_config.device_certificate_chain.buffer = NULL;
+        default_config.tls_config.device_certificate_chain.size = 0;
+        default_config.tls_config.private_key.buffer = NULL;
+        default_config.tls_config.private_key.size = 0;
+        default_config.tls_config.private_key.additional_key_buffer = NULL;
+        default_config.tls_config.private_key.additional_key_size = 0;
+        default_config.tls_config.root_certificate.buffer = NULL;
+        default_config.tls_config.root_certificate.size = 0;
+        default_config.tls_config.keylog_file = NULL;
+
+        return default_config;
 }
 
 

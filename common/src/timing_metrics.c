@@ -197,7 +197,10 @@ int timing_metrics_prepare_output_file(timing_metrics* metrics, char const* path
         /* Not supported on Zephyr */
         return 0;
 #else
-        if (metrics == NULL || path == NULL)
+        if (metrics == NULL)
+                return 0; /* No error */
+
+        if (path == NULL)
                 return -1;
 
         int ret = 0;
@@ -258,7 +261,7 @@ int timing_metrics_write_to_file(timing_metrics* metrics)
         return 0;
 #else
         if (metrics == NULL || metrics->output_file == NULL)
-                return -1;
+                return 0; /* No error */
 
         int ret = 0;
 
