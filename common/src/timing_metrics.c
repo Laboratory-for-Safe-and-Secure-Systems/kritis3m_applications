@@ -222,7 +222,7 @@ int timing_metrics_prepare_output_file(timing_metrics* metrics, char const* path
         int i = 1;
         while (access(metrics->output_file, F_OK) == 0)
         {
-                LOG_INFO_EX(*metrics->log_module ,"File %s already exists", metrics->output_file);
+                LOG_DEBUG_EX(*metrics->log_module ,"File %s already exists", metrics->output_file);
 
                 char* filename = strstr(metrics->output_file, metrics->name);
                 if (filename == NULL)
@@ -234,6 +234,8 @@ int timing_metrics_prepare_output_file(timing_metrics* metrics, char const* path
                 sprintf(extension, "_%d.csv", i);
                 i += 1;
         }
+
+        LOG_INFO_EX(*metrics->log_module ,"Output file: %s", metrics->output_file);
 
         /* Write initial information to the file to test if writing is possible */
         FILE* fptr = fopen(metrics->output_file, "w");

@@ -154,7 +154,7 @@ static void print_progress(network_tester* tester, size_t count)
         printf("\033[A\rProgress: [");
         for (int i = 0; i < bar_length; ++i)
         {
-                printf("#");
+                printf("=");
         }
         for (int i = bar_length; i < bar_width; ++i)
         {
