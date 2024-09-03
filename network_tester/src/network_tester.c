@@ -494,13 +494,14 @@ static void* network_tester_main_thread(void* ptr)
         while (handshake_count < tester->config->handshake_test.iterations);
 
         /* Print results */
+        LOG_INFO("Test results:\r\n");
         timing_metrics_results results;
 
         if (tester->config->handshake_test.iterations > 0)
         {
                 timing_metrics_get_results(tester->handshake_times, &results);
 
-                LOG_INFO("\nHandshake time");
+                LOG_INFO("Handshake time");
                 LOG_INFO("Number of measurements: %lu", results.num_measurements);
                 LOG_INFO("Minimum: %.3fms", (double) results.min / 1000);
                 LOG_INFO("Maximum: %.3fms", (double) results.max / 1000);
@@ -508,14 +509,14 @@ static void* network_tester_main_thread(void* ptr)
                 LOG_INFO("Standard deviation: %.3fms", results.std_dev / 1000);
                 LOG_INFO("Median: %.3fms", results.median / 1000);
                 LOG_INFO("90th percentile: %.3fms", results.percentile_90 / 1000);
-                LOG_INFO("99th percentile: %.3fms", results.percentile_99 / 1000);
+                LOG_INFO("99th percentile: %.3fms\r\n", results.percentile_99 / 1000);
         }
 
         if (tester->config->message_latency_test.iterations > 0)
         {
                 timing_metrics_get_results(tester->messsage_latency_times, &results);
 
-                LOG_INFO("\nMessage latency");
+                LOG_INFO("Message latency");
                 LOG_INFO("Number of measurements: %lu", results.num_measurements);
                 LOG_INFO("Minimum: %.3fus", (double) results.min);
                 LOG_INFO("Maximum: %.3fus", (double) results.max);
@@ -523,7 +524,7 @@ static void* network_tester_main_thread(void* ptr)
                 LOG_INFO("Standard deviation: %.3fus", results.std_dev);
                 LOG_INFO("Median: %.3fus", results.median);
                 LOG_INFO("90th percentile: %.3fus", results.percentile_90);
-                LOG_INFO("99th percentile: %.3fus", results.percentile_99);
+                LOG_INFO("99th percentile: %.3fus\r\n", results.percentile_99);
         }
 
         /* Store results in file (when no output is requested, the fails gracefully) */
@@ -720,7 +721,7 @@ network_tester_config network_tester_default_config(void)
         default_config.log_level = LOG_LVL_WARN;
         default_config.output_path = NULL;
 
-        default_config.handshake_test.iterations = 1;
+        default_config.handshake_test.iterations = 0;
         default_config.handshake_test.delay_ms = 0;
 
         default_config.message_latency_test.iterations = 0;
