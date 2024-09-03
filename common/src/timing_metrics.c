@@ -224,9 +224,11 @@ int timing_metrics_prepare_output_file(timing_metrics* metrics, char const* path
         {
                 LOG_INFO_EX(*metrics->log_module ,"File %s already exists", metrics->output_file);
 
-                char* extension = strstr(metrics->output_file, ".csv");
-                if (extension == NULL)
-                        ERROR_OUT("Failed to find extension in filename.");
+                char* filename = strstr(metrics->output_file, metrics->name);
+                if (filename == NULL)
+                        ERROR_OUT("Error in filename handling.");
+
+                char* extension = filename + strlen(metrics->name);
 
                 /* Append a number to the filename */
                 sprintf(extension, "_%d.csv", i);
