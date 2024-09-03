@@ -11,3 +11,8 @@ add_library(kritis3m_applications_common STATIC
 target_include_directories(kritis3m_applications_common PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
+
+# Link the library with the required libraries
+target_link_libraries(kritis3m_applications_common
+        m # Timing metrics need the math library
+)
