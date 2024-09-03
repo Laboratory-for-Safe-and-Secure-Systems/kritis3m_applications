@@ -19,8 +19,18 @@ LOG_MODULE_CREATE(echo_server);
 
 #define ERROR_OUT(...) { LOG_ERROR(__VA_ARGS__); goto cleanup; }
 
+
+#if defined(__ZEPHYR__)
+
 #define MAX_CLIENTS 5
 #define RECV_BUFFER_SIZE 1024
+
+#else
+
+#define MAX_CLIENTS 25
+#define RECV_BUFFER_SIZE 16384
+
+#endif
 
 
 enum echo_server_management_message_type
@@ -496,56 +506,87 @@ static int do_echo(echo_server* server, echo_client* client, int event)
 
         if (event & POLLIN)
         {
-                /* Receive data from the peer */
-                if (client->tls_session != NULL)
+                ret = 1;
+                while (ret > 0)
                 {
-                        ret = asl_receive(client->tls_session, client->recv_buffer, sizeof(client->recv_buffer));
-                        if (ret == ASL_CONN_CLOSED)
-                                ret = 0;
-                }
-                else
-                        ret = read(client->socket, client->recv_buffer, sizeof(client->recv_buffer));
-
-                if (ret > 0)
-                {
-                        client->num_of_bytes_in_recv_buffer = ret;
-
-                        /* Echo data back */
+                        /* Receive data from the peer */
                         if (client->tls_session != NULL)
                         {
-                                ret = asl_send(client->tls_session, client->recv_buffer,
-                                               client->num_of_bytes_in_recv_buffer);
-                                if (ret == ASL_WANT_WRITE)
-                                {
-                                        /* We have to wait for the socket to be writable */
-                                        poll_set_update_events(&server->poll_set, client->socket, POLLOUT);
+                                ret = asl_receive(client->tls_session, client->recv_buffer, sizeof(client->recv_buffer));
+                                if (ret == ASL_CONN_CLOSED)
                                         ret = 0;
-                                }
-                                else if (ret != ASL_SUCCESS)
-                                {
-                                        ret = -1;
-                                }
                         }
                         else
                         {
-                                ret = send(client->socket,
-                                        client->recv_buffer,
-                                        client->num_of_bytes_in_recv_buffer,
-                                        0);
+                                ret = read(client->socket, client->recv_buffer, sizeof(client->recv_buffer));
 
                                 if ((ret == -1) && ((errno == EAGAIN) || (errno == EWOULDBLOCK)))
                                 {
-                                        /* We have to wait for the socket to be writable */
-                                        poll_set_update_events(&server->poll_set, client->socket, POLLOUT);
+                                        ret = ASL_WANT_READ;
+                                }
+                        }
+
+                        if (ret > 0)
+                        {
+                                client->num_of_bytes_in_recv_buffer = ret;
+
+                                /* Echo data back */
+                                if (client->tls_session != NULL)
+                                {
+                                        ret = asl_send(client->tls_session, client->recv_buffer,
+                                                client->num_of_bytes_in_recv_buffer);
+
+                                        if (ret == ASL_WANT_WRITE)
+                                        {
+                                                /* We have to wait for the socket to be writable */
+                                                poll_set_update_events(&server->poll_set, client->socket, POLLOUT);
+                                                ret = 0;
+                                        }
+                                        else if (ret != ASL_SUCCESS)
+                                                ret = -1;
+                                        else
+                                                ret = client->num_of_bytes_in_recv_buffer;
+                                }
+                                else
+                                {
+                                        ret = send(client->socket,
+                                                client->recv_buffer,
+                                                client->num_of_bytes_in_recv_buffer,
+                                                0);
+
+                                        if ((ret == -1) && ((errno == EAGAIN) || (errno == EWOULDBLOCK)))
+                                        {
+                                                /* We have to wait for the socket to be writable */
+                                                poll_set_update_events(&server->poll_set, client->socket, POLLOUT);
+                                                ret = 0;
+                                        }
+                                }
+
+                                if ((size_t)ret == sizeof(client->recv_buffer))
+                                {
+                                        /* We read the maximum amount of data from the socket. This could be
+                                         * an indication that there is more data to be read. Hence, we trigger
+                                         * another read here. */
+                                        ret = 1;
+                                }
+                                else if (ret  == client->num_of_bytes_in_recv_buffer)
+                                {
+                                        client->num_of_bytes_in_recv_buffer = 0;
                                         ret = 0;
                                 }
                         }
-                }
-                else if (ret == 0)
-                {
-                        /* Connection closed */
-                        LOG_INFO("TCP connection closed by peer");
-                        ret = -1;
+                        else if (ret == ASL_WANT_READ)
+                        {
+                                /* We have to wait for more data from the peer */
+                                ret = 0;
+
+                        }
+                        else if (ret == 0)
+                        {
+                                /* Connection closed */
+                                LOG_INFO("TCP connection closed by peer");
+                                ret = -1;
+                        }
                 }
         }
         if (event & POLLOUT)

@@ -266,20 +266,27 @@ static int test_echo_message(network_tester* tester, size_t num_of_bytes)
         }
 
         /* Read response */
-        if (tester->config->use_tls)
+        size_t bytes_received = 0;
+        while (bytes_received < num_of_bytes)
         {
-                ret = asl_receive(tester->tls_session, tester->rx_buffer, num_of_bytes);
-                if (ret < 0)
-                        ERROR_OUT("Error receiving message: %d (%s)", ret, asl_error_message(ret));
-        }
-        else
-        {
-                ret = recv(tester->tcp_socket, tester->rx_buffer, num_of_bytes, 0);
-                if (ret == -1)
-                        ERROR_OUT("Error receiving message: %d (%s)", ret, strerror(errno));
+                if (tester->config->use_tls)
+                {
+                        ret = asl_receive(tester->tls_session, tester->rx_buffer + bytes_received, num_of_bytes - bytes_received);
+                        if (ret < 0)
+                                ERROR_OUT("Error receiving message: %d (%s)", ret, asl_error_message(ret));
+                }
+                else
+                {
+                        ret = recv(tester->tcp_socket, tester->rx_buffer + bytes_received, num_of_bytes - bytes_received, 0);
+                        if (ret == -1)
+                                ERROR_OUT("Error receiving message: %d (%s)", ret, strerror(errno));
+                }
+
+                bytes_received += ret;
         }
 
-        if ((ret != num_of_bytes) || (memcmp(tester->tx_buffer, tester->rx_buffer, num_of_bytes) != 0))
+        /* Check if the echod data is correct */
+        if ((bytes_received != num_of_bytes) || (memcmp(tester->tx_buffer, tester->rx_buffer, num_of_bytes) != 0))
                 ERROR_OUT("Echo NOT successfull");
 
         ret = 0;
