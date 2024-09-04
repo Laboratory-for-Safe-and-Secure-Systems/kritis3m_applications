@@ -24,13 +24,18 @@
 
 
 /* File global variables */
-static proxy_connection proxy_connection_pool[MAX_CONNECTIONS_PER_PROXY];
-
 #if defined(__ZEPHYR__)
-#define CONNECTION_HANDLER_STACK_SIZE (8*1024)
 
+static proxy_connection proxy_connection_pool[MAX_CONNECTIONS_PER_PROXY] __attribute__((section(CONFIG_RAM_SECTION_STACKS_2)));
+
+#define CONNECTION_HANDLER_STACK_SIZE (8*1024)
 Z_KERNEL_STACK_ARRAY_DEFINE_IN(connection_handler_stack_pool, MAX_CONNECTIONS_PER_PROXY, \
                 CONNECTION_HANDLER_STACK_SIZE, __attribute__((section(CONFIG_RAM_SECTION_STACKS_1))));
+
+#else
+
+static proxy_connection proxy_connection_pool[MAX_CONNECTIONS_PER_PROXY];
+
 #endif
 
 

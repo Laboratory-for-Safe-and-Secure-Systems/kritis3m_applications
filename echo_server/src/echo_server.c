@@ -95,13 +95,20 @@ static echo_server the_server = {
         .tls_endpoint = NULL,
         .management_socket_pair = {-1, -1},
 };
-static echo_client client_pool[MAX_CLIENTS];
+
 
 #if defined(__ZEPHYR__)
-#define STACK_SIZE (32*1024)
 
+static echo_client client_pool[MAX_CLIENTS] __attribute__((section(CONFIG_RAM_SECTION_STACKS_1)));
+
+#define STACK_SIZE (32*1024)
 Z_KERNEL_STACK_DEFINE_IN(echo_server_stack, STACK_SIZE, \
                 __attribute__((section(CONFIG_RAM_SECTION_STACKS_1))));
+
+#else
+
+static echo_client client_pool[MAX_CLIENTS];
+
 #endif
 
 
