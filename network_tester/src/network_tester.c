@@ -31,8 +31,8 @@ LOG_MODULE_CREATE(network_tester);
 
 #if defined(__ZEPHYR__)
 
-#define BACKEND_STACK_SIZE (32*1024)
-Z_KERNEL_STACK_DEFINE_IN(backend_stack, BACKEND_STACK_SIZE, \
+#define TESTER_STACK_SIZE (32*1024)
+Z_KERNEL_STACK_DEFINE_IN(tester_stack, TESTER_STACK_SIZE, \
                 __attribute__((section(CONFIG_RAM_SECTION_STACKS_2))));
 #endif
 
@@ -778,7 +778,7 @@ int network_tester_run(network_tester_config const* config)
 
 #if defined(__ZEPHYR__)
         /* We have to properly set the attributes with the stack to use for Zephyr. */
-        pthread_attr_setstack(&the_tester.thread_attr, &backend_stack, K_THREAD_STACK_SIZEOF(backend_stack));
+        pthread_attr_setstack(&the_tester.thread_attr, &tester_stack, K_THREAD_STACK_SIZEOF(tester_stack));
 #endif
 
         /* Create the socket pair for external management */
