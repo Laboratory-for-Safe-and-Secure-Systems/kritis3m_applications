@@ -17,6 +17,33 @@ LOG_MODULE_CREATE(proxy_api);
 static proxy_backend the_backend;
 
 
+/* Create the default config for the TLS proxy backend */
+proxy_backend_config tls_proxy_backend_default_config(void)
+{
+        proxy_backend_config default_config = {0};
+
+        default_config.log_level = LOG_LVL_WARN;
+
+        return default_config;
+}
+
+
+/* Create the default config for a TLS proxy */
+proxy_config tls_proxy_default_config(void)
+{
+        proxy_config default_config = {0};
+
+        default_config.own_ip_address = NULL;
+        default_config.listening_port = 0; /* 0 selects random available port */
+        default_config.target_ip_address = NULL;
+        default_config.target_port = 0;
+        default_config.log_level = LOG_LVL_WARN;
+        default_config.tls_config = asl_default_endpoint_config();
+
+        return default_config;
+}
+
+
 /* Start a new thread and run the main TLS proxy backend with given config.
  *
  * Returns 0 on success, -1 on failure (error message is printed to console).
