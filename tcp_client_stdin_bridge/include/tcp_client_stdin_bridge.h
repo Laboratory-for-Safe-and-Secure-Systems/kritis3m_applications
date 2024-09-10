@@ -22,6 +22,10 @@ typedef struct tcp_client_stdin_bridge_status
 tcp_client_stdin_bridge_status;
 
 
+/* Create the default config for the TCP client stdin bridge */
+tcp_client_stdin_bridge_config tcp_client_stdin_bridge_default_config(void);
+
+
 /* Start a new thread and run the TCP client stdin bridge application.
  *
  * Returns 0 on success, -1 on failure (error message is printed to console).

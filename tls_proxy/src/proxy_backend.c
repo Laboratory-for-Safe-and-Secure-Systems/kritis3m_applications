@@ -515,11 +515,11 @@ void* proxy_backend_thread(void* ptr)
         poll_set_add_fd(&backend->poll_set, backend->management_socket_pair[1], POLLIN);
 
         /* Initialize the Agile Security Library */
-        asl_configuration asl_config = {
-                .logging_enabled = true,
-                .log_level = LOG_LVL_GET(),
-                .custom_log_callback = asl_log_callback,
-        };
+        asl_configuration asl_config = asl_default_config();
+        asl_config.logging_enabled = true;
+        asl_config.log_level = LOG_LVL_GET();
+        asl_config.custom_log_callback = asl_log_callback;
+
 	int ret = asl_init(&asl_config);
 	if (ret != 0)
         {

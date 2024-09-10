@@ -179,11 +179,11 @@ static int network_init(network_tester* tester)
         {
                 LOG_DEBUG("Initializing ASL");
 
-                asl_configuration asl_config = {
-                        .logging_enabled = true,
-                        .log_level = LOG_LVL_GET(),
-                        .custom_log_callback = asl_log_callback,
-                };
+                asl_configuration asl_config = asl_default_config();
+                asl_config.logging_enabled = true;
+                asl_config.log_level = LOG_LVL_GET();
+                asl_config.custom_log_callback = asl_log_callback;
+
                 ret = asl_init(&asl_config);
                 if (ret != ASL_SUCCESS)
                         ERROR_OUT("Error initializing ASL: %d (%s)", ret, asl_error_message(ret));
@@ -741,20 +741,7 @@ network_tester_config network_tester_default_config(void)
         default_config.use_tls = true;
 
         /* TLS endpoint config */
-        default_config.tls_config.mutual_authentication = true;
-        default_config.tls_config.no_encryption = false;
-        default_config.tls_config.hybrid_signature_mode = ASL_HYBRID_SIGNATURE_MODE_DEFAULT;
-        default_config.tls_config.key_exchange_method = ASL_KEX_DEFAULT;
-        default_config.tls_config.secure_element_middleware_path = NULL;
-        default_config.tls_config.device_certificate_chain.buffer = NULL;
-        default_config.tls_config.device_certificate_chain.size = 0;
-        default_config.tls_config.private_key.buffer = NULL;
-        default_config.tls_config.private_key.size = 0;
-        default_config.tls_config.private_key.additional_key_buffer = NULL;
-        default_config.tls_config.private_key.additional_key_size = 0;
-        default_config.tls_config.root_certificate.buffer = NULL;
-        default_config.tls_config.root_certificate.size = 0;
-        default_config.tls_config.keylog_file = NULL;
+        default_config.tls_config = asl_default_endpoint_config();
 
         return default_config;
 }

@@ -347,6 +347,19 @@ static void bridge_cleanup(tcp_client_stdin_bridge* bridge)
 #endif // !defined(__ZEPHYR__)
 
 
+/* Create the default config for the TCP client stdin bridge */
+tcp_client_stdin_bridge_config tcp_client_stdin_bridge_default_config(void)
+{
+        tcp_client_stdin_bridge_config default_config = {0};
+
+        default_config.target_ip_address = NULL;
+        default_config.target_port = 0;
+        default_config.log_level = LOG_LVL_WARN;
+
+        return default_config;
+}
+
+
 /* Start a new thread and run the TCP client stdin bridge application.
  *
  * Returns 0 on success, -1 on failure (error message is printed to console).

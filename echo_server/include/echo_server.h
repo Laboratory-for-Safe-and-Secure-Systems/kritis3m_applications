@@ -29,6 +29,10 @@ typedef struct echo_server_status
 echo_server_status;
 
 
+/* Create the default config for the echo server */
+echo_server_config echo_server_default_config(void);
+
+
 /* Start a new thread and run the echo server.
  *
  * Returns 0 on success, -1 on failure (error message is printed to console).

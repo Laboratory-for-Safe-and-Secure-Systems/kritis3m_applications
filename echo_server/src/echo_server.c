@@ -360,11 +360,11 @@ static int prepare_server(echo_server* server, echo_server_config const* config)
         {
                 LOG_DEBUG("Initializing ASL");
 
-                asl_configuration asl_config = {
-                        .logging_enabled = true,
-                        .log_level = LOG_LVL_GET(),
-                        .custom_log_callback = asl_log_callback,
-                };
+                asl_configuration asl_config = asl_default_config();
+                asl_config.logging_enabled = true;
+                asl_config.log_level = LOG_LVL_GET();
+                asl_config.custom_log_callback = asl_log_callback;
+
                 ret = asl_init(&asl_config);
                 if (ret != ASL_SUCCESS)
                         ERROR_OUT("Error initializing ASL: %d (%s)", ret, asl_error_message(ret));
@@ -808,6 +808,21 @@ static void echo_server_cleanup(echo_server* server)
         }
 
         server->running = false;
+}
+
+
+/* Create the default config for the echo server */
+echo_server_config echo_server_default_config(void)
+{
+        echo_server_config default_config = {0};
+
+        default_config.own_ip_address = NULL;
+        default_config.listening_port = 0; /* 0 selects random available port */
+        default_config.log_level = LOG_LVL_WARN;
+        default_config.use_tls = false;
+        default_config.tls_config = asl_default_endpoint_config();
+
+        return default_config;
 }
 
 

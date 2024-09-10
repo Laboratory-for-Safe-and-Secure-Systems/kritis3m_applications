@@ -43,6 +43,14 @@ typedef struct proxy_status
 proxy_status;
 
 
+/* Create the default config for the TLS proxy backend */
+proxy_backend_config tls_proxy_backend_default_config(void);
+
+
+/* Create the default config for a TLS proxy */
+proxy_config tls_proxy_default_config(void);
+
+
 /* Start a new thread and run the main TLS proxy backend with given config.
  *
  * Returns 0 on success, -1 on failure (error message is printed to console).
