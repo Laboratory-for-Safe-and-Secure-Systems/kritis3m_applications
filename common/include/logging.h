@@ -36,15 +36,15 @@ log_module;
 
 #define LOG_MODULE_GET() &log_inst
 
-#define LOG_INFO(fmt, ...) log_message(&log_inst, LOG_LVL_INFO, fmt, ##__VA_ARGS__)
-#define LOG_WARN(fmt, ...) log_message(&log_inst, LOG_LVL_WARN, fmt, ##__VA_ARGS__)
-#define LOG_ERROR(fmt, ...) log_message(&log_inst, LOG_LVL_ERROR, fmt, ##__VA_ARGS__)
-#define LOG_DEBUG(fmt, ...) log_message(&log_inst, LOG_LVL_DEBUG, fmt, ##__VA_ARGS__)
+#define LOG_INFO(...) log_message(&log_inst, LOG_LVL_INFO, __VA_ARGS__)
+#define LOG_WARN(...) log_message(&log_inst, LOG_LVL_WARN, __VA_ARGS__)
+#define LOG_ERROR(...) log_message(&log_inst, LOG_LVL_ERROR, __VA_ARGS__)
+#define LOG_DEBUG(...) log_message(&log_inst, LOG_LVL_DEBUG, __VA_ARGS__)
 
-#define LOG_INFO_EX(module, fmt, ...) log_message(&module, LOG_LVL_INFO, fmt, ##__VA_ARGS__)
-#define LOG_WARN_EX(module, fmt, ...) log_message(&module, LOG_LVL_WARN, fmt, ##__VA_ARGS__)
-#define LOG_ERROR_EX(module, fmt, ...) log_message(&module, LOG_LVL_ERROR, fmt, ##__VA_ARGS__)
-#define LOG_DEBUG_EX(module, fmt, ...) log_message(&module, LOG_LVL_DEBUG, fmt, ##__VA_ARGS__)
+#define LOG_INFO_EX(module,...) log_message(&module, LOG_LVL_INFO, __VA_ARGS__)
+#define LOG_WARN_EX(module,...) log_message(&module, LOG_LVL_WARN, __VA_ARGS__)
+#define LOG_ERROR_EX(module,...) log_message(&module, LOG_LVL_ERROR, __VA_ARGS__)
+#define LOG_DEBUG_EX(module,...) log_message(&module, LOG_LVL_DEBUG, __VA_ARGS__)
 
 #define LOG_LVL_SET(level) log_level_set(&log_inst, level)
 #define LOG_LVL_GET() log_inst.level
