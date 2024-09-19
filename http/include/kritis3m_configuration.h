@@ -139,11 +139,6 @@ enum Kritis3mHelperApplicationtype
     L2_BRIDGE = 2,
 };
 
-enum ApplicationStatus
-{
-    APK_ERR = -1,
-    APK_OK = 1,
-};
 
 /****************** CRYPTO PROVILE DEFINITIONS ******************
  * @warning !READ! Min and Max are used as boundaries in the parser
@@ -169,6 +164,7 @@ struct Kritis3mHelperApplication
 
 struct CryptoProfile
 {
+    uint64_t crypto_id;
     char ID[ID_LEN];                   // ID of the configuration
     char name[NAME_LEN];               // Name of Crypto Profile
     char description[DESCRIPTION_LEN]; // Description of the Crypto Profile. We can log that
@@ -181,6 +177,7 @@ struct CryptoProfile
 // Structure for JS_ProxyApplication
 typedef struct
 {
+    uint64_t proxy_id;
     char listening_ip_port[IPv4_PORT_LEN];
     char target_ip_port[IPv4_PORT_LEN];
     Kritis3mApplicationtype application_type;
@@ -192,8 +189,13 @@ typedef struct
     ConnectionWhitelist connection_whitelist;
 } ProxyApplication;
 
+
+/**
+ *  */ 
 struct SystemConfiguration
 {
+    uint32_t sys_cfg_id; //referecne to the db entry
+    uint64_t updated_at;
     int number_crypto_profiles;
     int hardbeat_interval_s;
     CryptoProfile crypto_profile[NUMBER_CRYPTOPROFILE];

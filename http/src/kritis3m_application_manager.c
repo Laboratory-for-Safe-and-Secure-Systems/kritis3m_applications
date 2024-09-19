@@ -12,6 +12,8 @@ LOG_MODULE_CREATE(log_manager_svc);
 
 static struct application_manager manager = {0};
 
+
+
 /**
  * @brief This service starts the standard applications.
  * Each service which is started is assigned a file descriptor for communication purposes

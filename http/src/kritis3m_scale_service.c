@@ -50,6 +50,7 @@ int handle_hb_instruction(mgmt_container *l_mgmt, HardbeatInstructions instructi
 static void hb_timer_event_handler(struct k_timer *timer);
 int init_hardbeat_service(mgmt_container *mgmt_container, uint32_t hb_iv_seconds);
 void *mgmt_main_thread(void *ptr);
+int handle_distribution_server_rsp(mgmt_container *l_mgmt, PolicyResponse *rsp);
 
 // GLOBALS
 static mgmt_container mgmt = {0};
@@ -71,7 +72,6 @@ int set_hardbeat_interval(struct mgmt_container *l_mgmnt, uint64_t hb_iv_s)
   {
     t_hb_iv_s = hb_iv_s;
   }
-
   close(l_mgmnt->hb_fd);
   poll_set_remove_fd(&l_mgmnt->poll_set, l_mgmnt->hb_fd);
   int efd = zvfs_eventfd(0, EFD_NONBLOCK);
@@ -124,6 +124,7 @@ int handle_hb_instruction(mgmt_container *l_mgmt, HardbeatInstructions instructi
     {
       break;
     }
+    ret = handle_distribution_server_rsp(l_mgmt->endpoint, &rsp);
     /*
      *@todo Implement Configuration Service
      * In the future, the configuration should be stored on the flash
@@ -214,6 +215,14 @@ void *mgmt_main_thread(void *ptr)
     if (number_events > l_mgmt->poll_set.num_fds)
     {
       LOG_ERROR("to many events-> PANIC");
+    }
+    {
+      PolicyResponse rsp;
+      ret = call_policy_distribution_server(l_mgmt->endpoint, &rsp);
+      if (ret > 0)
+      {
+        handle_distribution_server_rsp(l_mgmt, &rsp);
+      }
     }
 
     // for each event, the matching fd is searched
@@ -320,4 +329,25 @@ static void hb_timer_event_handler(struct k_timer *timer)
   {
     LOG_ERROR("Failed to write to eventfd, errno: %d\n", errno);
   }
+}
+
+int handle_distribution_server_rsp(mgmt_container *l_mgmt, PolicyResponse *rsp)
+{
+  int ret = -1;
+
+  // check rsp
+
+  // check systemconfiguration id
+
+  // close running applications
+
+  // close running applications
+
+  // clear whitelist
+
+  // pass new systemconfiguration
+
+  // call application to startup
+
+  return ret;
 }

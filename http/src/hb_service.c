@@ -149,6 +149,7 @@ int handle_hb_event(struct pollfd *pfd, asl_endpoint *ep, HardbeatResponse *rsp)
 
 int call_hb_server(asl_endpoint *ep, HardbeatResponse *rsp)
 {
+    asl_session *hb_rq_session =NULL;
     int ret = -1;
     /**************** OPEN SOCKET *************/
 
@@ -164,22 +165,22 @@ int call_hb_server(asl_endpoint *ep, HardbeatResponse *rsp)
     if (server_port < 0)
     {
         LOG_ERROR("cant convert port to integer");
-        return -1;
+        goto shutdown;
     }
     server_addr.sin_port = htons(server_port);
     ret = inet_pton(AF_INET, HB_SERVERADDR, (struct sockaddr *)&server_addr);
     if (ret < 0)
     {
         LOG_ERROR("cant parse ipv 4 addr, errno: ", errno);
-        return -1;
+        goto shutdown;
     }
     ret = connect(req_fd, (struct sockaddr *)&server_addr, sizeof(struct sockaddr_in));
     if (ret < 0)
     {
         LOG_ERROR("cant connect to client: errno %d", errno);
-        return -1;
+        goto shutdown;
     }
-    asl_session *hb_rq_session = asl_create_session(ep, req_fd);
+    hb_rq_session =  asl_create_session(ep, req_fd);
 
     struct http_request req;
     memset(&req, 0, sizeof(req));
@@ -203,7 +204,7 @@ int call_hb_server(asl_endpoint *ep, HardbeatResponse *rsp)
     if (ret < 0)
     {
         LOG_ERROR("error on client req. need to implment error handler");
-        return -1;
+        goto shutdown;
     }
 
     if (user_response_data.is_finished)
@@ -213,5 +214,15 @@ int call_hb_server(asl_endpoint *ep, HardbeatResponse *rsp)
                sizeof(user_response_data.response));
     }
 
+    asl_close_session(hb_rq_session);
+    asl_free_session(hb_rq_session);
     return 0;
+
+    shutdown: 
+    asl_close_session(hb_rq_session);
+    asl_free_session(hb_rq_session);
+    return -1;
+
+
+
 }

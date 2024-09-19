@@ -85,6 +85,7 @@ static void policy_response_cb(struct http_response *rsp,
 int call_policy_distribution_server(asl_endpoint *ep, PolicyResponse *rsp)
 {
     int ret = -1;
+asl_session *policy_rq_session = NULL;
 
     int req_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (req_fd < 0)
@@ -98,14 +99,14 @@ int call_policy_distribution_server(asl_endpoint *ep, PolicyResponse *rsp)
     if (server_port < 0)
     {
         LOG_ERROR("cant convert port to integer");
-        return -1;
+        goto shutdown;
     }
     server_addr.sin_port = htons(server_port);
     ret = inet_pton(AF_INET, POLICY_SERVERADDR, (struct sockaddr *)&server_addr);
     if (ret < 0)
     {
         LOG_ERROR("cant parse ipv 4 addr, errno: ", errno);
-        return -1;
+        goto shutdown;
     }
     ret = connect(req_fd, (struct sockaddr *)&server_addr, sizeof(struct sockaddr_in));
     if (ret < 0)
@@ -113,7 +114,7 @@ int call_policy_distribution_server(asl_endpoint *ep, PolicyResponse *rsp)
         LOG_ERROR("cant connect to client: errno %d", errno);
         return -1;
     }
-    asl_session *policy_rq_session = asl_create_session(ep, req_fd);
+    policy_rq_session = asl_create_session(ep, req_fd);
 
     struct http_request req;
     memset(&req, 0, sizeof(req));
@@ -143,10 +144,19 @@ int call_policy_distribution_server(asl_endpoint *ep, PolicyResponse *rsp)
     if (ret < 0)
     {
         LOG_ERROR("error on client req. need to implment error handler");
-        return -1;
+        goto shutdown;
     }
 
+    asl_close_session(policy_rq_session);
+    asl_free_session(policy_rq_session);
     return 0;
+    shutdown:
+    //its ok to call these functions withh nullptr. no checks required
+    asl_close_session(policy_rq_session);
+    asl_free_session(policy_rq_session);
+
+
+    return -1;
 }
 
 int parse_system_config(uint8_t *body_msg, int size, SystemConfiguration *sys_cfg)

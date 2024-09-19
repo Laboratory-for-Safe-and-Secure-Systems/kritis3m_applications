@@ -14,7 +14,8 @@ static SystemConfiguration system_configuration = {0};
  *              MANAGEMENT SERVICE STARTUP
  */
 
-int start_management_service(struct sockaddr_in);
+
+int management_service_run();
 
 /*********************************************************
  *              CONFIGURATION DISTRIBUTION
