@@ -40,7 +40,8 @@
 #include <sys/socket.h>
 #endif // __ZEPHYR__
 
-#include "parser.h"
+#include "http_parser.h"
+#include "asl.h"
 
 #ifdef __cplusplus
 extern "C" {

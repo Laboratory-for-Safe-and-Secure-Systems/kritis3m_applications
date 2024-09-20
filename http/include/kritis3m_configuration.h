@@ -17,9 +17,7 @@
 #define NUMBER_STD_APK 4
 #define HARDBEAT_DEFAULT_S 24 * 60 * 60
 #define HARDBEAT_MIN_S 20
-#define HARDBEAT_MAX_S 60 * 60 * 24
-
-#define MAX_CONS 5
+#define HARDBEAT_MAX_S 60*60*24 
 
 /** defining supported applications for Kritis3m Gateway
  * DTLS_R_Proxy
@@ -74,12 +72,11 @@ struct Kritis3mHelperApplication;
 
 struct ConnectionWhitelist
 {
-    char allowed_client_ip_port[IPv4_PORT_LEN][MAX_CONS];
+    char allowed_client_ip_port[IPv4_PORT_LEN];
     int number_connections;
 };
 
 /**
- * @warning !READ! Min and Max are used as boundaries in the parser
  * @note when extending Kritis3mApplicationtype: DTLS_R_PROXY = MIN && TLS_R_PROXY = MAX
  * @example extension:
  * num Kritis3mApplicationtype
@@ -101,7 +98,6 @@ enum Kritis3mApplicationtype
 };
 
 /**
- * @warning !READ! Min and Max are used as boundaries in the parser
  * @note when extending Kritis3mProto: DTLS = MIN && UDP = MAX
  * @example extension:
  *enum Kritis3mProto
@@ -122,7 +118,6 @@ enum Kritis3mProto
 };
 
 /**
- * @warning !READ! Min and Max are used as boundaries in the parser
 * @note when extending Kritis3mHelper Applicaitontype: ECHO_TCP_SERVER = minimal number and L2_BRIDGE = maximal number
 * @example extension:
 * enum Kritis3mHelperApplicationtype {
@@ -139,11 +134,13 @@ enum Kritis3mHelperApplicationtype
     L2_BRIDGE = 2,
 };
 
+enum ApplicationStatus
+{
+    APK_ERR = -1,
+    APK_OK = 1,
+};
 
-/****************** CRYPTO PROVILE DEFINITIONS ******************
- * @warning !READ! Min and Max are used as boundaries in the parser
- *
- */
+/****************** CRYPTO PROVILE DEFINITIONS ******************/
 enum CertificatID
 {
     PQC = 0,
@@ -164,7 +161,6 @@ struct Kritis3mHelperApplication
 
 struct CryptoProfile
 {
-    uint64_t crypto_id;
     char ID[ID_LEN];                   // ID of the configuration
     char name[NAME_LEN];               // Name of Crypto Profile
     char description[DESCRIPTION_LEN]; // Description of the Crypto Profile. We can log that
@@ -177,7 +173,6 @@ struct CryptoProfile
 // Structure for JS_ProxyApplication
 typedef struct
 {
-    uint64_t proxy_id;
     char listening_ip_port[IPv4_PORT_LEN];
     char target_ip_port[IPv4_PORT_LEN];
     Kritis3mApplicationtype application_type;
@@ -189,13 +184,8 @@ typedef struct
     ConnectionWhitelist connection_whitelist;
 } ProxyApplication;
 
-
-/**
- *  */ 
 struct SystemConfiguration
 {
-    uint32_t sys_cfg_id; //referecne to the db entry
-    uint64_t updated_at;
     int number_crypto_profiles;
     int hardbeat_interval_s;
     CryptoProfile crypto_profile[NUMBER_CRYPTOPROFILE];
@@ -205,4 +195,4 @@ struct SystemConfiguration
     Kritis3mHelperApplication standard_applications[NUMBER_STD_APK];
 };
 
-#endif //KRITIS3M_CONFIGURATION_H
+#endif // KRITIS3M_CONFIGURATION_H
