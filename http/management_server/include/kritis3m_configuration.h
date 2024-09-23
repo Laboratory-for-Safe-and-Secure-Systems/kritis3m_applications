@@ -5,6 +5,7 @@
 #include "asl.h"
 #include <stdbool.h>
 #include <time.h>
+#include <pthread.h>
 
 // lengths
 #define IPv4_LEN 16
@@ -14,10 +15,11 @@
 #define IPv4_PORT_LEN 40
 #define NUMBER_CRYPTOPROFILE 20
 #define NUMBER_PROXIES 7
+#define MAX_NUMBER_TRUSTED_CLIENTS 7
 #define NUMBER_STD_APK 4
 #define HARDBEAT_DEFAULT_S 24 * 60 * 60
 #define HARDBEAT_MIN_S 20
-#define HARDBEAT_MAX_S 60*60*24 
+#define HARDBEAT_MAX_S 60 * 60 * 24
 
 /** defining supported applications for Kritis3m Gateway
  * DTLS_R_Proxy
@@ -148,51 +150,79 @@ enum CertificatID
     HYBRID_PQC = 2,
     CLASSIC = 3
 };
-#define N_PQC "PQC"
-#define N_HB_CLASSIC "HYBRID_CLASSIC"
-#define N_HB_PQC "HYBRID_PQC"
-#define N_CLASSIC "CLASSIC"
 
 struct Kritis3mHelperApplication
 {
     char listening_ip_port[IPv4_PORT_LEN];
     Kritis3mHelperApplicationtype application_type;
 };
-
 struct CryptoProfile
 {
-    char ID[ID_LEN];                   // ID of the configuration
-    char name[NAME_LEN];               // Name of Crypto Profile
-    char description[DESCRIPTION_LEN]; // Description of the Crypto Profile. We can log that
-    int certificate_ID;                // certificate ID
-    bool use_secure_element;           // Use of Secure Element
-    bool secure_element_import_keys;
-    enum asl_hybrid_signature_mode hybrid_signature_mode;
+    uint32_t ID;
+    char Name[256];
+    bool MutualAuthentication;
+    bool NoEncryption;
+    enum asl_key_exchange_method ASLKeyExchangeMethod;
+    bool UseSecureElement;
+    enum asl_hybrid_signature_mode HybridSignatureMode;
+    bool Keylog;
+    uint8_t Identity;
 };
 
-// Structure for JS_ProxyApplication
 typedef struct
 {
-    char listening_ip_port[IPv4_PORT_LEN];
-    char target_ip_port[IPv4_PORT_LEN];
-    Kritis3mApplicationtype application_type;
-    Kritis3mProto listening_proto;
-    Kritis3mProto target_proto;
-    char tunnel_crypto_profile_ID[ID_LEN];
-    char asset_crypto_profile_ID[ID_LEN];
-    int num_connections;
-    ConnectionWhitelist connection_whitelist;
-} ProxyApplication;
+    unsigned int id;
+    unsigned int type;
+    char *server_ip_port;
+    char *client_ip_port;
+    bool state;
+    unsigned int ep1_id;
+    unsigned int ep2_id;
+} Kritis3mApplications;
+
+typedef struct
+{
+    char client_ip_port[IPv4_PORT_LEN];
+    int number_trusted_applications;
+    int trusted_applications_id[10];
+} TrustedClients;
+typedef struct
+{
+    int number_trusted_clients;
+    TrustedClients TrustedClients[MAX_NUMBER_TRUSTED_CLIENTS];
+} Whitelist;
 
 struct SystemConfiguration
 {
+    pthread_mutex_t config_mutex;
+    uint32_t id;
+    uint32_t node_id;
+    char locality[256];
+    char serial_number[256];
+    uint32_t node_network_index;
+
+    uint64_t hardbeat_interval;
+    uint64_t updated_at;
+    uint32_t version;
+
+    Whitelist whitelist;
     int number_crypto_profiles;
-    int hardbeat_interval_s;
     CryptoProfile crypto_profile[NUMBER_CRYPTOPROFILE];
-    int number_proxy_applications;
-    ProxyApplication proxy_applications[NUMBER_PROXIES];
-    int number_standard_applications;
-    Kritis3mHelperApplication standard_applications[NUMBER_STD_APK];
+
+    int number_applications;
+    Kritis3mApplications applications[NUMBER_PROXIES];
 };
+
+typedef struct
+{
+    SystemConfiguration primary;
+    SystemConfiguration secondary;
+    char active_configuration[256];
+} ConfigurationManager;
+
+
+int load_configuration(const char *filename, ConfigurationManager *config);
+SystemConfiguration* get_active_configuration(ConfigurationManager *config);
+SystemConfiguration* get_free_configuration(ConfigurationManager *config);
 
 #endif // KRITIS3M_CONFIGURATION_H

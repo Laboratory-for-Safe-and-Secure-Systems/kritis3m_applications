@@ -9,23 +9,30 @@
 #include <stdio.h>
 #include <string.h>
 
-static SystemConfiguration system_configuration = {0};
 
 /*********************************************************
  *              MANAGEMENT SERVICE STARTUP
  */
 
+typedef struct kritis3m_service kritis3m_service;
+struct kritis3m_service;
 
-int management_service_run();
+
+struct kritis3m_service_configuration{
+  struct sockaddr server_addr;
+  asl_endpoint_configuration server_config;
+  char* configuration_path;
+};
+
+int init_kristis3m_service(struct kritis3m_service_configuration* config);
+
 
 /*********************************************************
  *              CONFIGURATION DISTRIBUTION
  */
 
 
-int handle_policy_rq_response(char *response, int response_len, SystemConfiguration *configuration);
 
-int parse_configuration(char *response, int response_len);
 
 /**********************************************************
  *                      Hardbeat Service

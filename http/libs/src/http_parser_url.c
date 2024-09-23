@@ -34,10 +34,6 @@
 #include <zephyr/sys/__assert.h>
 #else
 #include <assert.h>
-#endif
-
-#ifndef (__ZEPHYR__)
-/* GCC 7+ and Clang support fallthrough attribute */
 #define __fallthrough __attribute__((fallthrough))
 #endif
 
@@ -435,7 +431,7 @@ static int http_parse_host(const char *buf, struct http_parser_url *u,
 #if defined(__ZEPHYR__)
 	__ASSERT_NO_MSG(u->field_set & (1 << UF_HOST));
 #else
-	assert(u->field_set & (1 << UF_HOST) u->field_set);
+	assert(u->field_set & (1 << UF_HOST));
 #endif
 
 	u->field_data[UF_HOST].len = 0U;

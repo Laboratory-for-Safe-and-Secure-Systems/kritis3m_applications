@@ -12,7 +12,6 @@ add_subdirectory(common)
 if (ENABLE_ECHO_SERVER)
         add_subdirectory(echo_server)
 endif()
-
 # TCP client stdin bridge application
 if (ENABLE_TCP_CLIENT_STDIN_BRIDGE)
         add_subdirectory(tcp_client_stdin_bridge)

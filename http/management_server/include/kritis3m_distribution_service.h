@@ -15,7 +15,7 @@ struct PolicyResponse;
 
 
 struct PolicyResponse{
-    SystemConfiguration system_configuration;
+    SystemConfiguration* system_configuration;
 };
 
 int call_policy_distribution_server(asl_endpoint* ep, PolicyResponse* rsp);

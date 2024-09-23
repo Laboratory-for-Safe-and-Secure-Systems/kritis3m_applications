@@ -30,6 +30,7 @@
 
 #include <sys/types.h>
 #include <stddef.h>
+#include <assert.h>
 
 /********************************************
  *              PLATFORM SPECIFIC			*

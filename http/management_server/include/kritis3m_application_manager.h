@@ -3,15 +3,12 @@
 #include "poll_set.h"
 
 #include "kritis3m_configuration.h"
+/***
+ * includes threading
+ */
 
-struct application_manager
-{
-    struct poll_set poll_set;
-    int active_applications;
-
-};
+int start_applications(struct SystemConfiguration* configuration);
+int stop_applications();
 
 
-void init_application_manager(struct SystemConfiguration* configuration);
-void manage(SystemConfiguration* configuration);
 #endif  //KRITIS3M_APPLICATION_MANAGER_H

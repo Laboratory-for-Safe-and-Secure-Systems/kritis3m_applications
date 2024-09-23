@@ -15,7 +15,6 @@
 #include <errno.h>
 #include <stdbool.h>
 #include <stdlib.h>
-
 /********************************************
  *              PLATFORM SPECIFIC			*
  *******************************************/
@@ -25,6 +24,17 @@
  * *****************************************/
 #if defined(__ZEPYHR__)
 #include <zephyr/kernel.h>
+#else
+#include <limits.h>
+#include <stdio.h>
+#include <linux/kernel.h> // for offset of and other kernel utilities
+
+#define CONTAINER_OF(ptr, type, member)                    \
+	({                                                     \
+		const typeof(((type *)0)->member) *__mptr = (ptr); \
+		(type *)((char *)__mptr - offsetof(type, member)); \
+	})
+
 #endif
 
 #include <netinet/in.h>
@@ -318,7 +328,8 @@ static int http_flush_data(int sock, const char *send_buf, size_t send_buf_len,
 
 static void print_header_field(size_t len, const char *str)
 {
-	if (IS_ENABLED(CONFIG_NET_HTTP_LOG_LEVEL_DBG))
+
+	if (LOG_LVL_GET() == LOG_LVL_DEBUG)
 	{
 #define MAX_OUTPUT_LEN 128
 		char output[MAX_OUTPUT_LEN];
@@ -331,7 +342,11 @@ static void print_header_field(size_t len, const char *str)
 			len = sizeof(output) - 1;
 		}
 
+#if defined(__LINUX__)
 		snprintk(output, len + 1, "%s", str);
+#else
+		snprintf(output, len + 1, "%s", str);
+#endif
 
 		LOG_DEBUG("[%zd] %s", len, output);
 	}
@@ -653,7 +668,7 @@ static int https_wait_data(int sock, asl_session *session,
 	int total_received = 0;
 	size_t offset = 0;
 	int received, ret;
-	struct zsock_pollfd fds[1];
+	struct pollfd fds[1];
 	int nfds = 1;
 
 	fds[0].fd = sock;
@@ -665,7 +680,7 @@ static int https_wait_data(int sock, asl_session *session,
 			sys_timepoint_timeout(req_end_timepoint).ticks;
 		int req_timeout_ms = k_ticks_to_ms_floor32(req_timeout_ticks);
 
-		ret = zsock_poll(fds, nfds, req_timeout_ms);
+		ret = poll(fds, nfds, req_timeout_ms);
 		if (ret == 0)
 		{
 			LOG_DEBUG("Timeout");
@@ -772,11 +787,11 @@ static int http_wait_data(int sock, struct http_request *req, const k_timepoint_
 	int total_received = 0;
 	size_t offset = 0;
 	int received, ret;
-	struct zsock_pollfd fds[1];
+	struct pollfd fds[1];
 	int nfds = 1;
 
 	fds[0].fd = sock;
-	fds[0].events =POLLIN;
+	fds[0].events = POLLIN;
 
 	do
 	{
@@ -784,7 +799,7 @@ static int http_wait_data(int sock, struct http_request *req, const k_timepoint_
 			sys_timepoint_timeout(req_end_timepoint).ticks;
 		int req_timeout_ms = k_ticks_to_ms_floor32(req_timeout_ticks);
 
-		ret = zsock_poll(fds, nfds, req_timeout_ms);
+		ret = poll(fds, nfds, req_timeout_ms);
 		if (ret == 0)
 		{
 			LOG_DEBUG("Timeout");
@@ -808,8 +823,8 @@ static int http_wait_data(int sock, struct http_request *req, const k_timepoint_
 		}
 		else if (fds[0].revents & POLLIN)
 		{
-			received = zsock_recv(sock, req->internal.response.recv_buf + offset,
-								  req->internal.response.recv_buf_len - offset, 0);
+			received = recv(sock, req->internal.response.recv_buf + offset,
+							req->internal.response.recv_buf_len - offset, 0);
 			if (received == 0)
 			{
 				/* Connection closed */
