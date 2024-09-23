@@ -27,6 +27,7 @@
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdbool.h>
 #include <limits.h>
 #if defined (__ZEPHYR__)
 #include <zephyr/sys/__assert.h>

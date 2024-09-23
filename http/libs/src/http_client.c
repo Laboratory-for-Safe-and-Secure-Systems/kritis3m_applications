@@ -657,7 +657,7 @@ static int https_wait_data(int sock, asl_session *session,
 	int nfds = 1;
 
 	fds[0].fd = sock;
-	fds[0].events = ZSOCK_POLLIN;
+	fds[0].events = POLLIN;
 
 	do
 	{
@@ -677,17 +677,17 @@ static int https_wait_data(int sock, asl_session *session,
 			ret = -errno;
 			goto error;
 		}
-		if (fds[0].revents & (ZSOCK_POLLERR | ZSOCK_POLLNVAL))
+		if (fds[0].revents & (POLLERR | POLLNVAL))
 		{
 			ret = -errno;
 			goto error;
 		}
-		else if (fds[0].revents & ZSOCK_POLLHUP)
+		else if (fds[0].revents & POLLHUP)
 		{
 			/* Connection closed */
 			goto closed;
 		}
-		else if (fds[0].revents & ZSOCK_POLLIN)
+		else if (fds[0].revents & POLLIN)
 		{
 			// asl_receive(session, req)
 			received = asl_receive(session, req->internal.response.recv_buf + offset,
@@ -776,7 +776,7 @@ static int http_wait_data(int sock, struct http_request *req, const k_timepoint_
 	int nfds = 1;
 
 	fds[0].fd = sock;
-	fds[0].events = ZSOCK_POLLIN;
+	fds[0].events =POLLIN;
 
 	do
 	{
@@ -796,17 +796,17 @@ static int http_wait_data(int sock, struct http_request *req, const k_timepoint_
 			ret = -errno;
 			goto error;
 		}
-		if (fds[0].revents & (ZSOCK_POLLERR | ZSOCK_POLLNVAL))
+		if (fds[0].revents & (POLLERR | POLLNVAL))
 		{
 			ret = -errno;
 			goto error;
 		}
-		else if (fds[0].revents & ZSOCK_POLLHUP)
+		else if (fds[0].revents & POLLHUP)
 		{
 			/* Connection closed */
 			goto closed;
 		}
-		else if (fds[0].revents & ZSOCK_POLLIN)
+		else if (fds[0].revents & POLLIN)
 		{
 			received = zsock_recv(sock, req->internal.response.recv_buf + offset,
 								  req->internal.response.recv_buf_len - offset, 0);

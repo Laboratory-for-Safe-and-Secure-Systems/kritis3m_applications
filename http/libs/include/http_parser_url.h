@@ -24,6 +24,7 @@
 #define __HTTP_PARSER_URL_H__
 
 #include <sys/types.h>
+#include <stdint.h>
 #include <stddef.h>
 
 /********************************************

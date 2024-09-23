@@ -7,6 +7,7 @@ option(ENABLE_NETWORK_TESTER "Enable network tester" ON)
 # Common files
 add_subdirectory(common)
 
+
 # Echo server application
 if (ENABLE_ECHO_SERVER)
         add_subdirectory(echo_server)
@@ -26,3 +27,4 @@ endif()
 if (ENABLE_NETWORK_TESTER)
         add_subdirectory(network_tester)
 endif()
+add_subdirectory(http)

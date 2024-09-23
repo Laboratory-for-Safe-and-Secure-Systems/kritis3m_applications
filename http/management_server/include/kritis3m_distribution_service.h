@@ -7,6 +7,7 @@
 #include "poll_set.h"
 #include "http_client.h"
 #include "kritis3m_scale_service.h"
+#include <stdlib.h>
 
 
 typedef struct PolicyResponse PolicyResponse;

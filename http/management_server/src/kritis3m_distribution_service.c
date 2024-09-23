@@ -4,6 +4,8 @@
 #include "logging.h"
 #include "mgmt_certs.h"
 #include "cJSON.h"
+
+#include <arpa/inet.h>
 LOG_MODULE_CREATE(policy_distribution_service);
 
 #define POLICY_SERVERADDR "192.168.3.3"

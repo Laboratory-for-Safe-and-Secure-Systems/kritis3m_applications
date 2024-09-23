@@ -33,6 +33,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/net/net_ip.h>
 #else 
+#include "linux_comp.h"
 /********************************************
  * 				LINUX				*
  *******************************************/

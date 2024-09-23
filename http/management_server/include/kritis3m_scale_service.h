@@ -1,12 +1,13 @@
 #ifndef KRITIS3M_SCALE_SERVICE_H
 #define KRITIS3M_SCALE_SERVICE_H
 
-#define JSMN_PARENT_LINKS
 
 #include <netinet/in.h>
 #include "kritis3m_configuration.h"
 #include "kritis3m_distribution_service.h"
 #include "hb_service.h"
+#include <stdio.h>
+#include <string.h>
 
 static SystemConfiguration system_configuration = {0};
 
