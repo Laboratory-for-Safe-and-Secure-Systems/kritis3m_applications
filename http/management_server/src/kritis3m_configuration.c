@@ -4,6 +4,8 @@
 #include <time.h>
 #include "cJSON.h"
 #include "kritis3m_configuration.h" // Assuming this is the header file containing the struct definitions
+#include "logging.h"
+LOG_MODULE_CREATE(kritis3m_configuration);
 
 // Function prototypes
 
@@ -15,9 +17,36 @@ void parse_whitelist(cJSON *json, Whitelist *whitelist);
 void parse_applications(cJSON *json, Kritis3mApplications *applications, int *num_applications);
 void parse_crypto_profiles(cJSON *json, CryptoProfile *profiles, int *num_profiles);
 
+SystemConfiguration *get_active_configuration(ConfigurationManager *config)
+{
+    SystemConfiguration *retval = NULL;
+    if (strcmp(config->active_configuration, "primary") == 0)
+    {
+        retval = &config->primary;
+    }
+    else if (strcmp(config->active_configuration, "secondary") == 0)
+    {
+        retval = &config->secondary;
+    }
+    return retval;
+}
 
-int load_configuration(const char *filename, ConfigurationManager *config){
+SystemConfiguration *get_free_configuration(ConfigurationManager *config)
+{
+    SystemConfiguration *retval = NULL;
+    if (strcmp(config->active_configuration, "primary") == 0)
+    {
+        retval = &config->secondary;
+    }
+    else if (strcmp(config->active_configuration, "secondary") == 0)
+    {
+        retval = &config->primary;
+    }
+    return retval;
+}
 
+int load_configuration(const char *filename, ConfigurationManager *config)
+{
 
     char *json_content = read_file(filename);
     if (json_content == NULL)
@@ -28,10 +57,7 @@ int load_configuration(const char *filename, ConfigurationManager *config){
     parse_json(json_content, config);
     free(json_content);
     return 0;
-
 }
-
-
 
 char *read_file(const char *filename)
 {
@@ -134,7 +160,7 @@ void parse_system_configuration(cJSON *json, SystemConfiguration *config)
         if (cJSON_IsString(updated_at) && updated_at->valuestring != NULL)
         {
             struct tm tm;
-            strptime(updated_at->valuestring, "%Y-%m-%dT%H:%M:%SZ", &tm);
+            // strptime(updated_at->valuestring, "%Y-%m-%dT%H:%M:%SZ", &tm);
             config->updated_at = mktime(&tm);
         }
 

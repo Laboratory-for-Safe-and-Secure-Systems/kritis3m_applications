@@ -27,7 +27,13 @@
  * TLS_F_PROXY
  * TLS_R_PROXY
  */
-typedef enum Kritis3mApplicationtype Kritis3mApplicationtype;
+typedef enum
+{
+    DTLS_R_Proxy = 0,
+    DTLS_F_Proxy = 1,
+    TLS_F_PROXY = 2,
+    TLS_R_PROXY = 3
+} Kritis3mApplicationtype;
 
 /**
  * @brief Represents the system configuration.
@@ -52,25 +58,19 @@ struct CryptoProfile;
 /**
  * @brief supported protocols for the proxy applications
  */
-typedef enum Kritis3mProto Kritis3mProto;
-enum Kritis3mProto;
+typedef enum Kritis3mProto
+{
+    DTLS = 0,
+    TLS = 1,
+    TCP = 2,
+    UDP = 3
+} Kritis3mProto;
 
 /**
  * @brief ConnectionWhitelist details the allowed connections for the proxy applications based on the client IP and Port
  */
 typedef struct ConnectionWhitelist ConnectionWhitelist;
 struct ConnectionWhitelist;
-
-/** @brief supported applications for the helper applications
- * ECHO_TCP_SERVER
- * ECHO_UDP_SERVER
- */
-typedef enum Kritis3mHelperApplicationtype Kritis3mHelperApplicationtype;
-enum Kritis3mHelperApplicationtype;
-
-/** @brief Defining structure of Kritis3mHelper Applications  */
-typedef struct Kritis3mHelperApplication Kritis3mHelperApplication;
-struct Kritis3mHelperApplication;
 
 struct ConnectionWhitelist
 {
@@ -91,33 +91,6 @@ struct ConnectionWhitelist
  * };
  *
  */
-enum Kritis3mApplicationtype
-{
-    DTLS_R_Proxy = 0,
-    DTLS_F_Proxy = 1,
-    TLS_F_PROXY = 2,
-    TLS_R_PROXY = 3
-};
-
-/**
- * @note when extending Kritis3mProto: DTLS = MIN && UDP = MAX
- * @example extension:
- *enum Kritis3mProto
- *{
- *    DTLS = 0,
- *    TLS = 1,
- *    TCP = 2,
- *    MACSEC = 3,
- *    UDP = 4
- *};
- */
-enum Kritis3mProto
-{
-    DTLS = 0,
-    TLS = 1,
-    TCP = 2,
-    UDP = 3
-};
 
 /**
 * @note when extending Kritis3mHelper Applicaitontype: ECHO_TCP_SERVER = minimal number and L2_BRIDGE = maximal number
@@ -129,12 +102,6 @@ enum Kritis3mProto
 *    L2_BRIDGE =3,
 };
  */
-enum Kritis3mHelperApplicationtype
-{
-    ECHO_TCP_SERVER = 0,
-    ECHO_UDP_SERVER = 1,
-    L2_BRIDGE = 2,
-};
 
 enum ApplicationStatus
 {
@@ -151,11 +118,6 @@ enum CertificatID
     CLASSIC = 3
 };
 
-struct Kritis3mHelperApplication
-{
-    char listening_ip_port[IPv4_PORT_LEN];
-    Kritis3mHelperApplicationtype application_type;
-};
 struct CryptoProfile
 {
     uint32_t ID;
@@ -220,9 +182,8 @@ typedef struct
     char active_configuration[256];
 } ConfigurationManager;
 
-
 int load_configuration(const char *filename, ConfigurationManager *config);
-SystemConfiguration* get_active_configuration(ConfigurationManager *config);
-SystemConfiguration* get_free_configuration(ConfigurationManager *config);
+SystemConfiguration *get_active_configuration(ConfigurationManager *config);
+SystemConfiguration *get_free_configuration(ConfigurationManager *config);
 
 #endif // KRITIS3M_CONFIGURATION_H
