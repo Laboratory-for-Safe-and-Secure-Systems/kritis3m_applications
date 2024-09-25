@@ -29,32 +29,22 @@
  */
 typedef enum
 {
-    DTLS_R_Proxy = 0,
-    DTLS_F_Proxy = 1,
-    TLS_F_PROXY = 2,
-    TLS_R_PROXY = 3
+    TLS_FORWARD_PROXY,
+    TLS_REVERSE_PROXY,
+    TLS_TLS_PROXY,
+    ECHO_SERVER,
+    TCP_CLIENT_STDIN_BRIDGE,
+    L2_BRIDGE,
 } Kritis3mApplicationtype;
 
-/**
- * @brief Represents the system configuration.
- * Including:
- * - Accepted connections
- * - Proxy Server Port
- * - Proxy Endpoint
- * - Used Crypto Profile
- */
 typedef struct SystemConfiguration SystemConfiguration;
 struct SystemConfiguration;
-
-/**
- * @brief Cryptoprofile details the supported crypto profiles for the Kritis3m Gateway
- * Including:
- * - Use of SmartCard
- * - Certificates
- * - Algorithms
- */
 typedef struct CryptoProfile CryptoProfile;
 struct CryptoProfile;
+typedef struct ConnectionWhitelist ConnectionWhitelist;
+struct ConnectionWhitelist;
+typedef struct ApplicationConfiguration ApplicationConfiguration;
+struct ApplicationConfiguration;
 /**
  * @brief supported protocols for the proxy applications
  */
@@ -69,8 +59,6 @@ typedef enum Kritis3mProto
 /**
  * @brief ConnectionWhitelist details the allowed connections for the proxy applications based on the client IP and Port
  */
-typedef struct ConnectionWhitelist ConnectionWhitelist;
-struct ConnectionWhitelist;
 
 struct ConnectionWhitelist
 {
@@ -109,15 +97,6 @@ enum ApplicationStatus
     APK_OK = 1,
 };
 
-/****************** CRYPTO PROVILE DEFINITIONS ******************/
-enum CertificatID
-{
-    PQC = 0,
-    HYBRID_CLASSIC = 1,
-    HYBRID_PQC = 2,
-    CLASSIC = 3
-};
-
 struct CryptoProfile
 {
     uint32_t ID;
@@ -133,13 +112,15 @@ struct CryptoProfile
 
 typedef struct
 {
+    uint32_t application_id;
     unsigned int id;
-    unsigned int type;
+    Kritis3mApplicationtype type;
     char *server_ip_port;
     char *client_ip_port;
     bool state;
     unsigned int ep1_id;
     unsigned int ep2_id;
+    int log_level;
 } Kritis3mApplications;
 
 typedef struct
@@ -154,9 +135,18 @@ typedef struct
     TrustedClients TrustedClients[MAX_NUMBER_TRUSTED_CLIENTS];
 } Whitelist;
 
+struct ApplicationConfiguration
+{
+    Whitelist whitelist;
+    int number_crypto_profiles;
+    CryptoProfile crypto_profile[NUMBER_CRYPTOPROFILE];
+
+    int number_applications;
+    Kritis3mApplications applications[NUMBER_PROXIES];
+};
+
 struct SystemConfiguration
 {
-    pthread_mutex_t config_mutex;
     uint32_t id;
     uint32_t node_id;
     char locality[256];
@@ -166,13 +156,7 @@ struct SystemConfiguration
     uint64_t hardbeat_interval;
     uint64_t updated_at;
     uint32_t version;
-
-    Whitelist whitelist;
-    int number_crypto_profiles;
-    CryptoProfile crypto_profile[NUMBER_CRYPTOPROFILE];
-
-    int number_applications;
-    Kritis3mApplications applications[NUMBER_PROXIES];
+    ApplicationConfiguration application_config;
 };
 
 typedef struct
@@ -180,9 +164,12 @@ typedef struct
     SystemConfiguration primary;
     SystemConfiguration secondary;
     char active_configuration[256];
-} ConfigurationManager;
 
-int load_configuration(const char *filename, ConfigurationManager *config);
+    pthread_mutex_t primaryLock;
+    pthread_mutex_t secondaryLock;
+
+} ConfigurationManager;
+ConfigurationManager *parse_configuration(char *filename);
 SystemConfiguration *get_active_configuration(ConfigurationManager *config);
 SystemConfiguration *get_free_configuration(ConfigurationManager *config);
 

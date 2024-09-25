@@ -19,7 +19,7 @@ struct kritis3m_service;
 
 
 struct kritis3m_service_configuration{
-  struct sockaddr server_addr;
+  struct sockaddr_in server_addr;
   asl_endpoint_configuration server_config;
   char* configuration_path;
 };

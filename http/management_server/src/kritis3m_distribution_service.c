@@ -4,6 +4,7 @@
 #include "logging.h"
 #include "mgmt_certs.h"
 #include "cJSON.h"
+#include "http_client.h"
 
 #include <arpa/inet.h>
 LOG_MODULE_CREATE(policy_distribution_service);
@@ -27,10 +28,6 @@ struct http_policy_distribution_user_data
 
 /********   FORWARD DECLARATION ***************/
 
-int parse_system_config(uint8_t *body_msg, int size, kritis3m_service *sys_cfg);
-int parse_standard_appl(cJSON *js_standard_appl, Kritis3mHelperApplication *sys_standard_appl);
-int parse_crypto_profile(cJSON *js_crypto_item, CryptoProfile *sys_crypto_profile);
-
 static void policy_response_cb(struct http_response *rsp,
                                enum http_final_call final_data,
                                void *user_data)
@@ -49,13 +46,13 @@ static void policy_response_cb(struct http_response *rsp,
         case HTTP_OK:
             LOG_INFO("SUCCESFULL REQUEST");
             user_data_ref->error_msg = HTTP_OK_MSG;
-            int ret = parse_system_config(rsp->body_frag_start, rsp->body_frag_len, user_data_ref->response);
-            if (ret < 0)
-            {
-                user_data_ref->error_occured = true;
-                user_data_ref->error_msg = HTTP_DEFAULT_MSG;
-                LOG_ERROR("parser error");
-            }
+            // int ret = parse_system_config(rsp->body_frag_start, rsp->body_frag_len, user_data_ref->response);
+            // if (ret < 0)
+            // {
+            //     user_data_ref->error_occured = true;
+            //     user_data_ref->error_msg = HTTP_DEFAULT_MSG;
+            //     LOG_ERROR("parser error");
+            // }
 
             break;
         case HTTP_BAD_REQUEST:
@@ -67,7 +64,7 @@ static void policy_response_cb(struct http_response *rsp,
             user_data_ref->error_occured = true;
             user_data_ref->error_msg = HTTP_SERVICE_UNAVAILABLE_MSG;
             LOG_INFO("Hardbeat service is not supported from the server");
-            ret = -1;
+            int ret = -1;
             break;
         case HTTP_TOO_MANY_REQUESTS:
             user_data_ref->error_occured = true;
@@ -86,7 +83,7 @@ static void policy_response_cb(struct http_response *rsp,
 int call_policy_distribution_server(asl_endpoint *ep, PolicyResponse *rsp)
 {
     int ret = -1;
-asl_session *policy_rq_session = NULL;
+    asl_session *policy_rq_session = NULL;
 
     int req_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (req_fd < 0)
@@ -151,11 +148,10 @@ asl_session *policy_rq_session = NULL;
     asl_close_session(policy_rq_session);
     asl_free_session(policy_rq_session);
     return 0;
-    shutdown:
-    //its ok to call these functions withh nullptr. no checks required
+shutdown:
+    // its ok to call these functions withh nullptr. no checks required
     asl_close_session(policy_rq_session);
     asl_free_session(policy_rq_session);
-
 
     return -1;
 }

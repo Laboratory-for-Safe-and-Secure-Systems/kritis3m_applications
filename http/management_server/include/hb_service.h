@@ -42,6 +42,7 @@ int timer_stop(TimerPipe *pipe);
 int timer_change_interval(TimerPipe *pipe, int new_interval_sec);
 int init_posix_timer(TimerPipe *pipe);
 int timer_terminate(TimerPipe *pipe);
+int get_clock_signal_fd(TimerPipe *pipe);
 
 typedef enum
 {

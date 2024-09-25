@@ -107,9 +107,7 @@ proxy_connection* add_new_connection_to_proxy(proxy* proxy, int client_socket,
         connection->in_use = true;
         connection->direction = proxy->direction;
         connection->slot = freeSlotConnectionPool;
-        connection->log_module = &proxy->log_module;
-        connection->proxy = proxy;
-
+        connection->log_module = &proxy->log_module; connection->proxy = proxy;
         if (connection->direction == FORWARD_PROXY)
         {
                 connection->asset_sock = client_socket;

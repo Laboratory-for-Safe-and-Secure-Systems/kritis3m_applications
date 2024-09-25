@@ -33,6 +33,17 @@ struct TimerPipe
     timer_t timerid;
 };
 
+int get_clock_signal_fd(TimerPipe *pipe)
+{
+    int ret = pipe->pipe_fds[0];
+    if (ret < 0)
+    {
+        LOG_ERROR("Error: Invalid file descriptor");
+        return -1;
+    }
+    return ret;
+}
+
 static void timer_handler(union sigval arg)
 {
     TimerPipe *tp = (TimerPipe *)arg.sival_ptr;

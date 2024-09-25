@@ -5,7 +5,6 @@
 #include "asl.h"
 #include "poll.h"
 #include "poll_set.h"
-#include "http_client.h"
 #include "kritis3m_scale_service.h"
 #include <stdlib.h>
 
