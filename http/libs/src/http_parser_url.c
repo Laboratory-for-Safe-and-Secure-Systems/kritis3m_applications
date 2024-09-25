@@ -35,6 +35,7 @@
 #else
 #include <assert.h>
 #define __fallthrough __attribute__((fallthrough))
+#define __ASSERT_NO_MSG(u) assert(u)
 #endif
 
 #include "http_parser_url.h"
@@ -428,11 +429,7 @@ static int http_parse_host(const char *buf, struct http_parser_url *u,
 	const char *p;
 
 	buflen = u->field_data[UF_HOST].off + u->field_data[UF_HOST].len;
-#if defined(__ZEPHYR__)
 	__ASSERT_NO_MSG(u->field_set & (1 << UF_HOST));
-#else
-	assert(u->field_set & (1 << UF_HOST));
-#endif
 
 	u->field_data[UF_HOST].len = 0U;
 

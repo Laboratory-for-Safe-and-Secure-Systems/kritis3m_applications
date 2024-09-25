@@ -32,6 +32,9 @@
 #if defined(__ZEPHYR__)
 #include <zephyr/sys/__assert.h>
 #include <zephyr/toolchain.h>
+#else
+#include <assert.h>
+#define __ASSERT_NO_MSG(a) assert(a)
 #endif
 
 #include "http_parser.h"
@@ -207,11 +210,7 @@ enum header_states
 static inline int cb_notify(struct http_parser *parser, enum state *current_state, http_cb cb,
 							int cb_error, size_t *parsed, size_t already_parsed)
 {
-#if defined(__ZEPHYR)
 	__ASSERT_NO_MSG(HTTP_PARSER_ERRNO(parser) == HPE_OK);
-#else
-	assert(HTTP_PARSER_ERRNO(parser) == HPE_OK);
-#endif
 
 	if (cb == NULL)
 	{
@@ -240,11 +239,7 @@ static inline int cb_data(struct http_parser *parser, http_data_cb cb, int cb_er
 {
 	int rc;
 
-#if defined(__ZEPHYR)
 	__ASSERT_NO_MSG(HTTP_PARSER_ERRNO(parser) == HPE_OK);
-#else
-	assert(HTTP_PARSER_ERRNO(parser) == HPE_OK);
-#endif
 	if (*mark == NULL)
 	{
 		return 0;
