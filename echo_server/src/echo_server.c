@@ -408,7 +408,10 @@ static int prepare_server(echo_server* server, echo_server_config const* config)
 
                 server->tls_endpoint = asl_setup_server_endpoint(&config->tls_config);
                 if (server->tls_endpoint == NULL)
+                {
+                        ret = -1;
                         ERROR_OUT("Error creating TLS endpoint");
+                }
         }
 
         /* Start listening for incoming connections */
