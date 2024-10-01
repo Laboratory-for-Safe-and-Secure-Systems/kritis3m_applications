@@ -6,6 +6,8 @@
 #include <stdbool.h>
 #include <time.h>
 #include <pthread.h>
+#include "kritis3m_pki_client.h"
+#include <netinet/in.h>
 
 // lengths
 #define IPv4_LEN 16
@@ -13,20 +15,26 @@
 #define NAME_LEN 256
 #define DESCRIPTION_LEN 256
 #define IPv4_PORT_LEN 40
-#define NUMBER_CRYPTOPROFILE 20
+#define MAX_NUMBER_CRYPTOPROFILE 20
 #define NUMBER_PROXIES 7
 #define MAX_NUMBER_TRUSTED_CLIENTS 7
 #define NUMBER_STD_APK 4
 #define HARDBEAT_DEFAULT_S 24 * 60 * 60
 #define HARDBEAT_MIN_S 20
 #define HARDBEAT_MAX_S 60 * 60 * 24
+#define SERIAL_NUMBER_SIZE 254
 
-/** defining supported applications for Kritis3m Gateway
- * DTLS_R_Proxy
- * DTLS_F_Proxy
- * TLS_F_PROXY
- * TLS_R_PROXY
- */
+#define PRIMARY_FILENAME "primary.json"
+#define SECONDARY_FILENAME "secondary.json"
+
+#define PKI_MANAGEMENT_URL "path/to/management/pki/"
+#define PKI_REMOTE_URL "path/to/remote/pki/"
+#define PKI_PRODUCTION_URL "path/to/remote/pki/"
+
+#define PKI_MANAGEMENT_PATH "path/to/management/pki/"
+#define PKI_REMOTE_PATH "path/to/remote/pki/"
+#define PKI_PRODUCTION_PATH "path/to/remote/pki/"
+
 typedef enum
 {
     TLS_FORWARD_PROXY,
@@ -97,6 +105,24 @@ enum ApplicationStatus
     APK_OK = 1,
 };
 
+
+typedef enum
+{
+    MANAGEMENT_SERVICE,
+    MANAGEMENT,
+    REMOTE,
+    PRODUCTION,
+} network_identity;
+
+typedef struct crypto_identity
+{
+    network_identity identity;
+    char *pki_base_url;
+    int pki_base_url_size;
+    int revocation_days;
+    int32_t algorithm; // the algorithm is a feature of the identity and does not define it
+} crypto_identity;
+
 struct CryptoProfile
 {
     uint32_t ID;
@@ -107,7 +133,7 @@ struct CryptoProfile
     bool UseSecureElement;
     enum asl_hybrid_signature_mode HybridSignatureMode;
     bool Keylog;
-    uint8_t Identity;
+    crypto_identity Identity;
 };
 
 typedef struct
@@ -129,6 +155,7 @@ typedef struct
     int number_trusted_applications;
     int trusted_applications_id[10];
 } TrustedClients;
+
 typedef struct
 {
     int number_trusted_clients;
@@ -139,7 +166,7 @@ struct ApplicationConfiguration
 {
     Whitelist whitelist;
     int number_crypto_profiles;
-    CryptoProfile crypto_profile[NUMBER_CRYPTOPROFILE];
+    CryptoProfile crypto_profile[MAX_NUMBER_CRYPTOPROFILE];
 
     int number_applications;
     Kritis3mApplications applications[NUMBER_PROXIES];
@@ -153,7 +180,7 @@ struct SystemConfiguration
     char serial_number[256];
     uint32_t node_network_index;
 
-    uint64_t hardbeat_interval;
+    uint64_t heartbeat_interval;
     uint64_t updated_at;
     uint32_t version;
     ApplicationConfiguration application_config;
@@ -161,16 +188,42 @@ struct SystemConfiguration
 
 typedef struct
 {
+    const char *folderpath;
     SystemConfiguration primary;
     SystemConfiguration secondary;
-    char active_configuration[256];
 
     pthread_mutex_t primaryLock;
     pthread_mutex_t secondaryLock;
 
 } ConfigurationManager;
+
 ConfigurationManager *parse_configuration(char *filename);
 SystemConfiguration *get_active_configuration(ConfigurationManager *config);
 SystemConfiguration *get_free_configuration(ConfigurationManager *config);
+
+typedef struct
+{
+    char serial_number[SERIAL_NUMBER_SIZE];
+    char *management_server_url;
+    int management_server_url_size;
+
+    char *management_service_ip;
+    crypto_identity identity;
+} Kritis3mManagemntConfiguration;
+
+typedef struct
+{
+    Kritis3mManagemntConfiguration management_identity;
+    char *application_configuration_path;
+    int application_configuration_path_size;
+    char *machine_crypto_path;
+    int machine_crypto_path_size;
+    char *pki_cert_path;
+    int pki_cert_path_size;
+    int selected_configuration;
+} Kritis3mNodeConfiguration;
+
+int get_Kritis3mNodeConfiguration(char *filename, Kritis3mNodeConfiguration *config);
+int get_Application_confing(ConfigurationManager *applconfig, Kritis3mNodeConfiguration *node_config);
 
 #endif // KRITIS3M_CONFIGURATION_H

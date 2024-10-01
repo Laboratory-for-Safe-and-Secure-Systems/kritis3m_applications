@@ -18,13 +18,8 @@ typedef struct kritis3m_service kritis3m_service;
 struct kritis3m_service;
 
 
-struct kritis3m_service_configuration{
-  struct sockaddr_in server_addr;
-  asl_endpoint_configuration server_config;
-  char* configuration_path;
-};
 
-int init_kristis3m_service(struct kritis3m_service_configuration* config);
+int init_kristis3m_service(char* config_file);
 
 
 /*********************************************************
