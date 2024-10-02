@@ -35,6 +35,14 @@
 #define PKI_REMOTE_PATH "path/to/remote/pki/"
 #define PKI_PRODUCTION_PATH "path/to/remote/pki/"
 
+#define MANAGEMENT_SERVICE_STR "management_service"
+#define MANAGEMENT_STR "management"
+#define REMOTE_STR "remote"
+#define PRODUCTION_STR "production"
+
+
+
+
 typedef enum
 {
     TLS_FORWARD_PROXY,
@@ -113,8 +121,14 @@ typedef enum
     PRODUCTION,
 } network_identity;
 
-typedef struct crypto_identity crypto_identity;
-struct crypto_identity;
+typedef struct
+{
+    network_identity identity;
+    char *pki_base_url;
+    int pki_base_url_size;
+    int revocation_days;
+    int32_t algorithm; // the algorithm is a feature of the identity and does not define it
+} crypto_identity;
 
 struct CryptoProfile
 {
@@ -190,7 +204,6 @@ typedef struct
 
 } ConfigurationManager;
 
-
 typedef struct
 {
     char serial_number[SERIAL_NUMBER_SIZE];
@@ -218,18 +231,8 @@ typedef struct
     int selected_configuration;
 } Kritis3mNodeConfiguration;
 
-struct crypto_identity
-{
-    network_identity identity;
-    char *pki_base_url;
-    int pki_base_url_size;
-    int revocation_days;
-    int32_t algorithm; // the algorithm is a feature of the identity and does not define it
-}; 
-
 int get_Kritis3mNodeConfiguration(char *filename, Kritis3mNodeConfiguration *config);
 int get_Systemconfig(ConfigurationManager *applconfig, Kritis3mNodeConfiguration *node_config);
-int write_Kritis3mNodeConfig_toflash(Kritis3mNodeConfiguration* config);
-
+int write_Kritis3mNodeConfig_toflash(Kritis3mNodeConfiguration *config);
 
 #endif // KRITIS3M_CONFIGURATION_H

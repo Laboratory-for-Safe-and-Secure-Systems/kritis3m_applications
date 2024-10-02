@@ -395,7 +395,21 @@ int Kritis3mNodeConfiguration_tojson(Kritis3mNodeConfiguration *config, char **b
 
     // Management PKI object
     cJSON *management_pki = cJSON_CreateObject();
-    cJSON_AddStringToObject(management_pki, "identity", config->management_identity.identity.identity);
+    switch (config->management_identity.identity.identity)
+    {
+    case MANAGEMENT_SERVICE:
+        cJSON_AddStringToObject(management_pki, "identity", MANAGEMENT_SERVICE_STR);
+        break;
+    case MANAGEMENT:
+        cJSON_AddStringToObject(management_pki, "identity", MANAGEMENT_STR);
+        break;
+    case REMOTE:
+        cJSON_AddStringToObject(management_pki, "identity", REMOTE_STR);
+        break;
+    case PRODUCTION:
+        cJSON_AddStringToObject(management_pki, "identity", PRODUCTION_STR);
+        break;
+    }
     cJSON_AddStringToObject(management_pki, "url", config->management_identity.identity.pki_base_url);
     cJSON_AddItemToObject(management_service, "management_pki", management_pki);
 

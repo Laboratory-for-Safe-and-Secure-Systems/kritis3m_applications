@@ -21,7 +21,7 @@ int get_Kritis3mNodeConfiguration(char *filename, Kritis3mNodeConfiguration *con
     if ((filename == NULL) || (config == NULL))
         goto error_occured;
 
-    ret = read_file(filename, json_buffer, &file_size);
+    ret = read_file(filename, &json_buffer, &file_size);
     if ((ret < 0) || (file_size <= 0))
     {
         goto error_occured;
@@ -43,7 +43,7 @@ int get_systemconfig(char *filename, SystemConfiguration *systemconfig)
     if ((filename == NULL) || (systemconfig == NULL))
         goto error_occured;
 
-    ret = read_file(filename, json_buffer, &file_size);
+    ret = read_file(filename, &json_buffer, &file_size);
     if ((ret < 0) || (file_size <= 0))
     {
         goto error_occured;
