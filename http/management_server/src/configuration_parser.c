@@ -10,6 +10,7 @@ LOG_MODULE_CREATE(kritis3m_config_paser);
 
 int parse_whitelist(cJSON *json_obj, Whitelist *whitelist);
 int parse_crypo_config(cJSON *json_obj, CryptoProfile *CryptoProfile);
+int parse_application(cJSON *json_obj, Kritis3mApplications *application);
 
 int parse_json_to_ManagementConfig(cJSON *json_management_service, Kritis3mManagemntConfiguration *config)
 {
@@ -210,35 +211,33 @@ int parse_buffer_to_SystemConfiguration(char *json_buffer, int json_buffer_size,
     cJSON *crypto_profiles = cJSON_GetObjectItem(node, "crypto_config");
     int number_crypto_profiles = cJSON_GetArraySize(crypto_profiles);
     if (number_crypto_profiles == 0)
-    {
         LOG_WARN("no crypto profiles provided");
-    }
+    else if (number_crypto_profiles > MAX_NUMBER_CRYPTOPROFILE)
+        goto error_occured;
     config->application_config.number_crypto_profiles = number_crypto_profiles;
     for (int i = 0; i < number_crypto_profiles; i++)
     {
-        if (i < MAX_NUMBER_CRYPTOPROFILE)
-        {
-            cJSON *crypto = cJSON_GetArrayItem(crypto_profiles, i);
-            ret = parse_crypo_config(crypto, &config->application_config.crypto_profile[i]);
-            if (ret < 0)
-                goto error_occured;
-        }
-        else
-        {
-            LOG_ERROR("not enough space for crypto profiles");
+        cJSON *crypto = cJSON_GetArrayItem(crypto_profiles, i);
+        ret = parse_crypo_config(crypto, &config->application_config.crypto_profile[i]);
+        if (ret < 0)
             goto error_occured;
-        }
     }
     //*******************APPLICATION CONFIG*******************************************/
     cJSON *json_applications = cJSON_GetObjectItem(node, "applications");
     int number_applications = cJSON_GetArraySize(json_applications);
+
     config->application_config.number_applications = number_applications;
-    if (number_applications)
+    if (number_applications == 0)
         LOG_WARN("no applications available in this configuration");
+    else if (number_applications > MAX_NUMBER_APPLICATIONS)
+        goto error_occured;
     for (int i = 0; i < number_applications; i++)
     {
+        item = cJSON_GetArrayItem(json_applications, i);
+        ret = parse_application(item, &config->application_config.applications[i]);
+        if (ret < 0)
+            goto error_occured;
     }
-
     cJSON_Delete(root);
     return ret;
 error_occured:
@@ -276,6 +275,54 @@ int parse_whitelist(cJSON *json_obj, Whitelist *whitelist)
     return ret;
 
 error_occured:
+    ret = -1;
+    return ret;
+}
+
+int parse_application(cJSON *json_obj, Kritis3mApplications *application)
+{
+    int ret = 0;
+    cJSON *item;
+    item = cJSON_GetObjectItem(json_obj, "id");
+    if (item == NULL)
+        goto error_occured;
+    application->id = item->valueint;
+
+    item = cJSON_GetObjectItem(json_obj, "type");
+    if (item == NULL)
+        goto error_occured;
+    application->type = item->valueint;
+
+    item = cJSON_GetObjectItem(json_obj, "servier_ip_port");
+    if (item == NULL)
+        goto error_occured;
+    strcpy(application->server_ip_port, item->valuestring);
+
+    item = cJSON_GetObjectItem(json_obj, "client_ip_port");
+    if (item == NULL)
+        goto error_occured;
+    strcpy(application->client_ip_port, item->valuestring);
+
+    item = cJSON_GetObjectItem(json_obj, "ep1_id");
+    if (item == NULL)
+        goto error_occured;
+    application->ep1_id = item->valueint;
+
+    item = cJSON_GetObjectItem(json_obj, "ep2_id");
+    if (item == NULL)
+        LOG_INFO("Ep2_config not in Application config with application id: %d", application->id);
+    application->ep2_id = item->valueint;
+
+    item = cJSON_GetObjectItem(json_obj, "log_level");
+    if (item == NULL)
+        LOG_WARN("No Log levle included. Default log_level will be selected");
+    else
+        application->log_level = item->valueint;
+
+    application->state = false;
+    return ret;
+error_occured:
+    LOG_ERROR("cannot parse Kritis3m_application");
     ret = -1;
     return ret;
 }
@@ -321,7 +368,7 @@ int parse_crypo_config(cJSON *json_obj, CryptoProfile *profile)
     item = cJSON_GetObjectItem(json_obj, "keylog");
     if (item == NULL)
         goto error_occured;
-    profile->Keylog = cjSON - cJSON_IsTrue(item);
+    profile->Keylog = cJSON_IsTrue(item);
 
     item = cJSON_GetObjectItem(json_obj, "identity");
     if (item == NULL)
