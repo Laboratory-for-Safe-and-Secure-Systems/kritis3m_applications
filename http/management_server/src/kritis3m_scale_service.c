@@ -15,7 +15,7 @@ void *start_kristis3m_service(void *arg);
 struct kritis3m_service
 {
   Kritis3mNodeConfiguration *node_configuration;
-  ConfigurationManager *configuration_manager;
+  ConfigurationManager configuration_manager;
 
   pthread_t thread;
   pthread_attr_t thread_attr;
@@ -32,10 +32,13 @@ int setup_socketpair(int management_socket[2], bool blocking);
 
 void set_kritis3m_serivce_defaults(struct kritis3m_service *svc)
 {
-  svc->configuration_manager = NULL;
+  if (svc == NULL)
+    return;
+  memset(&svc->configuration_manager, 0, sizeof(ConfigurationManager));
   memset(&svc->management_endpoint_config, 0, sizeof(asl_endpoint_configuration));
+  memset(svc->node_configuration, 0, sizeof(asl_endpoint_configuration));
+  svc->node_configuration = NULL;
   pthread_attr_init(&svc->thread_attr);
-  svc->service_config = NULL;
   init_posix_timer(svc->hardbeat_timer);
   poll_set_init(svc->pollfd);
 }
@@ -76,7 +79,7 @@ int init_kristis3m_service(char *config_file)
 {
   // initializations
   int ret = 0;
-  Kritis3mNodeConfiguration config;
+  Kritis3mNodeConfiguration config = {0};
   // get global node config
   ret = get_Kritis3mNodeConfiguration(config_file, &config);
   if (ret < 0)
@@ -84,6 +87,8 @@ int init_kristis3m_service(char *config_file)
     LOG_ERROR("can't parse Config, error occured: %d ", errno);
     return ret;
   }
+  config.kritis3m_node_configuration_path = config_file;
+  // set default of main service object
   set_kritis3m_serivce_defaults(&svc);
   svc.node_configuration = &config;
   initialize_crypto(&svc); // enroll would be called
@@ -91,12 +96,9 @@ int init_kristis3m_service(char *config_file)
   // The PKI-Client is not implemented yet, but will be in the future
   // The Certificates are now obtained from the file system and parsed into the asl_endpoint_configuration object
   certificates_to_endpoint(config.pki_cert_path, config.pki_cert_path_size, &config.management_identity.identity, &svc.management_endpoint_config);
-
-  int get_Application_config(svc.configuration_manager, svc.node_configuration);
-
   // call pki if certificates are outdated
   // parse configuration to startup the system
-  svc.configuration_manager = parse_configuration(config->configuration_path);
+  ret = get_Systemconfig(&svc.configuration_manager, svc.node_configuration);
   if (&svc.configuration_manager == NULL)
   {
     LOG_ERROR("couldnt load configuration. Abort");

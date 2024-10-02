@@ -16,7 +16,7 @@
 #define DESCRIPTION_LEN 256
 #define IPv4_PORT_LEN 40
 #define MAX_NUMBER_CRYPTOPROFILE 20
-#define NUMBER_PROXIES 7
+#define MAX_NUMBER_APPLICATIONS 7
 #define MAX_NUMBER_TRUSTED_CLIENTS 7
 #define NUMBER_STD_APK 4
 #define HARDBEAT_DEFAULT_S 24 * 60 * 60
@@ -105,7 +105,6 @@ enum ApplicationStatus
     APK_OK = 1,
 };
 
-
 typedef enum
 {
     MANAGEMENT_SERVICE,
@@ -114,14 +113,8 @@ typedef enum
     PRODUCTION,
 } network_identity;
 
-typedef struct crypto_identity
-{
-    network_identity identity;
-    char *pki_base_url;
-    int pki_base_url_size;
-    int revocation_days;
-    int32_t algorithm; // the algorithm is a feature of the identity and does not define it
-} crypto_identity;
+typedef struct crypto_identity crypto_identity;
+struct crypto_identity;
 
 struct CryptoProfile
 {
@@ -138,14 +131,14 @@ struct CryptoProfile
 
 typedef struct
 {
-    uint32_t application_id;
-    unsigned int id;
+    uint32_t config_id;
+    uint32_t id;
     Kritis3mApplicationtype type;
     char *server_ip_port;
     char *client_ip_port;
     bool state;
-    unsigned int ep1_id;
-    unsigned int ep2_id;
+    uint32_t ep1_id;
+    uint32_t ep2_id;
     int log_level;
 } Kritis3mApplications;
 
@@ -169,7 +162,7 @@ struct ApplicationConfiguration
     CryptoProfile crypto_profile[MAX_NUMBER_CRYPTOPROFILE];
 
     int number_applications;
-    Kritis3mApplications applications[NUMBER_PROXIES];
+    Kritis3mApplications applications[MAX_NUMBER_APPLICATIONS];
 };
 
 struct SystemConfiguration
@@ -197,9 +190,6 @@ typedef struct
 
 } ConfigurationManager;
 
-ConfigurationManager *parse_configuration(char *filename);
-SystemConfiguration *get_active_configuration(ConfigurationManager *config);
-SystemConfiguration *get_free_configuration(ConfigurationManager *config);
 
 typedef struct
 {
@@ -216,14 +206,30 @@ typedef struct
     Kritis3mManagemntConfiguration management_identity;
     char *application_configuration_path;
     int application_configuration_path_size;
+
     char *machine_crypto_path;
     int machine_crypto_path_size;
+
     char *pki_cert_path;
     int pki_cert_path_size;
+
+    char *kritis3m_node_configuration_path;
+
     int selected_configuration;
 } Kritis3mNodeConfiguration;
 
+struct crypto_identity
+{
+    network_identity identity;
+    char *pki_base_url;
+    int pki_base_url_size;
+    int revocation_days;
+    int32_t algorithm; // the algorithm is a feature of the identity and does not define it
+}; 
+
 int get_Kritis3mNodeConfiguration(char *filename, Kritis3mNodeConfiguration *config);
-int get_Application_confing(ConfigurationManager *applconfig, Kritis3mNodeConfiguration *node_config);
+int get_Systemconfig(ConfigurationManager *applconfig, Kritis3mNodeConfiguration *node_config);
+int write_Kritis3mNodeConfig_toflash(Kritis3mNodeConfiguration* config);
+
 
 #endif // KRITIS3M_CONFIGURATION_H

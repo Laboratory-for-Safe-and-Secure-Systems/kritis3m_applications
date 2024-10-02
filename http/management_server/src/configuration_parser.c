@@ -80,7 +80,6 @@ error_occured:
 
 int parse_buffer_to_Config(char *json_buffer, int json_buffer_size, Kritis3mNodeConfiguration *config)
 {
-    memset(config, 0, sizeof(Kritis3mNodeConfiguration));
     int ret = 0;
     int string_len = -1;
     cJSON *root = cJSON_ParseWithLength(json_buffer, json_buffer_size);
@@ -147,7 +146,6 @@ void free_NodeConfig(Kritis3mNodeConfiguration *config)
 int parse_buffer_to_SystemConfiguration(char *json_buffer, int json_buffer_size, SystemConfiguration *config)
 {
     int ret = 0;
-    memset(config, 0, sizeof(SystemConfiguration));
     cJSON *root = cJSON_ParseWithLength(json_buffer, json_buffer_size);
 
     // Parse primary configuration
@@ -379,5 +377,42 @@ int parse_crypo_config(cJSON *json_obj, CryptoProfile *profile)
 error_occured:
     LOG_ERROR("error in parsing crypto profile");
     ret = -1;
+    return ret;
+}
+
+int Kritis3mNodeConfiguration_tojson(Kritis3mNodeConfiguration *config, char **buffer)
+{
+    int ret = 0;
+    if (config == NULL || buffer == NULL)
+        return -1;
+    cJSON *root = cJSON_CreateObject(); // Create root JSON object
+
+    // Management service object
+    cJSON *management_service = cJSON_CreateObject();
+    cJSON_AddStringToObject(management_service, "serial_number", config->management_identity.serial_number);
+    cJSON_AddStringToObject(management_service, "management_server_url", config->management_identity.management_server_url);
+    cJSON_AddStringToObject(management_service, "management_service_ip", config->management_identity.management_service_ip);
+
+    // Management PKI object
+    cJSON *management_pki = cJSON_CreateObject();
+    cJSON_AddStringToObject(management_pki, "identity", config->management_identity.identity.identity);
+    cJSON_AddStringToObject(management_pki, "url", config->management_identity.identity.pki_base_url);
+    cJSON_AddItemToObject(management_service, "management_pki", management_pki);
+
+    // Add management service to root
+    cJSON_AddItemToObject(root, "management_service", management_service);
+
+    // Add other paths and configuration
+    cJSON_AddStringToObject(root, "application_configuration_path", config->application_configuration_path);
+    cJSON_AddStringToObject(root, "machine_crypto_path", config->machine_crypto_path);
+    cJSON_AddStringToObject(root, "pki_cert_path", config->pki_cert_path);
+
+    // Add selected configuration
+    cJSON_AddNumberToObject(root, "selected_configuration", config->selected_configuration);
+    // Convert to string
+    char *json_string = cJSON_Print(root);
+    // Clean up
+    cJSON_Delete(root);
+    *buffer = json_string;
     return ret;
 }
