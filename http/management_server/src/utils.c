@@ -73,6 +73,70 @@ int parse_IPv4_fromIpPort(const char *src_ip_port, char *dst_ip)
     return -1;
 }
 
+int parse_ip_port_to_sockaddr_in(char *ip_port, struct sockaddr_in *dst)
+{
+    int ret = -1;
+    memset(dst, 0, sizeof(struct sockaddr_in));
+    char ip[INET_ADDRSTRLEN] = {0};
+    int port = 0;
+
+    // Initialize sockaddr_in
+    dst->sin_family = AF_INET;
+
+    if (ip_port == NULL)
+    {
+        LOG_ERROR("ip_port is NULL");
+        return -1;
+    }
+    else if (strcmp(ip_port, "*:*") == 0) // Check for the format "*:*"
+    {
+        dst->sin_addr.s_addr = htonl(INADDR_ANY); // 0.0.0.0
+        dst->sin_port = 0;                        // Port 0 (any port)
+        ret = 0;
+    }
+    else if (sscanf(ip_port, "%[^:]:%d", ip, &port) == 2) // Parse the ip:port string
+    {
+        // Handle the case "*:<port>"
+        if (strcmp(ip, "*") == 0)
+        {
+            dst->sin_addr.s_addr = htonl(INADDR_ANY); // 0.0.0.0
+            dst->sin_port = htons(port);              // Set the provided port
+        }
+        // Handle the case "<ip>:<port>"
+        else
+        {
+            if (inet_pton(AF_INET, ip, &dst->sin_addr) <= 0)
+            {
+                LOG_ERROR("Invalid IP address: %s", ip);
+                ret = -1;
+            }
+            dst->sin_port = htons(port); // Set the provided port
+        }
+    }
+    else if (sscanf(ip_port, "%[^:]:*", ip) == 1) // Handle the case "<ip>:*"
+    {
+        if (strcmp(ip, "*") == 0)
+        {
+            dst->sin_addr.s_addr = htonl(INADDR_ANY); // 0.0.0.0
+        }
+        else
+        {
+            if (inet_pton(AF_INET, ip, &dst->sin_addr) <= 0)
+            {
+                LOG_ERROR("Invalid IP address: %s", ip);
+                ret = -1;
+            }
+        }
+        dst->sin_port = 0; // Port 0 (any port)
+    }
+    // Invalid format
+    else
+    {
+        LOG_ERROR("Can't parse IP address and port from the string: %s", ip_port);
+        ret = -1;
+    }
+    return ret;
+}
 int extrack_addr_from_url(const char *url, struct sockaddr_in *addr)
 {
     int ret = 0;
