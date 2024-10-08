@@ -1,13 +1,15 @@
-#include "kritis3m_application_manager.h"
 #include <pthread.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
 
-#include "utils.h"
 #include <errno.h>
+#include <string.h>
+#include <unistd.h>
 
 // kritis3m applications:
+#include "kritis3m_application_manager.h"
+#include "utils.h"
 #include "asl.h"
 #include "tls_proxy.h"
 #include "tcp_client_stdin_bridge.h"
@@ -18,16 +20,6 @@
 
 #include "logging.h"
 LOG_MODULE_CREATE(log_manager_svc);
-
-bool uses_tls(int ep_id);
-void *application_service_main_trhead(void *arg);
-int send_management_message(int socket, application_message *msg);
-int read_management_message(int socket, application_message *msg);
-int get_endpoint_configuration(int ep_1id, asl_endpoint_configuration *ep);
-int create_proxy_config(Kritis3mApplications *appl, proxy_config *config);
-int create_echo_config(Kritis3mApplications *appl, echo_server_config *config);
-int create_network_tester_config(Kritis3mApplications *appl, network_tester_config *config);
-int create_tcp_stdin_bridge_config(Kritis3mApplications *appl, tcp_client_stdin_bridge_config *config);
 
 struct application_manager
 {
@@ -41,6 +33,20 @@ struct application_manager
 };
 
 static struct application_manager manager;
+
+bool uses_tls(int ep_id);
+void *application_service_main_trhead(void *arg);
+int read_management_message(int socket, application_message *msg);
+int get_endpoint_configuration(int ep_1id, asl_endpoint_configuration *ep);
+int read_management_message(int socket, application_message *msg);
+int send_management_message(int socket, application_message *msg);
+int create_proxy_config(Kritis3mApplications *appl, proxy_config *config);
+int stop_application(Kritis3mApplications *appl);
+int stop_application_service(struct application_manager *application_manager);
+int respond_with(int socket, enum MSG_RESPONSE_CODE response_code);
+int create_echo_config(Kritis3mApplications *appl, echo_server_config *config);
+int create_network_tester_config(Kritis3mApplications *appl, network_tester_config *config);
+int create_tcp_stdin_bridge_config(Kritis3mApplications *appl, tcp_client_stdin_bridge_config *config);
 
 int client_matches_trusted_client(TrustedClients *trusted_client, int application_id, struct sockaddr_in *connecting_client)
 {
@@ -72,15 +78,16 @@ bool confirm_client(int application_id, struct sockaddr_in *connecting_client)
     ApplicationConfiguration *appl_config = manager.configuration;
     bool ret = false;
 
-    if (((!manager.initialized) || (appl_config == NULL)) &&
-        ((manager.management_pair[0] > 0) && (manager.management_pair[1] > 0)))
+    if (((!manager.initialized) ||
+         (appl_config == NULL)) &&
+        ((manager.management_pair[0] > 0) &&
+         (manager.management_pair[1] > 0)))
     {
         LOG_ERROR("application manager not initialized");
         return false;
     }
 
     request.msg_type = APPLICATION_CONNECTION_REQUEST;
-    request.application_id = application_id;
     request.payload.client = *connecting_client;
 
     int return_code = send_management_message(manager.management_pair[0], &request);
@@ -91,28 +98,26 @@ bool confirm_client(int application_id, struct sockaddr_in *connecting_client)
     else
     {
         /* Wait for response */
-        ret = read_management_message(the_backend.management_socket_pair[0], &response);
+        ret = read_management_message(manager.management_pair[0], &response);
         if (ret < 0)
-        {
             goto error_occured;
-        }
         if (response.msg_type == MSG_RESPONSE)
         {
             switch (response.payload.return_code)
             {
-            case ERROR:
-                LOG_ERROR("Service Returned with error")
+            case MSG_ERROR:
+                LOG_ERROR("Service Returned with error");
                 goto error_occured;
                 break;
-            case OK:
+            case MSG_OK:
                 LOG_INFO("Client accepted");
                 ret = true;
                 break;
-            case FORBIDDEN:
-                LOG_INFO("Client rejected")
+            case MSG_FORBIDDEN:
+                LOG_INFO("Client rejected");
                 ret = false;
                 break;
-            case BUSY:
+            case MSG_BUSY:
                 LOG_INFO("Try again");
                 ret = false;
                 break;
@@ -176,13 +181,11 @@ void init_applicaiton_manager(void)
 enum MSG_RESPONSE_CODE management_request_helper(int socket, application_message *msg)
 {
     int ret;
-    enum MSG_RESPONSE_CODE retval = OK;
+    enum MSG_RESPONSE_CODE retval = MSG_OK;
     application_message response = {0};
 
     if (socket < 0)
-    {
-        return 0;
-    }
+        goto error_occured;
     ret = send_management_message(socket, msg);
     if (ret < 0)
         goto error_occured;
@@ -190,13 +193,13 @@ enum MSG_RESPONSE_CODE management_request_helper(int socket, application_message
     if (ret < 0)
         goto error_occured;
     if (response.msg_type == MSG_RESPONSE)
-    {
         retval = response.payload.return_code;
-    }
+    else
+        goto error_occured;
     return retval;
 
 error_occured:
-    retval = ERROR;
+    retval = MSG_ERROR;
     return retval;
 }
 
@@ -214,27 +217,26 @@ int start_application_manager(ApplicationConfiguration *configuration)
             goto error_occured;
     }
     manager.configuration = configuration;
-    int ret = socketpair(AF_UNIX, SOCK_STREAM, 0, manager.management_socket_pair);
+    ret = socketpair(AF_UNIX, SOCK_STREAM, 0, manager.management_pair);
     if (ret < 0)
-        ERROR_OUT("Error creating socket pair for management: %d (%s)", errno, strerror(errno));
-    LOG_DEBUG("Created management socket pair (%d, %d)", manager.management_pair[0], the_server.management_pair[1]);
+        LOG_ERROR("Error creating socket pair for management: %d (%s)", errno, strerror(errno));
+    LOG_DEBUG("Created management socket pair (%d, %d)", manager.management_pair[0], manager.management_pair[1]);
 
     /* Init main backend */
     ret = pthread_create(&manager.thread, &manager.thread_attr, application_service_main_trhead, &manager);
     if (ret != 0)
-        ERROR_OUT("Error starting TCP echo server thread: %s", strerror(ret));
+        LOG_ERROR("Error starting TCP echo server thread: %s", strerror(ret));
     // wait until service is initialized
     usleep(10 * 1000);
     while (!application_service_initialized)
     {
         // start request
         application_message request = {0};
-        enum MSG_RESPONSE_CODE initialized = BUSY;
-
+        enum MSG_RESPONSE_CODE initialized = MSG_BUSY;
         request.msg_type = APPLICATION_SERVICE_START_REQUEST,
-        request.payload.config = appl_config;
-        initialzed = management_request_helper(socket, &request);
-        if (initialized == OK)
+        request.payload.config = configuration;
+        enum MSG_RESPONSE_CODE initialzed = management_request_helper(manager.management_pair[0], &request);
+        if (initialized == MSG_OK)
             application_service_initialized = true;
     }
 
@@ -243,24 +245,19 @@ error_occured:
     return ret;
 }
 
-int handle_management_message(int fd, struct application_manager *appl_manager)
+int start_application(Kritis3mApplications *appl)
 {
-    application_message msg = {0};
-    int ret = -1;
-
-    ret = read_management_message(fd, &msg);
-    if (ret < 0)
-    {
+    int ret = 0;
+    int appl_id = -1;
+    if (appl == NULL)
         goto error_occured;
-    }
-    switch (msg.msg_type)
+    Kritis3mApplicationtype type = appl->type;
+    appl_id = appl->id;
+    if (appl->state == true)
+        LOG_INFO("applicationalready running");
+    else
     {
-    case APPLICATION_START_REQUEST:
-    {
-        Kritis3mApplications *appl = msg.payload.kritis3m_applicaiton;
-        if (appl == NULL)
-            goto error_occured;
-        switch (appl->type)
+        switch (type)
         {
         UNDEFINED:
         {
@@ -351,23 +348,125 @@ int handle_management_message(int fd, struct application_manager *appl_manager)
             break;
         }
 
+        appl->state = true;
+    }
+    return ret;
+error_occured:
+    ret = -1;
+    LOG_ERROR("error occured starting application");
+    return ret;
+}
+/**************
+ * RESPONSES MISSING
+ *  @TODO impl response
+ */
+int handle_management_message(int fd, struct application_manager *appl_manager)
+{
+    application_message msg = {0};
+    int ret = -1;
+
+    enum MSG_RESPONSE_CODE retval = MSG_OK;
+    ret = read_management_message(fd, &msg);
+    if (ret < 0)
+    {
+        goto error_occured;
+    }
+    switch (msg.msg_type)
+    {
+    /** RETVAL
+     * -> OK, on successfull program start
+     * -> ERROR, on failure
+     */
+    case APPLICATION_START_REQUEST:
+    {
+        Kritis3mApplications *appl = msg.payload.kritis3m_applicaiton;
+
+        if (appl == NULL)
+            goto error_occured;
+        ret = start_application(appl);
+        if (ret < 0)
+            goto error_occured;
+        retval = MSG_OK;
         break;
     }
+    /** RETVAL
+     * -> OK, on successfull status Request
+     * -> ERROR, on failure
+     */
     case APPLICATION_STATUS_REQUEST:
     {
+        retval = MSG_ERROR;
         break;
     }
+    /** RETVAL
+     * -> OK, on successfull Stop Request
+     * -> ERROR, on failure
+     */
     case APPLICATION_STOP_REQUEST:
     {
+        int appl_id = msg.payload.application_id;
+        Kritis3mApplications *appl = find_application_by_application_id(appl_manager->configuration->applications,
+                                                                        appl_manager->configuration->number_applications,
+                                                                        appl_id);
+        if (appl == NULL)
+        {
+            LOG_ERROR("no application found with application_id %d. STOP Request failed", appl_id);
+            goto error_occured;
+        }
+        ret = stop_application(appl);
+        if (ret < 0)
+        {
+            LOG_ERROR("Can't stop application with appl_id %d", appl_id);
+            goto error_occured;
+        }
+        retval = MSG_OK;
         break;
     }
-
     case APPLICATION_SERVICE_START_REQUEST:
     {
+        ApplicationConfiguration *config = msg.payload.config;
+        int ret = 0;
+
+        if (config == NULL)
+            goto error_occured;
+        if (appl_manager->configuration != NULL)
+            LOG_WARN("Already existing configuration available. Please terminate application manager before passing new configuration");
+        appl_manager->configuration = config;
+        proxy_backend_config backend_config = tls_proxy_backend_default_config();
+        ret = tls_proxy_backend_run(&backend_config);
+        if (ret < 0)
+            goto error_occured;
+        for (int i = 0; i < appl_manager->configuration->number_applications; i++)
+        {
+            Kritis3mApplications *appl = &appl_manager->configuration->applications[i];
+            if (appl == NULL)
+                goto error_occured;
+            ret = start_application(appl);
+            if (ret < 0)
+                goto error_occured;
+            appl->state = true;
+        }
+        retval = MSG_OK;
         break;
     }
     case APPLICATION_SERVICE_STOP_REQUEST:
     {
+        // just stops all running appls
+        ret = stop_application_service(appl_manager);
+        if (ret < 0)
+            retval = MSG_ERROR;
+        else
+            retval = MSG_OK;
+        respond_with(fd, retval);
+        // not sure about the close process, since the receive socket must still be opened to receive the management message
+        close(appl_manager->management_pair[0]);
+        close(appl_manager->management_pair[1]);
+        return 0;
+        // @TODO free mem
+        // @TODO RESET application_managerclean application_manager
+        appl_manager->initialized = false;
+        if (appl_manager != NULL)
+            poll_set_init(&appl_manager->notifier);
         break;
     }
     case APPLICATION_SERVICE_STATUS_REQUEST:
@@ -377,19 +476,37 @@ int handle_management_message(int fd, struct application_manager *appl_manager)
 
     case APPLICATION_CONNECTION_REQUEST:
     {
+        client_connection_request con_req = msg.payload.client_con_request;
+        int appl_id = con_req.application_id;
+        if ((appl_id < 0))
+            goto error_occured;
+        bool is_supported = false;
+        is_supported = is_client_supported(con_req.application_id, &con_req.client);
+        if (is_supported)
+            retval = MSG_OK;
+        else
+            retval = MSG_FORBIDDEN;
         break;
     }
     case MSG_RESPONSE:
     {
+        ret = msg.payload.return_code;
+        LOG_INFO("response not implemented");
+        return 0;
         break;
     }
     default:
     {
+        LOG_ERROR("unknown request");
+        retval = MSG_ERROR;
         break;
     }
     }
-
+    ret = respond_with(fd, retval);
+    return ret;
 error_occured:
+    retval = MSG_ERROR;
+    respond_with(fd, retval);
     ret = -1;
     return ret;
 }
@@ -401,17 +518,16 @@ void *application_service_main_trhead(void *arg)
     int management_socket = -1;
     struct application_manager *appl_manager = (struct application_manager *)arg;
     // check if service is correctly initialized:
-    if ((appl_manager == NULL) || (appl_manager->configuration == NULL) || (appl_manager->management_pair[1] < 0))
-    {
+    if ((appl_manager == NULL) ||
+        (appl_manager->configuration == NULL) ||
+        (appl_manager->management_pair[1] < 0))
         return NULL;
-    }
-    poll_set_add_fd(&appl_manager->management_pair[1]; POLLIN | POLLERR | POLLHUP);
-    // use mutex
+    poll_set_add_fd(&appl_manager->notifier, appl_manager->management_pair[1], POLLIN | POLLERR | POLLHUP);
     appl_manager->initialized = true;
 
     while (!shutdown)
     {
-        int number_events = poll(&appl_manager->notifier.fds, appl_manger->notifier.num_fds, 0);
+        int number_events = poll(appl_manager->notifier.fds, appl_manager->notifier.num_fds, 0);
 
         if (number_events == -1)
         {
@@ -431,13 +547,9 @@ void *application_service_main_trhead(void *arg)
             if (fd == appl_manager->management_pair[1])
             {
                 if (event & POLLIN)
-                {
                     ret = handle_management_message(fd, appl_manager);
-                }
                 if ((event & POLLERR) || (event & POLLHUP))
-                {
                     LOG_ERROR("Error occured, shut down management service");
-                }
                 else
                 {
                     LOG_ERROR(" unsupported event %d ", event);
@@ -446,8 +558,7 @@ void *application_service_main_trhead(void *arg)
             }
         }
     }
-
-    error_occured;
+error_occured:
     return NULL;
 }
 
@@ -615,4 +726,116 @@ error_occured:
 int get_endpoint_configuration(int ep_1id, asl_endpoint_configuration *ep)
 {
     return -1;
+}
+
+int respond_with(int socket, enum MSG_RESPONSE_CODE response_code)
+{
+    application_message response = {0};
+    response.msg_type = MSG_RESPONSE;
+    response.payload.return_code = response_code;
+    return send_management_message(socket, &response);
+}
+
+int stop_application(Kritis3mApplications *appl)
+{
+    int ret = 0;
+    int appl_id = -1;
+    if (appl == NULL)
+        goto error_occured;
+
+    appl_id = appl->id;
+
+    if (appl->state == false)
+    {
+        LOG_WARN("application is already offline");
+    }
+    else
+    {
+        switch (appl->type)
+        {
+        case TLS_FORWARD_PROXY:
+        {
+            ret = tls_proxy_stop_appl_id(appl_id);
+            if (ret < 0)
+            {
+                LOG_ERROR("stop request for tls forward proxy with appl_id %d failed. STOP Request failed", appl_id);
+                goto error_occured;
+            }
+            break;
+        }
+        case TLS_REVERSE_PROXY:
+        {
+            ret = tls_proxy_stop_appl_id(appl_id);
+            if (ret < 0)
+            {
+                LOG_ERROR("stop request for tls reverse proxy with appl_id %d failed. STOP Request failed", appl_id);
+                goto error_occured;
+            }
+            break;
+        }
+        case ECHO_SERVER:
+        {
+            ret = echo_server_terminate();
+            if (ret < 0)
+            {
+                LOG_ERROR("stop request for echo server with appl_id %d failed. STOP Request failed", appl_id);
+                goto error_occured;
+            }
+            break;
+        }
+        case TCP_CLIENT_STDIN_BRIDGE:
+        {
+            ret = tcp_client_stdin_bridge_terminate();
+            if (ret < 0)
+            {
+                LOG_ERROR("stop request for tcp_client_stdin_bridge with appl_id %d failed. STOP Request failed", appl_id);
+                goto error_occured;
+            }
+            break;
+        }
+        case UNDEFINED:
+        {
+            LOG_WARN("cant stop application: Unknown application type with appl_id %d ", appl_id);
+            goto error_occured;
+            break;
+        }
+        default:
+            goto error_occured;
+        }
+    }
+    appl->state = false;
+    return ret;
+error_occured:
+    ret = -1;
+    LOG_ERROR("exit stop application with error");
+    return ret;
+}
+int stop_application_service(struct application_manager *application_manager)
+{
+    int ret = 0;
+    int number_applications = -1;
+    int appl_id = -1;
+    Kritis3mApplications *appls = NULL;
+    Kritis3mApplications *appl = NULL;
+
+    if (application_manager == NULL)
+        return -1;
+    appls = application_manager->configuration->applications;
+    number_applications = application_manager->configuration->number_applications;
+
+    for (int i = 0; i < number_applications; i++)
+    {
+        appl = &appls[i];
+        ret = stop_application(appl);
+        if (ret < 0)
+        {
+            LOG_ERROR("can't stop appl with appl id %d", appl_id);
+        }
+    }
+
+    // free mem
+    // mutex unlock config
+    // socketpair close
+
+    return ret;
 }

@@ -140,3 +140,24 @@ error_occured:
     ret = -1;
     LOG_ERROR("Can't set selected configuration");
 }
+
+Kritis3mApplications *find_application_by_application_id(Kritis3mApplications *appls, int number_appls, int appl_id)
+{
+    if (appls == NULL)
+        goto error_occured;
+    Kritis3mApplications *t_appl = NULL;
+
+    for (int i = 0; i < number_appls; i++)
+    {
+        t_appl = &appls[i];
+        if (t_appl == NULL)
+            goto error_occured;
+        if (t_appl->id == appl_id)
+            return t_appl;
+    }
+    return NULL;
+
+error_occured:
+    LOG_ERROR("No matching applicaiton for application id %d found", appl_id);
+    return NULL;
+}

@@ -40,17 +40,16 @@
 #define REMOTE_STR "remote"
 #define PRODUCTION_STR "production"
 
-
-
-
 typedef enum
 {
-    TLS_FORWARD_PROXY,
-    TLS_REVERSE_PROXY,
-    TLS_TLS_PROXY,
-    ECHO_SERVER,
-    TCP_CLIENT_STDIN_BRIDGE,
-    L2_BRIDGE,
+
+    UNDEFINED = -1,
+    TLS_FORWARD_PROXY = 0,
+    TLS_REVERSE_PROXY = 1,
+    TLS_TLS_PROXY = 2,
+    ECHO_SERVER = 3,
+    TCP_CLIENT_STDIN_BRIDGE = 4,
+    L2_BRIDGE = 5,
 } Kritis3mApplicationtype;
 
 typedef struct SystemConfiguration SystemConfiguration;
@@ -159,6 +158,7 @@ typedef struct
 typedef struct
 {
     char client_ip_port[IPv4_PORT_LEN];
+    struct sockaddr_in addr;
     int number_trusted_applications;
     int trusted_applications_id[10];
 } TrustedClients;
@@ -234,5 +234,6 @@ typedef struct
 int get_Kritis3mNodeConfiguration(char *filename, Kritis3mNodeConfiguration *config);
 int get_Systemconfig(ConfigurationManager *applconfig, Kritis3mNodeConfiguration *node_config);
 int write_Kritis3mNodeConfig_toflash(Kritis3mNodeConfiguration *config);
+Kritis3mApplications *find_application_by_application_id(Kritis3mApplications *appls, int number_appls, int appl_id);
 
 #endif // KRITIS3M_CONFIGURATION_H
