@@ -1,14 +1,11 @@
 #ifndef KRITIS3M_SCALE_SERVICE_H
 #define KRITIS3M_SCALE_SERVICE_H
 
-
 #include <netinet/in.h>
 #include "kritis3m_configuration.h"
-#include "kritis3m_distribution_service.h"
 #include "hb_service.h"
 #include <stdio.h>
 #include <string.h>
-
 
 /*********************************************************
  *              MANAGEMENT SERVICE STARTUP
@@ -17,17 +14,36 @@
 typedef struct kritis3m_service kritis3m_service;
 struct kritis3m_service;
 
-
-
-int init_kristis3m_service(char* config_file);
-
+int init_kristis3m_service(char *config_file);
 
 /*********************************************************
  *              CONFIGURATION DISTRIBUTION
  */
 
+enum service_message_type
+{
+    HTTP_GET_REQUEST_RESPONSE,
+    HTTP_POST_REQUEST_RESPONSE,
+    HTTP_SERVICE_RETURN,
+};
 
+enum used_service 
+{
+    EST_ENROLL,
+    EST_REENROLL,
+    MGMT_POLICY_REQ,
+    MGMT_HEARTBEAT_REQ,
+    MGMT_POLICY_CONFIRM,
+};
 
+enum request_type
+
+{
+    POLICY_GET,
+    POLICY_POST,
+    ENROLL_GET,
+    HEARTBEAT_GET,
+};
 
 /**********************************************************
  *                      Hardbeat Service

@@ -2,12 +2,9 @@
 #define KRITIS3M_APPLICATION_MANAGER_H
 #include "poll_set.h"
 #include "kritis3m_configuration.h"
-#include "tls_proxy.h"
 #include "echo_server.h"
+#include "tls_proxy.h"
 #include "tcp_client_stdin_bridge.h"
-#include "network_tester.h"
-
-#define GLOBAL_MANAGEMENT
 
 /***
  * includes threading
@@ -53,7 +50,7 @@ typedef struct application_status
         proxy_status proxy_status;
         echo_server_status echo_status;
         tcp_client_stdin_bridge_status stdtin_bridge_status;
-        network_tester_status tester_status;
+        // network_tester_status tester_status;
 
     } concrete_application_status;
 } application_status;
@@ -66,7 +63,7 @@ typedef struct application_config
     {
         echo_server_config echo_config;
         proxy_config proxy_config;
-        network_tester_config network_tester_config;
+        // network_tester_config network_tester_config;
         tcp_client_stdin_bridge_config stdin_bridge_config;
         ApplicationConfiguration application_configuration;
     } config;
@@ -76,7 +73,7 @@ typedef struct client_connection_request
 {
     struct sockaddr_in client;
     int application_id;
-}client_connection_request;
+} client_connection_request;
 
 typedef struct application_message
 {
@@ -101,6 +98,5 @@ int start_application_manager(ApplicationConfiguration *configuration);
 bool confirm_client(int application_id, struct sockaddr_in *connecting_client);
 
 int stop_application_manager();
-int terminate_application_manager();
 
 #endif // KRITIS3M_APPLICATION_MANAGER_H

@@ -40,6 +40,26 @@
 #define REMOTE_STR "remote"
 #define PRODUCTION_STR "production"
 
+typedef enum ManagementReturncode
+{
+    MGMT_BAD_REQUEST = -6,
+    MGMT_PARSE_ERROR = -5,
+    MGMT_EMPTY_OBJECT_ERROR = -4,
+    MGMT_BAD_PARAMS = -3,
+    MGMT_CONNECT_ERROR = -3,
+    MGMT_ERROR =-1,
+    MGMT_OK =0,
+    MGMT_FORBIDDEN = 1,
+    MGMT_BUSY = 2,
+} ManagementReturncode;
+
+typedef enum SelectedConfiguration
+{
+    CFG_NONE = 0,
+    CFG_PRIMARY = 1,
+    CFG_SECONDARY = 2,
+} SelectedConfiguration;
+
 typedef enum
 {
 
@@ -171,6 +191,7 @@ typedef struct
 
 struct ApplicationConfiguration
 {
+    pthread_mutex_t lock;
     Whitelist whitelist;
     int number_crypto_profiles;
     CryptoProfile crypto_profile[MAX_NUMBER_CRYPTOPROFILE];
@@ -196,11 +217,9 @@ struct SystemConfiguration
 typedef struct
 {
     const char *folderpath;
+    SelectedConfiguration active_configuration;
     SystemConfiguration primary;
     SystemConfiguration secondary;
-
-    pthread_mutex_t primaryLock;
-    pthread_mutex_t secondaryLock;
 
 } ConfigurationManager;
 
@@ -228,7 +247,7 @@ typedef struct
 
     char *kritis3m_node_configuration_path;
 
-    int selected_configuration;
+    SelectedConfiguration selected_configuration;
 } Kritis3mNodeConfiguration;
 
 int get_Kritis3mNodeConfiguration(char *filename, Kritis3mNodeConfiguration *config);

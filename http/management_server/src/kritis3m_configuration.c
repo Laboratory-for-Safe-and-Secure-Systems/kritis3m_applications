@@ -33,10 +33,14 @@ error_occured:
     free(json_buffer);
     return ret;
 }
-
-int get_systemconfig(char *filename, SystemConfiguration *systemconfig)
+/**
+ * what happens if file has no content:
+ * -> new file will be created
+ */
+ManagementReturncode get_systemconfig(char *filename, SystemConfiguration *systemconfig)
 {
     int ret = 0;
+    ManagementReturncode retval = MGMT_OK;
     char *json_buffer = NULL;
     int file_size = -1;
 
@@ -44,13 +48,29 @@ int get_systemconfig(char *filename, SystemConfiguration *systemconfig)
         goto error_occured;
 
     ret = read_file(filename, &json_buffer, &file_size);
-    if ((ret < 0) || (file_size <= 0))
+    // empty file or no file
+    if ((ret < 0) || (file_size <= 1))
     {
+        retval = MGMT_EMPTY_OBJECT_ERROR;
+        LOG_ERROR("Can't open file: %s, probably file does not exist", filename);
         goto error_occured;
     }
-    ret = parse_buffer_to_SystemConfiguration(json_buffer, file_size, systemconfig);
+    retval = parse_buffer_to_SystemConfiguration(json_buffer, file_size, systemconfig);
+    if (retval == MGMT_PARSE_ERROR)
+    {
+        LOG_ERROR("error parsing system configuration");
+        goto error_occured;
+    }
+    else if (retval < MGMT_ERROR)
+    {
+        LOG_ERROR("error occured during parsing configuration");
+        goto error_occured;
+    }
+    return ret;
 
 error_occured:
+    if (retval > MGMT_ERROR)
+        retval = MGMT_ERROR;
     LOG_ERROR("Error occured in Read configuration, with error code %d", errno);
     free(json_buffer);
     return ret;
@@ -58,23 +78,33 @@ error_occured:
 
 // calls the management server, if no config exists,
 // returns the active configuration
-int get_Systemconfig(ConfigurationManager *applconfig, Kritis3mNodeConfiguration *node_config)
+ManagementReturncode get_Systemconfig(ConfigurationManager *applconfig, Kritis3mNodeConfiguration *node_config)
 {
-    int ret = 0;
+    /***
+     * Three cases must be checked:
+     * - No config is available: The Management Server must be instantly called for a configuration
+     * - One/Two config/s is/are available: The application can be started. And the next Heartbeat is awaited
+     * - Configuration is available, but incomplete
+     */
+    ManagementReturncode ret = 0;
     SystemConfiguration *sys_config = NULL;
     char filepath[512];
+    SelectedConfiguration selected_configuration = CFG_NONE;
+    char *application_config_path = NULL;
+    int application_config_path_size = -1;
+
     if ((applconfig == NULL) || (node_config == NULL))
         goto error_occured;
 
-    int selected_configuration = node_config->selected_configuration;
-    char *application_config_path = node_config->application_configuration_path;
-    int application_config_path_size = node_config->application_configuration_path_size;
+    selected_configuration = node_config->selected_configuration;
+    application_config_path = node_config->application_configuration_path;
+    application_config_path_size = node_config->application_configuration_path_size;
     memset(filepath, 0, sizeof(filepath));
-    if (selected_configuration <= 0)
-        LOG_INFO("calling management server");
 
-    if (selected_configuration == 1)
+    switch (selected_configuration)
     {
+    case CFG_PRIMARY:
+        applconfig->active_configuration = CFG_PRIMARY;
         sys_config = &applconfig->primary;
         // get primary filepath
         ret = create_file_path(filepath, sizeof(filepath),
@@ -82,9 +112,9 @@ int get_Systemconfig(ConfigurationManager *applconfig, Kritis3mNodeConfiguration
                                PRIMARY_FILENAME, sizeof(PRIMARY_FILENAME));
         if (ret < 0)
             goto error_occured;
-    }
-    else if (selected_configuration == 2)
-    {
+        break;
+    case CFG_SECONDARY:
+        applconfig->active_configuration = CFG_SECONDARY;
         sys_config = &applconfig->secondary;
         // get secondary filepath
         ret = create_file_path(filepath, sizeof(filepath),
@@ -92,12 +122,39 @@ int get_Systemconfig(ConfigurationManager *applconfig, Kritis3mNodeConfiguration
                                SECONDARY_FILENAME, sizeof(SECONDARY_FILENAME));
         if (ret < 0)
             goto error_occured;
-        // get secondary configuration
+        break;
+    case CFG_NONE:
+        LOG_INFO("calling management server");
+        applconfig->active_configuration = CFG_PRIMARY;
+        sys_config = &applconfig->primary;
+        // get primary filepath
+        ret = create_file_path(filepath, sizeof(filepath),
+                               node_config->application_configuration_path, node_config->application_configuration_path_size,
+                               PRIMARY_FILENAME, sizeof(PRIMARY_FILENAME));
+        if (ret < 0)
+            goto error_occured;
+        break;
+    default:
+        applconfig->active_configuration = CFG_PRIMARY;
+        LOG_INFO("selected config not provided. Use primary as new selected config");
+        LOG_INFO("calling management server");
+        sys_config = &applconfig->primary;
+        // get primary filepath
+        ret = create_file_path(filepath, sizeof(filepath),
+                               node_config->application_configuration_path, node_config->application_configuration_path_size,
+                               PRIMARY_FILENAME, sizeof(PRIMARY_FILENAME));
+        if (ret < 0)
+            goto error_occured;
+        LOG_INFO("calling management server");
+        break;
     }
-    get_systemconfig(filepath, sys_config);
+    // reads and parses data from filepath to sys_config object
+    ret = get_systemconfig(filepath, sys_config);
+    return ret;
 
 error_occured:
-    ret = -1;
+    if (ret > MGMT_ERROR)
+        ret = MGMT_ERROR;
     return ret;
 }
 
@@ -121,6 +178,8 @@ int write_Kritis3mNodeConfig_toflash(Kritis3mNodeConfiguration *config)
     free(buffer);
     return ret;
 error_occured:
+    if (file != NULL)
+        fclose(file);
     free(buffer);
     ret = -1;
     return ret;
