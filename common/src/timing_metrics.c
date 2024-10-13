@@ -3,6 +3,11 @@
 #include <string.h>
 #include <math.h>
 
+#if !defined(__ZEPHYR__) && !defined(_WIN32)
+
+#include <unistd.h>
+
+#endif
 
 #include "timing_metrics.h"
 
