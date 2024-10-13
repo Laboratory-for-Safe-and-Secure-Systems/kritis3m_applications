@@ -1,14 +1,8 @@
 
 #include <stdio.h>
 #include <string.h>
-#include <unistd.h>
 #include <math.h>
 
-#if !defined(__ZEPHYR__)
-
-#include <linux/limits.h>
-
-#endif
 
 #include "timing_metrics.h"
 
@@ -69,6 +63,28 @@ timing_metrics* timing_metrics_create(char const* name, size_t max_measurements,
 
         return self;
 }
+
+
+// #ifdef _WIN32
+
+// #include <winsock2.h>
+
+// static int clock_gettime(int dummy, struct timespec *spec)
+// {
+//         (void)dummy;
+//         __int64 wintime;
+
+//         GetSystemTimeAsFileTime((FILETIME*)&wintime);
+
+//         wintime      -=116444736000000000i64;  //1jan1601 to 1jan1970
+//         spec->tv_sec  =wintime / 10000000i64;           //seconds
+//         spec->tv_nsec =wintime % 10000000i64 * 100;      //nano-seconds
+
+//         return 0;
+// }
+// #define CLOCK_MONOTONIC 0
+
+// #endif
 
 
 /* Start the next measurement */
@@ -193,7 +209,7 @@ void timing_metrics_get_results(timing_metrics* metrics, timing_metrics_results*
  */
 int timing_metrics_prepare_output_file(timing_metrics* metrics, char const* path)
 {
-#if defined(__ZEPHYR__)
+#if defined(__ZEPHYR__) || defined(_WIN32)
         /* Not supported on Zephyr */
         return 0;
 #else
@@ -209,7 +225,7 @@ int timing_metrics_prepare_output_file(timing_metrics* metrics, char const* path
                 free(metrics->output_file);
 
         /* Generate the full output filename */
-        metrics->output_file = (char*) malloc(PATH_MAX);
+        metrics->output_file = (char*) malloc(1024);
         if (metrics->output_file == NULL)
                 ERROR_OUT("Failed to allocate memory for file path.");
 
@@ -260,7 +276,7 @@ cleanup:
  */
 int timing_metrics_write_to_file(timing_metrics* metrics)
 {
-#if defined(__ZEPHYR__)
+#if defined(__ZEPHYR__) || defined(_WIN32)
         /* Not supported on Zephyr */
         return 0;
 #else

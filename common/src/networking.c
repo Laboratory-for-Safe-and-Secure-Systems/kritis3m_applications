@@ -1,15 +1,21 @@
 
 #include <errno.h>
-#include <sys/socket.h>
 #include <stdint.h>
 
 #if defined(__ZEPHYR__)
 
+#include <sys/socket.h>
 #include <zephyr/posix/fcntl.h>
 #include <zephyr/net/net_l2.h>
 
+#elif defined(_WIN32)
+
+#include <winsock2.h>
+#include <sys/types.h>
+
 #else
 
+#include <sys/socket.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
@@ -200,6 +206,26 @@ int remove_ipv4_address(void* iface, struct in_addr ipv4_addr)
 	return 0;
 }
 
+#elif defined(_WIN32)
+
+#include <stdio.h>
+
+/* Initialize the network interfaces */
+int initialize_network_interfaces()
+{
+	WSADATA wsaData;
+
+	if(WSAStartup(0x202, &wsaData) == 0)
+	{
+		return 0;
+	}
+	else
+	{
+		printf("ERROR: Initialization failure.\n");
+		return -1;
+	}
+}
+
 #else //defined (__ZEPHYR__)
 
 /* Initialize the network interfaces */
@@ -324,6 +350,15 @@ struct network_interfaces const* network_interfaces(void)
 /* Helper method to set a socket to (non) blocking */
 int setblocking(int fd, bool val)
 {
+#ifdef _WIN32
+	unsigned long arg = 1;
+	int ret = ioctlsocket(fd, FIONBIO, &arg);
+	if (ret != NO_ERROR)
+	{
+		LOG_ERROR("ioctlsocket(FIONBIO): %d", ret);
+		return ret;
+	}
+#else
 	int fl, res;
 
 	fl = fcntl(fd, F_GETFL, 0);
@@ -350,30 +385,92 @@ int setblocking(int fd, bool val)
 	}
 
 	return 0;
+#endif
 }
 
-/* Temporary helper method to send data synchronously */
-int blocking_send(int fd, char* data, size_t length)
+#include <stdio.h>
+
+/* Generic method to create a socketpair for inter-thread communication */
+int create_socketpair(int socket_pair[2])
 {
-	setblocking(fd, true); //ToDo: remove this blocking stuff and implement proper async send
+#if defined(_WIN32)
+	/* Implementation taken from:
+	 * https://github.com/ncm/selectable-socketpair/blob/master/socketpair.c */
+	union {
+		struct sockaddr_in inaddr;
+		struct sockaddr addr;
+	} a;
+	SOCKET listener;
+	int e;
+	socklen_t addrlen = sizeof(a.inaddr);
+	DWORD flags = 0;
+	int reuse = 1;
 
-	int out_len;
-	for (char const* p = data; length > 0; length -= out_len)
-	{
-		out_len = send(fd, p, length, 0);
+	if (socket_pair == 0) {
+		WSASetLastError(WSAEINVAL);
+		return SOCKET_ERROR;
+	}
+	socket_pair[0] = socket_pair[1] = -1;
 
-		if (out_len < 0)
-		{
-			int error = errno;
-			LOG_ERROR("send error (fd=%d): %d", fd, error);
-			break;
-		}
-
-		p += out_len;
+	listener = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+	if (listener == -1) {
+		int error = WSAGetLastError();
+		printf("socket error: %d\n", error);
+		return SOCKET_ERROR;
 	}
 
-	setblocking(fd, false);
 
-	return -errno;
+	memset(&a, 0, sizeof(a));
+	a.inaddr.sin_family = AF_INET;
+	a.inaddr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+	a.inaddr.sin_port = 0;
+
+	for (;;) {
+		if (setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, (char*) &reuse, (socklen_t) sizeof(reuse)) == -1)
+			break;
+		if (bind(listener, &a.addr, sizeof(a.inaddr)) == SOCKET_ERROR)
+			break;
+
+		memset(&a, 0, sizeof(a));
+		if  (getsockname(listener, &a.addr, &addrlen) == SOCKET_ERROR)
+			break;
+
+		// win32 getsockname may only set the port number, p=0.0005.
+		// ( http://msdn.microsoft.com/library/ms738543.aspx ):
+		a.inaddr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+		a.inaddr.sin_family = AF_INET;
+
+		if (listen(listener, 1) == SOCKET_ERROR)
+			break;
+
+		socket_pair[0] = WSASocketW(AF_INET, SOCK_STREAM, 0, NULL, 0, flags);
+		if (socket_pair[0] == -1)
+			break;
+
+		if (connect(socket_pair[0], &a.addr, sizeof(a.inaddr)) == SOCKET_ERROR)
+			break;
+
+		socket_pair[1] = accept(listener, NULL, NULL);
+		if (socket_pair[1] == -1)
+			break;
+
+		closesocket(listener);
+		return 0;
+	}
+
+	e = WSAGetLastError();
+	closesocket(listener);
+	closesocket(socket_pair[0]);
+	closesocket(socket_pair[1]);
+	WSASetLastError(e);
+	socket_pair[0] = socket_pair[1] = -1;
+	return SOCKET_ERROR;
+
+#else
+	int ret = socketpair(AF_UNIX, SOCK_STREAM, 0, socket_pair);
+	if (ret < 0)
+		socket_pair[0] = socket_pair[1] = -1;
+
+	return ret;
+#endif
 }
-

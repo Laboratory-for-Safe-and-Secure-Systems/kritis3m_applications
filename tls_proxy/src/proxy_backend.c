@@ -1,12 +1,21 @@
 
 #include <errno.h>
 #include <pthread.h>
-#include <sys/socket.h>
 #include <unistd.h>
 #include <stdint.h>
-#include <netinet/tcp.h>
 #include <string.h>
 #include <stdio.h>
+
+#if defined(_WIN32)
+
+#include <winsock2.h>
+
+#else
+
+#include <sys/socket.h>
+#include <netinet/tcp.h>
+
+#endif
 
 #include "tls_proxy.h"
 
@@ -105,7 +114,7 @@ int proxy_backend_init(proxy_backend* backend, proxy_backend_config const* confi
         LOG_LVL_SET(config->log_level);
 
         /* Create the socket pair for external management */
-        int ret = socketpair(AF_UNIX, SOCK_STREAM, 0, backend->management_socket_pair);
+        int ret = create_socketpair(backend->management_socket_pair);
         if (ret < 0)
         {
                 LOG_ERROR("Error creating socket pair for management: %d (%s)", errno, strerror(errno));
@@ -183,7 +192,7 @@ static int add_new_proxy(enum tls_proxy_direction direction, proxy_config const*
         if (proxy->incoming_sock == -1)
                 ERROR_OUT_EX(proxy->log_module, "Error creating incoming TCP socket");
 
-        if (setsockopt(proxy->incoming_sock, SOL_SOCKET, SO_REUSEADDR, &(int){1}, sizeof(int)) < 0)
+        if (setsockopt(proxy->incoming_sock, SOL_SOCKET, SO_REUSEADDR, &(char){1}, sizeof(int)) < 0)
                 ERROR_OUT_EX(proxy->log_module, "setsockopt(SO_REUSEADDR) failed: errer %d", errno);
 
         /* Configure TCP server */
@@ -264,7 +273,7 @@ static void kill_proxy(proxy* proxy)
         /* Stop the listening socket and clear it from the poll_set */
         if (proxy->incoming_sock >= 0)
         {
-                close(proxy->incoming_sock);
+                closesocket(proxy->incoming_sock);
                 proxy->incoming_sock = -1;
         }
 
@@ -465,12 +474,12 @@ void proxy_backend_cleanup(proxy_backend* backend)
         /* Close the management socket pair */
         if (backend->management_socket_pair[0] >= 0)
         {
-                close(backend->management_socket_pair[0]);
+                closesocket(backend->management_socket_pair[0]);
                 backend->management_socket_pair[0] = -1;
         }
         if (backend->management_socket_pair[1] >= 0)
         {
-                close(backend->management_socket_pair[1]);
+                closesocket(backend->management_socket_pair[1]);
                 backend->management_socket_pair[1] = -1;
         }
 
@@ -538,7 +547,11 @@ void* proxy_backend_thread(void* ptr)
                 ret = poll(backend->poll_set.fds, backend->poll_set.num_fds, -1);
 
                 if (ret == -1) {
+                #if defined(_WIN32)
+                        LOG_ERROR("poll error: %d", WSAGetLastError());
+                #else
                         LOG_ERROR("poll error: %d", errno);
+                #endif
                         continue;
                 }
 
@@ -613,7 +626,7 @@ void* proxy_backend_thread(void* ptr)
                                         else if (proxy_connection->direction == FORWARD_PROXY)
                                         {
                                                 ret = poll_set_add_fd(&backend->poll_set, proxy_connection->tunnel_sock,
-                                                                      POLLOUT | POLLERR | POLLHUP);
+                                                                      POLLOUT);
                                         }
                                         if (ret != 0)
                                         {

@@ -1,11 +1,20 @@
 #include <errno.h>
 #include <pthread.h>
-#include <sys/socket.h>
-#include <netinet/tcp.h>
 #include <unistd.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
+
+#if defined(_WIN32)
+
+#include <winsock2.h>
+
+#else
+
+#include <sys/socket.h>
+#include <netinet/tcp.h>
+
+#endif
 
 #include "echo_server.h"
 
@@ -78,6 +87,7 @@ typedef struct echo_client
         bool in_use;
         bool handshake_done;
         int socket;
+        int slot;
         asl_session* tls_session;
         size_t num_of_bytes_in_recv_buffer;
         uint8_t recv_buffer[RECV_BUFFER_SIZE];
@@ -248,7 +258,7 @@ static void* echo_server_main_thread(void* ptr)
                                         if (client == NULL)
                                         {
                                                 LOG_ERROR("Error adding new client");
-                                                close(client_socket);
+                                                closesocket(client_socket);
                                                 continue;
                                         }
 
@@ -266,6 +276,14 @@ static void* echo_server_main_thread(void* ptr)
                         /* Check all clients */
                         else if ((client = find_client_by_fd(fd)) != NULL)
                         {
+                                if (event & POLLERR)
+                                {
+                                        LOG_ERROR("Error on client connection in slot %d", client->slot+1);
+                                        poll_set_remove_fd(&server->poll_set, fd);
+                                        client_cleanup(client);
+                                        continue;
+                                }
+
                                 if (client->tls_session != NULL && client->handshake_done == false)
                                 {
                                         /* Perform TLS handshake */
@@ -349,6 +367,7 @@ static int prepare_server(echo_server* server, echo_server_config const* config)
                 client_pool[i].in_use = false;
                 client_pool[i].handshake_done = false;
                 client_pool[i].socket = -1;
+                client_pool[i].slot = -1;
                 client_pool[i].tls_session = NULL;
                 client_pool[i].num_of_bytes_in_recv_buffer = 0;
         }
@@ -375,7 +394,7 @@ static int prepare_server(echo_server* server, echo_server_config const* config)
         if (server->server_socket == -1)
                 ERROR_OUT("Error creating incoming TCP socket");
 
-        if (setsockopt(server->server_socket, SOL_SOCKET, SO_REUSEADDR, &(int){1}, sizeof(int)) < 0)
+        if (setsockopt(server->server_socket, SOL_SOCKET, SO_REUSEADDR, &(char){1}, sizeof(int)) < 0)
                 ERROR_OUT("setsockopt(SO_REUSEADDR) failed: error %d\n", errno);
 
         /* Configure TCP server */
@@ -457,10 +476,11 @@ static echo_client* add_new_client(echo_server* server, int client_socket,
         client->in_use = true;
         client->num_of_bytes_in_recv_buffer = 0;
         client->socket = client_socket;
+        client->slot = freeSlot;
 
         setblocking(client->socket, false);
 
-        if (setsockopt(client->socket, IPPROTO_TCP, TCP_NODELAY, &(int){1}, sizeof(int)) < 0)
+        if (setsockopt(client->socket, IPPROTO_TCP, TCP_NODELAY, &(char){1}, sizeof(int)) < 0)
         {
                 LOG_ERROR("setsockopt(TCP_NODELAY) for client socket failed: error %d", errno);
                 client_cleanup(client);
@@ -528,9 +548,14 @@ static int do_echo(echo_server* server, echo_client* client, int event)
                         }
                         else
                         {
-                                ret = read(client->socket, client->recv_buffer, sizeof(client->recv_buffer));
+                                ret = recv(client->socket, client->recv_buffer, sizeof(client->recv_buffer), 0);
 
-                                if ((ret == -1) && ((errno == EAGAIN) || (errno == EWOULDBLOCK)))
+                                if ((ret == -1) &&
+                        #if defined(_WIN32)
+                                        (WSAGetLastError() == WSAEWOULDBLOCK))
+                        #else
+                                        ((errno == EAGAIN) || (errno == EWOULDBLOCK)))
+                        #endif
                                 {
                                         ret = ASL_WANT_READ;
                                 }
@@ -564,7 +589,12 @@ static int do_echo(echo_server* server, echo_client* client, int event)
                                                 client->num_of_bytes_in_recv_buffer,
                                                 0);
 
-                                        if ((ret == -1) && ((errno == EAGAIN) || (errno == EWOULDBLOCK)))
+                                        if ((ret == -1) &&
+                                        #if defined(_WIN32)
+                                                (WSAGetLastError() == WSAEWOULDBLOCK))
+                                        #else
+                                                ((errno == EAGAIN) || (errno == EWOULDBLOCK)))
+                                        #endif
                                         {
                                                 /* We have to wait for the socket to be writable */
                                                 poll_set_update_events(&server->poll_set, client->socket, POLLOUT);
@@ -646,7 +676,7 @@ static void client_cleanup(echo_client* client)
         if (client->socket > 0)
         {
                 poll_set_remove_fd(&the_server.poll_set, client->socket);
-                close(client->socket);
+                closesocket(client->socket);
                 client->socket = -1;
         }
 
@@ -659,6 +689,7 @@ static void client_cleanup(echo_client* client)
         if (the_server.num_clients > 0)
                 the_server.num_clients -= 1;
 
+        client->slot = -1;
         client->handshake_done = false;
 }
 
@@ -671,7 +702,7 @@ static int send_management_message(int socket, echo_server_management_message co
 
         while ((ret <= 0) && (retries < max_retries))
         {
-                ret = send(socket, msg, sizeof(echo_server_management_message), 0);
+                ret = send(socket, (char const*) msg, sizeof(echo_server_management_message), 0);
                 if (ret < 0)
                 {
                         if (errno != EAGAIN)
@@ -703,7 +734,7 @@ static int send_management_message(int socket, echo_server_management_message co
 
 static int read_management_message(int socket, echo_server_management_message* msg)
 {
-        int ret = recv(socket, msg, sizeof(echo_server_management_message), 0);
+        int ret = recv(socket, (char*) msg, sizeof(echo_server_management_message), 0);
         if (ret < 0)
         {
                 LOG_ERROR("Error receiving message: %d (%s)", errno, strerror(errno));
@@ -787,7 +818,7 @@ static void echo_server_cleanup(echo_server* server)
         /* Stop the listening socket */
         if (server->server_socket > 0)
         {
-                close(server->server_socket);
+                closesocket(server->server_socket);
                 server->server_socket = -1;
         }
 
@@ -801,12 +832,12 @@ static void echo_server_cleanup(echo_server* server)
         /* Close the management socket pair */
         if (server->management_socket_pair[0] != -1)
         {
-                close(server->management_socket_pair[0]);
+                closesocket(server->management_socket_pair[0]);
                 server->management_socket_pair[0] = -1;
         }
         if (server->management_socket_pair[1] != -1)
         {
-                close(server->management_socket_pair[1]);
+                closesocket(server->management_socket_pair[1]);
                 server->management_socket_pair[1] = -1;
         }
 
@@ -853,7 +884,7 @@ int echo_server_run(echo_server_config const* config)
         }
 
         /* Create the socket pair for external management */
-        int ret = socketpair(AF_UNIX, SOCK_STREAM, 0, the_server.management_socket_pair);
+        int ret = create_socketpair(the_server.management_socket_pair);
         if (ret < 0)
                 ERROR_OUT("Error creating socket pair for management: %d (%s)", errno, strerror(errno));
 

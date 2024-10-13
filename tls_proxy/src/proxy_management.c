@@ -1,12 +1,21 @@
 
 #include <errno.h>
 #include <pthread.h>
-#include <sys/socket.h>
 #include <unistd.h>
 #include <stdint.h>
-#include <netinet/tcp.h>
 #include <string.h>
 #include <stdio.h>
+
+#if defined(_WIN32)
+
+#include <winsock2.h>
+
+#else
+
+#include <sys/socket.h>
+#include <netinet/tcp.h>
+
+#endif
 
 #include "proxy_management.h"
 #include "proxy_connection.h"
@@ -27,7 +36,7 @@ int send_management_message(int socket, proxy_management_message const* msg)
 
         while ((ret <= 0) && (retries < max_retries))
         {
-                ret = send(socket, msg, sizeof(proxy_management_message), 0);
+                ret = send(socket, (char const*) msg, sizeof(proxy_management_message), 0);
                 if (ret < 0)
                 {
                         if (errno != EAGAIN)
@@ -59,7 +68,7 @@ int send_management_message(int socket, proxy_management_message const* msg)
 
 int read_management_message(int socket, proxy_management_message* msg)
 {
-        int ret = recv(socket, msg, sizeof(proxy_management_message), 0);
+        int ret = recv(socket, (char*) msg, sizeof(proxy_management_message), 0);
         if (ret < 0)
         {
                 LOG_ERROR("Error receiving message: %d (%s)", errno, strerror(errno));

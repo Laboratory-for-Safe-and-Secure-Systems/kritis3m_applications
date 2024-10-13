@@ -3,8 +3,17 @@
 
 
 #include <stdint.h>
+
+#if defined(_WIN32)
+
+#include <winsock2.h>
+
+#else
+
 #include <sys/socket.h>
 #include <poll.h>
+
+#endif
 
 
 #ifdef CONFIG_NET_SOCKETS_POLL_MAX
@@ -14,7 +23,7 @@
 #endif
 
 
-typedef struct poll_set 
+typedef struct poll_set
 {
 	struct pollfd fds[NUM_FDS];
 	int num_fds;

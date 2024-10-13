@@ -3,7 +3,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
-#include <unistd.h>
 
 
 void log_message(log_module const* module, int32_t level, char const* fmt, ...)

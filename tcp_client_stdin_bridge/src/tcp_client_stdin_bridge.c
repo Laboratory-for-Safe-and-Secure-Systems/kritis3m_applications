@@ -1,10 +1,19 @@
 #include <errno.h>
 #include <pthread.h>
-#include <sys/socket.h>
 #include <unistd.h>
 #include <stdint.h>
 #include <string.h>
+
+#if defined(_WIN32)
+
+#include <winsock2.h>
+
+#else
+
+#include <sys/socket.h>
 #include <netinet/tcp.h>
+
+#endif
 
 #include "tcp_client_stdin_bridge.h"
 
@@ -173,7 +182,7 @@ static void* tcp_client_stdin_bridge_main_thread(void* ptr)
                                 if (event & POLLIN)
                                 {
                                         /* Receive data from stdin */
-                                        ret = read(fd, bridge->recv_buffer, sizeof(bridge->recv_buffer));
+                                        ret = recv(fd, bridge->recv_buffer, sizeof(bridge->recv_buffer), 0);
 
                                         if (ret > 0)
                                         {
@@ -216,7 +225,7 @@ static int send_management_message(int socket, tcp_client_stdin_bridge_managemen
 
         while ((ret <= 0) && (retries < max_retries))
         {
-                ret = send(socket, msg, sizeof(tcp_client_stdin_bridge_management_message), 0);
+                ret = send(socket, (char*) msg, sizeof(tcp_client_stdin_bridge_management_message), 0);
                 if (ret < 0)
                 {
                         if (errno != EAGAIN)
@@ -248,7 +257,7 @@ static int send_management_message(int socket, tcp_client_stdin_bridge_managemen
 
 static int read_management_message(int socket, tcp_client_stdin_bridge_management_message* msg)
 {
-        int ret = recv(socket, msg, sizeof(tcp_client_stdin_bridge_management_message), 0);
+        int ret = recv(socket, (char*) msg, sizeof(tcp_client_stdin_bridge_management_message), 0);
         if (ret < 0)
         {
                 LOG_ERROR("Error receiving message: %d (%s)", errno, strerror(errno));
@@ -325,19 +334,19 @@ static void bridge_cleanup(tcp_client_stdin_bridge* bridge)
         /* Close the TCP socket */
         if (bridge->tcp_socket != -1)
         {
-                close(bridge->tcp_socket);
+                closesocket(bridge->tcp_socket);
                 bridge->tcp_socket = -1;
         }
 
         /* Close the management socket pair */
         if (bridge->management_socket_pair[0] != -1)
         {
-                close(bridge->management_socket_pair[0]);
+                closesocket(bridge->management_socket_pair[0]);
                 bridge->management_socket_pair[0] = -1;
         }
         if (bridge->management_socket_pair[1] != -1)
         {
-                close(bridge->management_socket_pair[1]);
+                closesocket(bridge->management_socket_pair[1]);
                 bridge->management_socket_pair[1] = -1;
         }
 
@@ -378,7 +387,7 @@ int tcp_client_stdin_bridge_run(tcp_client_stdin_bridge_config const* config)
         client_stdin_bridge.num_of_bytes_in_recv_buffer = 0;
 
         /* Create the socket pair for external management */
-        int ret = socketpair(AF_UNIX, SOCK_STREAM, 0, client_stdin_bridge.management_socket_pair);
+        int ret = create_socketpair(client_stdin_bridge.management_socket_pair);
         if (ret < 0)
                 ERROR_OUT("Error creating socket pair for management: %d (%s)", errno, strerror(errno));
 
@@ -403,16 +412,23 @@ int tcp_client_stdin_bridge_run(tcp_client_stdin_bridge_config const* config)
         setblocking(client_stdin_bridge.tcp_socket, false);
 
         /* Set TCP_NODELAY option to disable Nagle algorithm */
-        if (setsockopt(client_stdin_bridge.tcp_socket, IPPROTO_TCP, TCP_NODELAY, &(int){1}, sizeof(int)) < 0)
+        if (setsockopt(client_stdin_bridge.tcp_socket, IPPROTO_TCP, TCP_NODELAY, &(char){1}, sizeof(int)) < 0)
                 ERROR_OUT("setsockopt(TCP_NODELAY) failed: error %d", errno);
 
+#if !defined(_WIN32)
         /* Set retry count to send a total of 3 SYN packets => Timeout ~7s */
         if (setsockopt(client_stdin_bridge.tcp_socket, IPPROTO_TCP, TCP_SYNCNT, &(int){2}, sizeof(int)) < 0)
                 ERROR_OUT("setsockopt(TCP_SYNCNT) failed: error %d", errno);
+#endif
 
         /* Connect to the peer */
         ret = connect(client_stdin_bridge.tcp_socket, (struct sockaddr*) &target_addr, sizeof(target_addr));
-        if ((ret != 0) && (errno != EINPROGRESS))
+        if ((ret != 0) &&
+        #if defined(_WIN32)
+                (WSAGetLastError() != WSAEWOULDBLOCK))
+        #else
+                (errno != EINPROGRESS))
+        #endif
                 ERROR_OUT("Unable to connect to target peer, errno: %d", errno);
 
         /* Add new server to the poll_set */

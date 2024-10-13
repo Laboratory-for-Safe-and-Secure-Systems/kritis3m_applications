@@ -1,6 +1,5 @@
 #include <stdlib.h>
 #include <stdint.h>
-#include <unistd.h>
 #include <string.h>
 
 #include "proxy_management.h"

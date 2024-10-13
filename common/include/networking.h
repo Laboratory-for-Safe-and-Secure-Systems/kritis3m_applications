@@ -5,18 +5,33 @@
 
 #include <zephyr/net/net_if.h>
 
+#define closesocket close
+
+#elif defined(_WIN32)
+
+#include <stdbool.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
+
+#define poll WSAPoll
+
+#define net_addr_ntop inet_ntop
+#define net_addr_pton inet_pton
+
 #else
 
 #include <stdbool.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
 
+#define closesocket close
+
 #define net_addr_ntop inet_ntop
 #define net_addr_pton inet_pton
 
 #endif
 
-struct network_interfaces 
+struct network_interfaces
 {
 	void* management;
 	void* lan;
@@ -44,7 +59,7 @@ int remove_ipv4_address(void* iface, struct in_addr ipv4_addr);
 int setblocking(int fd, bool val);
 
 
-/* Temporary helper method to send data synchronously */
-int blocking_send(int fd, char* data, size_t length);
+/* Generic method to create a socketpair for inter-thread communication */
+int create_socketpair(int socket_pair[2]);
 
 #endif

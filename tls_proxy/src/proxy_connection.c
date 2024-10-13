@@ -1,11 +1,20 @@
 #include <errno.h>
 #include <pthread.h>
-#include <sys/socket.h>
 #include <unistd.h>
 #include <stdint.h>
-#include <netinet/tcp.h>
 #include <string.h>
 #include <stdio.h>
+
+#if defined(_WIN32)
+
+#include <winsock2.h>
+
+#else
+
+#include <sys/socket.h>
+#include <netinet/tcp.h>
+
+#endif
 
 #include "proxy_connection.h"
 #include "proxy_backend.h"
@@ -95,7 +104,7 @@ proxy_connection* add_new_connection_to_proxy(proxy* proxy, int client_socket,
         if ((freeSlotConnectionPool == -1) || (freeSlotProxyConnectionsArray == -1))
         {
                 LOG_ERROR_EX(proxy->log_module, "Cannot accept more connections (no free slot)");
-                close(client_socket);
+                closesocket(client_socket);
                 return NULL;
         }
 
@@ -136,15 +145,15 @@ proxy_connection* add_new_connection_to_proxy(proxy* proxy, int client_socket,
         setblocking(connection->asset_sock, false);
 
         /* Set TCP_NODELAY option to disable Nagle algorithm */
-        if (setsockopt(connection->tunnel_sock, IPPROTO_TCP, TCP_NODELAY, &(int){1}, sizeof(int)) < 0)
+        if (setsockopt(connection->tunnel_sock, IPPROTO_TCP, TCP_NODELAY, &(char){1}, sizeof(int)) < 0)
                 ERROR_OUT_EX(proxy->log_module, "setsockopt(TCP_NODELAY) tunnel_sock failed: error %d", errno);
 
-        if (setsockopt(connection->asset_sock, IPPROTO_TCP, TCP_NODELAY, &(int){1}, sizeof(int)) < 0)
+        if (setsockopt(connection->asset_sock, IPPROTO_TCP, TCP_NODELAY, &(char){1}, sizeof(int)) < 0)
                 ERROR_OUT_EX(proxy->log_module, "setsockopt(TCP_NODELAY) asset_sock failed: error %d", errno);
 
         if (connection->direction == FORWARD_PROXY)
         {
-        #if !defined(__ZEPHYR__)
+        #if !defined(__ZEPHYR__) && !defined(_WIN32)
                 /* Set retry count to send a total of 3 SYN packets => Timeout ~7s */
                 if (setsockopt(connection->tunnel_sock, IPPROTO_TCP, TCP_SYNCNT, &(int){2}, sizeof(int)) < 0)
                         ERROR_OUT_EX(proxy->log_module, "setsockopt(TCP_SYNCNT) tunnel_sock failed: error %d", errno);
@@ -155,7 +164,7 @@ proxy_connection* add_new_connection_to_proxy(proxy* proxy, int client_socket,
         }
         else if (connection->direction == REVERSE_PROXY)
         {
-        #if !defined(__ZEPHYR__)
+        #if !defined(__ZEPHYR__) && !defined(_WIN32)
                 /* Set retry count to send a total of 3 SYN packets => Timeout ~7s */
                 if (setsockopt(connection->asset_sock, IPPROTO_TCP, TCP_SYNCNT, &(int){2}, sizeof(int)) < 0)
                         ERROR_OUT_EX(proxy->log_module, "setsockopt(TCP_SYNCNT) asset_sock failed: error %d", errno);
@@ -164,7 +173,12 @@ proxy_connection* add_new_connection_to_proxy(proxy* proxy, int client_socket,
                 /* Connect to the peer */
                 ret = connect(connection->asset_sock, (struct sockaddr*) &proxy->target_addr, sizeof(proxy->target_addr));
         }
-        if ((ret != 0) && (errno != EINPROGRESS))
+        if ((ret != 0) &&
+        #if defined(_WIN32)
+                (WSAGetLastError() != WSAEWOULDBLOCK))
+        #else
+                (errno != EINPROGRESS))
+        #endif
                 ERROR_OUT_EX(proxy->log_module, "Unable to connect to target peer, errno: %d", errno);
 
         /* Create a new TLS session on the destined interface depending on the direction */
@@ -225,7 +239,7 @@ int proxy_connection_detach_handling(proxy_connection* connection)
         // pthread_attr_setschedpolicy(&connection->thread_attr, SCHED_RR);
 
         /* Create the socket pair for external management */
-        int ret = socketpair(AF_UNIX, SOCK_STREAM, 0, connection->management_socket_pair);
+        int ret = create_socketpair(connection->management_socket_pair);
         if (ret < 0)
         {
                 LOG_ERROR_EX(*connection->log_module, "Error creating management socket pair: %d (%s)",
@@ -300,12 +314,12 @@ void proxy_connection_cleanup(proxy_connection* connection)
         /* Kill the network connections */
         if (connection->tunnel_sock >= 0)
         {
-                close(connection->tunnel_sock);
+                closesocket(connection->tunnel_sock);
                 connection->tunnel_sock = -1;
         }
         if (connection->asset_sock >= 0)
         {
-                close(connection->asset_sock);
+                closesocket(connection->asset_sock);
                 connection->asset_sock = -1;
         }
 
@@ -325,12 +339,12 @@ void proxy_connection_cleanup(proxy_connection* connection)
         /* Close the management socket pair */
         if (connection->management_socket_pair[0] >= 0)
         {
-                close(connection->management_socket_pair[0]);
+                closesocket(connection->management_socket_pair[0]);
                 connection->management_socket_pair[0] = -1;
         }
         if (connection->management_socket_pair[1] >= 0)
         {
-                close(connection->management_socket_pair[1]);
+                closesocket(connection->management_socket_pair[1]);
                 connection->management_socket_pair[1] = -1;
         }
 
@@ -463,7 +477,11 @@ static void* connection_handler_thread(void *ptr)
 
                                                         if (ret == -1)
                                                         {
+                                                        #if defined(_WIN32)
+                                                                if (WSAGetLastError() == WSAEWOULDBLOCK)
+                                                        #else
                                                                 if ((errno == EAGAIN) || (errno == EWOULDBLOCK))
+                                                        #endif
                                                                 {
                                                                         /* We have to wait for the asset socket to be writable. Until we can send
                                                                         * the data, we also mustn't receive more data on the tunnel socket. */
@@ -559,7 +577,7 @@ static void* connection_handler_thread(void *ptr)
                                 if (event & POLLIN)
                                 {
                                         /* Data received from the asset connection */
-                                        ret = read(connection->asset_sock, connection->ass2tun_buffer, sizeof(connection->ass2tun_buffer));
+                                        ret = recv(connection->asset_sock, connection->ass2tun_buffer, sizeof(connection->ass2tun_buffer), 0);
 
                                         if (ret > 0)
                                         {
@@ -589,6 +607,10 @@ static void* connection_handler_thread(void *ptr)
                                                 /* Connection closed */
                                                 ret = -1;
                                         }
+                                        else
+                                        {
+                                                ret = -1;
+                                        }
                                 }
                                 if (event & POLLOUT)
                                 {
@@ -601,7 +623,11 @@ static void* connection_handler_thread(void *ptr)
 
                                         if (ret == -1)
                                         {
+                                        #if defined(_WIN32)
+                                                if (WSAGetLastError() == WSAEWOULDBLOCK)
+                                        #else
                                                 if ((errno == EAGAIN) || (errno == EWOULDBLOCK))
+                                        #endif
                                                 {
                                                         ret = 0;
                                                 }

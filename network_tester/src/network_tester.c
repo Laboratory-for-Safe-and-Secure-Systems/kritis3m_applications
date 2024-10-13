@@ -3,18 +3,26 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
-#include <sys/socket.h>
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <netinet/tcp.h>
 #include <unistd.h>
 #include <errno.h>
-#include <getopt.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <time.h>
 #include <limits.h>
 #include <pthread.h>
+
+#if defined(_WIN32)
+
+#include <winsock2.h>
+
+#else
+
+#include <sys/socket.h>
+#include <netinet/tcp.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+
+#endif
 
 #include "logging.h"
 #include "networking.h"
@@ -220,10 +228,10 @@ static int connection_setup(network_tester* tester)
                 ERROR_OUT("Error creating TCP socket");
 
         /* Set TCP_NODELAY option to disable Nagle algorithm */
-        if (setsockopt(tester->tcp_socket, IPPROTO_TCP, TCP_NODELAY, &(int){1}, sizeof(int)) < 0)
+        if (setsockopt(tester->tcp_socket, IPPROTO_TCP, TCP_NODELAY, &(char){1}, sizeof(int)) < 0)
                 ERROR_OUT("setsockopt(TCP_NODELAY) failed: error %d", errno);
 
-#if !defined(__ZEPHYR__)
+#if !defined(__ZEPHYR__) && !defined(_WIN32)
         /* Set retry count to send a total of 3 SYN packets => Timeout ~7s */
         if (setsockopt(tester->tcp_socket, IPPROTO_TCP, TCP_SYNCNT, &(int){2}, sizeof(int)) < 0)
                 ERROR_OUT("setsockopt(TCP_SYNCNT) failed: error %d", errno);
@@ -412,7 +420,12 @@ static void* network_tester_main_thread(void* ptr)
                 /* Connect to the peer */
                 LOG_DEBUG("Establishing TCP connection");
                 ret = connect(tester->tcp_socket, (struct sockaddr*) &tester->target_addr, sizeof(tester->target_addr));
-                if ((ret != 0) && (errno != EINPROGRESS))
+                if ((ret != 0) &&
+                #if defined(_WIN32)
+                        (WSAGetLastError() != WSAEWOULDBLOCK))
+                #else
+                        (errno != EINPROGRESS))
+                #endif
                         ERROR_OUT("Error establishing TCP connection to target peer");
 
                 /* Do TLS handshake */
@@ -469,7 +482,7 @@ static void* network_tester_main_thread(void* ptr)
                         tester->tls_session = NULL;
                 }
 
-                close(tester->tcp_socket);
+                closesocket(tester->tcp_socket);
                 tester->tcp_socket = -1;
 
                 /* Print progress bar to the console */
@@ -566,7 +579,7 @@ static int send_management_message(int socket, network_tester_management_message
 
         while ((ret <= 0) && (retries < max_retries))
         {
-                ret = send(socket, msg, sizeof(network_tester_management_message), 0);
+                ret = send(socket, (char const*) msg, sizeof(network_tester_management_message), 0);
                 if (ret < 0)
                 {
                         if (errno != EAGAIN)
@@ -598,7 +611,7 @@ static int send_management_message(int socket, network_tester_management_message
 
 static int read_management_message(int socket, network_tester_management_message* msg)
 {
-        int ret = recv(socket, msg, sizeof(network_tester_management_message), 0);
+        int ret = recv(socket, (char*) msg, sizeof(network_tester_management_message), 0);
         if (ret < 0 && errno == EAGAIN )
         {
                 /* No message available on the non-blocking socket. This error condition is no
@@ -698,7 +711,7 @@ static void tester_cleanup(network_tester* tester)
         }
         if (tester->tcp_socket != -1)
         {
-                close(tester->tcp_socket);
+                closesocket(tester->tcp_socket);
         }
 
         timing_metrics_destroy(&tester->handshake_times);
@@ -706,12 +719,12 @@ static void tester_cleanup(network_tester* tester)
         /* Close the management socket pair */
         if (tester->management_socket_pair[0] != -1)
         {
-                close(tester->management_socket_pair[0]);
+                closesocket(tester->management_socket_pair[0]);
                 tester->management_socket_pair[0] = -1;
         }
         if (tester->management_socket_pair[1] != -1)
         {
-                close(tester->management_socket_pair[1]);
+                closesocket(tester->management_socket_pair[1]);
                 tester->management_socket_pair[1] = -1;
         }
 
@@ -769,7 +782,7 @@ int network_tester_run(network_tester_config const* config)
 #endif
 
         /* Create the socket pair for external management */
-        int ret = socketpair(AF_UNIX, SOCK_STREAM, 0, the_tester.management_socket_pair);
+        int ret = create_socketpair(the_tester.management_socket_pair);
         if (ret < 0)
                 ERROR_OUT("Error creating socket pair for management: %d (%s)", errno, strerror(errno));
 
