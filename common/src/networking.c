@@ -358,6 +358,8 @@ int setblocking(int fd, bool val)
 		LOG_ERROR("ioctlsocket(FIONBIO): %d", ret);
 		return ret;
 	}
+
+	return 0;
 #else
 	int fl, res;
 

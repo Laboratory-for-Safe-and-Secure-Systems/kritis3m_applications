@@ -9,6 +9,8 @@
 
 #endif
 
+#include <time.h>
+
 #include "timing_metrics.h"
 
 
@@ -28,6 +30,38 @@ struct timing_metrics
 
         char* output_file;
 };
+
+
+/* Internal helper methods */
+static int take_timestamp(struct timespec* ts);
+
+
+#if defined(_WIN32) && defined(_MSC_VER)
+
+#include <winsock2.h>
+
+static int take_timestamp(struct timespec* ts)
+{
+        __int64 wintime;
+
+        GetSystemTimeAsFileTime((FILETIME*)&wintime);
+
+        wintime      -=116444736000000000i64;  //1jan1601 to 1jan1970
+        ts->tv_sec    =wintime / 10000000i64;           //seconds
+        ts->tv_nsec   =wintime % 10000000i64 * 100;      //nano-seconds
+
+        return 0;
+}
+
+#else
+
+static int take_timestamp(struct timespec* ts)
+{
+        return clock_gettime(CLOCK_MONOTONIC, ts);
+}
+
+#endif
+
 
 
 /* Create a new timing_metrics object.
@@ -70,36 +104,14 @@ timing_metrics* timing_metrics_create(char const* name, size_t max_measurements,
 }
 
 
-// #ifdef _WIN32
-
-// #include <winsock2.h>
-
-// static int clock_gettime(int dummy, struct timespec *spec)
-// {
-//         (void)dummy;
-//         __int64 wintime;
-
-//         GetSystemTimeAsFileTime((FILETIME*)&wintime);
-
-//         wintime      -=116444736000000000i64;  //1jan1601 to 1jan1970
-//         spec->tv_sec  =wintime / 10000000i64;           //seconds
-//         spec->tv_nsec =wintime % 10000000i64 * 100;      //nano-seconds
-
-//         return 0;
-// }
-// #define CLOCK_MONOTONIC 0
-
-// #endif
-
-
 /* Start the next measurement */
 void timing_metrics_start_measurement(timing_metrics* metrics)
 {
         if (metrics == NULL)
                 return;
 
-        if(clock_gettime(CLOCK_MONOTONIC, &metrics->last_start_time) != 0)
-                LOG_ERROR_EX(*metrics->log_module, "Error in clock_gettime() - start_time.");
+        if(take_timestamp(&metrics->last_start_time) != 0)
+                LOG_ERROR_EX(*metrics->log_module, "Error taking timestamp - start_time.");
 }
 
 
@@ -111,8 +123,8 @@ void timing_metrics_end_measurement(timing_metrics* metrics)
 
         struct timespec end_time = {0};
 
-        if(clock_gettime(CLOCK_MONOTONIC, &end_time) != 0)
-                LOG_ERROR_EX(*metrics->log_module, "Error in clock_gettime() - end_time.");
+        if(take_timestamp(&end_time) != 0)
+                LOG_ERROR_EX(*metrics->log_module, "Error taking timestamp - end_time.");
 
         /* Calculate duration */
         uint32_t duration_us = (end_time.tv_sec - metrics->last_start_time.tv_sec) * 1000000.0 +
