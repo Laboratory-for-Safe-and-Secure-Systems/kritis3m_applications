@@ -45,6 +45,7 @@ typedef struct proxy_connection proxy_connection;
 
 typedef struct proxy
 {
+        int application_id; //holds the application idenetifier
         bool in_use;
         enum tls_proxy_direction direction;
         int incoming_sock;

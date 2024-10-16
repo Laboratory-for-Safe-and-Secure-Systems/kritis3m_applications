@@ -16,6 +16,9 @@ enum proxy_management_message_type
         PROXY_STOP_REQUEST,
         BACKEND_STOP_REQUEST,
 
+        PROXY_STOP_APPL_ID_REQUEST,
+        PROXY_STATUS_APPL_ID_REQUEST,
+
         RESPONSE,
 };
 
@@ -38,6 +41,7 @@ typedef struct proxy_management_message
                 proxy_config forward_proxy_config;      /* FORWARD_PROXY_START_REQUEST */
                 proxy_status_request status_req;        /* PROXY_STATUS_REQUEST */
                 int proxy_id;	                        /* PROXY_STOP_REQUEST */
+                int application_id;	                        /* PROXY_STOP_REQUEST */
                 int dummy_unused;                       /* CONNECTION_STOP_REQUEST, BACKEND_STOP_REQUEST */
                 int response_code;                      /* RESPONSE */
         }

@@ -32,13 +32,14 @@
 #define HB_MAX_INSTRUCTIONS 4
 #define HB_URL (HB_SERVERADDR ":" HB_SERVERPORT "/hb_service/moin/")
 
-typedef struct HardbeatResponse HardbeatResponse;
-struct HardbeatResponse;
+typedef struct HeartbeatResponse HeartbeatResponse;
+struct HeartbeatResponse;
 
 typedef struct TimerPipe TimerPipe;
 struct TimerPipe;
 int timer_start(TimerPipe *pipe, uint32_t interval_sec);
 int timer_stop(TimerPipe *pipe);
+TimerPipe* get_timer_pipe();
 int timer_change_interval(TimerPipe *pipe, int new_interval_sec);
 int init_posix_timer(TimerPipe *pipe);
 int timer_terminate(TimerPipe *pipe);
@@ -52,13 +53,11 @@ typedef enum
     HB_REQUEST_POLICIES = 2,   // request new configuration policies/config from the distribution server
     HB_POST_SYSTEM_STATUS = 3, // post system status to the distribution server
     HB_SET_DEBUG_LEVEL = 4,    // set the debug level to either DEBUG,INFO, WARN, ERROR
-} HardbeatInstructions;
+} HeartbeatInstruction;
 
-struct HardbeatResponse
+struct HeartbeatResponse
 {
-    HardbeatInstructions HardbeatInstruction[HB_MAX_INSTRUCTIONS];
-    int hb_instructions_count;
-    uint64_t HardbeatInterval_s;
+    HeartbeatInstruction HeartbeatInstruction;
 };
 
 #endif // HB_SERVICE_H
