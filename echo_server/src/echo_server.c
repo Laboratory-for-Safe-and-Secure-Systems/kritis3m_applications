@@ -382,7 +382,7 @@ static int prepare_server(echo_server* server, echo_server_config const* config)
                 asl_configuration asl_config = asl_default_config();
                 asl_config.logging_enabled = true;
                 asl_config.log_level = LOG_LVL_GET();
-                asl_config.custom_log_callback = asl_log_callback;
+                asl_config.log_callback = asl_log_callback;
 
                 ret = asl_init(&asl_config);
                 if (ret != ASL_SUCCESS)

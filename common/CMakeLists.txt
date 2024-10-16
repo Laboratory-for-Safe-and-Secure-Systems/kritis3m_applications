@@ -30,3 +30,6 @@ if(NOT MSVC)
                 m # Timing metrics need the math library
         )
 endif()
+if(WIN32)
+        target_link_libraries(kritis3m_applications_common wsock32 ws2_32)
+endif()
