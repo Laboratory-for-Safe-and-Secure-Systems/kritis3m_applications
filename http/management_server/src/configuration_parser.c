@@ -4,6 +4,7 @@
 #include "utils.h"
 #include "errno.h"
 #include "string.h"
+#include <stdlib.h>
 #include <stdio.h>
 #include "configuration_parser.h"
 LOG_MODULE_CREATE(kritis3m_config_paser);
@@ -97,6 +98,23 @@ int parse_buffer_to_Config(char *json_buffer, int json_buffer_size, Kritis3mNode
         goto error_occured;
     }
     config->machine_crypto_path_size = strlen(config->machine_crypto_path) + 1; // including '\0'
+
+    config->crypto_path= duplicate_string(cJSON_GetObjectItem(root, "crypto_path")->valuestring);
+    if (config->crypto_path == NULL)
+    {
+        ret = -1;
+        goto error_occured;
+    }
+    config->crypto_path_size    = strlen(config->crypto_path) + 1; // including '\0'
+
+    config->config_path = duplicate_string(cJSON_GetObjectItem(root, "config_path")->valuestring);
+    if (config->config_path == NULL)
+    {
+        ret = -1;
+        goto error_occured;
+    }
+    config->config_path_size = strlen(config->config_path) + 1; // including '\0'
+
     config->pki_cert_path = duplicate_string(cJSON_GetObjectItem(root, "pki_cert_path")->valuestring);
     if (config->pki_cert_path == NULL)
     {
@@ -128,30 +146,17 @@ error_occured:
     return ret;
 }
 
-void free_ManagementConfiguration(Kritis3mManagemntConfiguration *config)
-{
-    free(config->management_server_url);
-    free(config->management_service_ip);
-    free(config->identity.pki_base_url);
-}
 
-void free_NodeConfig(Kritis3mNodeConfiguration *config)
+ManagementReturncode parse_buffer_to_SystemConfiguration(char *json_buffer, int json_buffer_size, SystemConfiguration *config)
 {
-    free(config->application_configuration_path);
-    free(config->pki_cert_path);
-    free(config->machine_crypto_path);
-    free_ManagementConfiguration(&config->management_identity);
-}
-
-int parse_buffer_to_SystemConfiguration(char *json_buffer, int json_buffer_size, SystemConfiguration *config)
-{
-    int ret = 0;
+    ManagementReturncode retval = MGMT_OK;
     cJSON *root = cJSON_ParseWithLength(json_buffer, json_buffer_size);
 
     // Parse primary configuration
     cJSON *node = cJSON_GetObjectItem(root, "node");
     if (node == NULL)
     {
+        goto error_occured;
     }
     cJSON *item = cJSON_GetObjectItem(node, "serial_number");
     if (item == NULL)
@@ -202,8 +207,8 @@ int parse_buffer_to_SystemConfiguration(char *json_buffer, int json_buffer_size,
     if (item == NULL)
         goto error_occured;
     //*******************WHITELIST*******************************************/
-    ret = parse_whitelist(item, &config->application_config.whitelist);
-    if (ret < 0)
+    retval = parse_whitelist(item, &config->application_config.whitelist);
+    if (retval < MGMT_OK)
         goto error_occured;
     //*******************CRYPTO PROFILES *******************************************/
     cJSON *crypto_profiles = cJSON_GetObjectItem(node, "crypto_config");
@@ -216,8 +221,8 @@ int parse_buffer_to_SystemConfiguration(char *json_buffer, int json_buffer_size,
     for (int i = 0; i < number_crypto_profiles; i++)
     {
         cJSON *crypto = cJSON_GetArrayItem(crypto_profiles, i);
-        ret = parse_crypo_config(crypto, &config->application_config.crypto_profile[i]);
-        if (ret < 0)
+        retval = parse_crypo_config(crypto, &config->application_config.crypto_profile[i]);
+        if (retval < MGMT_OK)
             goto error_occured;
     }
     //*******************APPLICATION CONFIG*******************************************/
@@ -232,22 +237,23 @@ int parse_buffer_to_SystemConfiguration(char *json_buffer, int json_buffer_size,
     for (int i = 0; i < number_applications; i++)
     {
         item = cJSON_GetArrayItem(json_applications, i);
-        ret = parse_application(item, &config->application_config.applications[i]);
-        if (ret < 0)
+        retval = parse_application(item, &config->application_config.applications[i]);
+        if (retval < MGMT_OK)
             goto error_occured;
     }
     cJSON_Delete(root);
-    return ret;
+    return retval;
 error_occured:
+    if (retval > MGMT_ERR)
+        retval = MGMT_ERR;
     cJSON_Delete(root);
-    ret = -1;
     LOG_ERROR("Error occured in getting system configuration, errno: %d", errno);
-    return ret;
+    return retval;
 }
 
-int parse_whitelist(cJSON *json_obj, Whitelist *whitelist)
+ManagementReturncode parse_whitelist(cJSON *json_obj, Whitelist *whitelist)
 {
-    int ret = 0;
+    ManagementReturncode ret = MGMT_OK;
     int number_trusted_clients = cJSON_GetArraySize(cJSON_GetObjectItem(json_obj, "trusted_clients"));
     whitelist->number_trusted_clients = number_trusted_clients;
     for (int i = 0; i < number_trusted_clients; i++)
@@ -273,13 +279,13 @@ int parse_whitelist(cJSON *json_obj, Whitelist *whitelist)
     return ret;
 
 error_occured:
-    ret = -1;
+    ret = MGMT_PARSE_ERROR;
     return ret;
 }
 
-int parse_application(cJSON *json_obj, Kritis3mApplications *application)
+ManagementReturncode parse_application(cJSON *json_obj, Kritis3mApplications *application)
 {
-    int ret = 0;
+    ManagementReturncode ret = MGMT_OK;
     cJSON *item;
     item = cJSON_GetObjectItem(json_obj, "id");
     if (item == NULL)
@@ -320,14 +326,14 @@ int parse_application(cJSON *json_obj, Kritis3mApplications *application)
     application->state = false;
     return ret;
 error_occured:
+    ret = MGMT_PARSE_ERROR;
     LOG_ERROR("cannot parse Kritis3m_application");
-    ret = -1;
     return ret;
 }
 
-int parse_crypo_config(cJSON *json_obj, CryptoProfile *profile)
+ManagementReturncode parse_crypo_config(cJSON *json_obj, CryptoProfile *profile)
 {
-    int ret = 0;
+    ManagementReturncode ret = MGMT_OK;
     cJSON *item;
     item = cJSON_GetObjectItem(json_obj, "id");
     if (item == NULL)
@@ -376,7 +382,7 @@ int parse_crypo_config(cJSON *json_obj, CryptoProfile *profile)
     return ret;
 error_occured:
     LOG_ERROR("error in parsing crypto profile");
-    ret = -1;
+    ret = MGMT_PARSE_ERROR;
     return ret;
 }
 

@@ -36,11 +36,10 @@ static struct application_manager manager;
 bool uses_tls(int ep_id);
 
 void *application_service_main_thread(void *arg);
-int read_management_message(int socket, application_message *msg);
 enum MSG_RESPONSE_CODE management_request_helper(int socket, application_message *msg);
 int get_endpoint_configuration(int ep_1id, asl_endpoint_configuration *ep);
-int read_management_message(int socket, application_message *msg);
-int send_management_message(int socket, application_message *msg);
+static int read_management_message(int socket, application_message *msg);
+static int send_management_message(int socket, application_message *msg);
 int create_proxy_config(Kritis3mApplications *appl, proxy_config *config);
 int stop_application(Kritis3mApplications *appl);
 int stop_application_service(struct application_manager *application_manager);
@@ -72,6 +71,16 @@ int client_matches_trusted_client(TrustedClients *trusted_client, int applicatio
     return ret;
 }
 
+bool is_running()
+{
+    if ((!manager.initialized) ||
+        (manager.management_pair[0] < 0) ||
+        (manager.management_pair[1] < 0))
+    {
+        return false;
+    }
+    return true;
+}
 bool confirm_client(int application_id, struct sockaddr_in *connecting_client)
 {
     application_message request = {0};
@@ -571,7 +580,7 @@ error_occured:
     return NULL;
 }
 
-int send_management_message(int socket, application_message *msg)
+static int send_management_message(int socket, application_message *msg)
 {
     int ret = 0;
     static const int max_retries = 5;
@@ -607,7 +616,7 @@ int send_management_message(int socket, application_message *msg)
     return 0;
 }
 
-int read_management_message(int socket, application_message *msg)
+static int read_management_message(int socket, application_message *msg)
 {
     int ret = recv(socket, msg, sizeof(application_message), 0);
     if (ret < 0)
@@ -683,7 +692,7 @@ int create_echo_config(Kritis3mApplications *appl, echo_server_config *config)
     config->own_ip_address = NULL;
     config->own_ip_address = (char *)malloc(INET_ADDRSTRLEN);
     config->log_level = appl->log_level;
-    config->use_tls = uses_tls(appl->ep1_id);
+    config->use_tls = true;
     config->application_id = appl->id;
 
     ret = parse_IPv4_fromIpPort(appl->server_ip_port, config->own_ip_address);

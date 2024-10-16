@@ -93,8 +93,9 @@ typedef struct application_message
     } payload;
 } application_message;
 
+int init_application_manager(ApplicationConfiguration *configuration);
 int start_application_manager(ApplicationConfiguration *configuration);
-
+bool is_running();
 bool confirm_client(int application_id, struct sockaddr_in *connecting_client);
 
 int stop_application_manager();

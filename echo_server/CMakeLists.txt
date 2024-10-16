@@ -11,3 +11,4 @@ target_include_directories(kritis3m_applications_echo_server PUBLIC
 
 # Link the common KRITIS3M application library
 target_link_libraries(kritis3m_applications_echo_server PRIVATE kritis3m_applications_common)
+target_link_libraries(kritis3m_applications_echo_server PRIVATE kritis3m_service)

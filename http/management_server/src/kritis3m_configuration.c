@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 #include <time.h>
 #include "cJSON.h"
 #include "kritis3m_configuration.h" // Assuming this is the header file containing the struct definitions
@@ -11,6 +12,12 @@
 LOG_MODULE_CREATE(kritis3m_configuration);
 
 // Function prototypes
+
+const char *identity_folder_names[max_identities] = {
+    "management_service",
+    "management",
+    "remote",
+    "production"};
 
 int get_Kritis3mNodeConfiguration(char *filename, Kritis3mNodeConfiguration *config)
 {
@@ -27,10 +34,14 @@ int get_Kritis3mNodeConfiguration(char *filename, Kritis3mNodeConfiguration *con
         goto error_occured;
     }
     ret = parse_buffer_to_Config(json_buffer, file_size, config);
+    if (json_buffer != NULL)
+        free(json_buffer);
+    return ret;
 
 error_occured:
     LOG_ERROR("Error occured in Read configuration, with error code %d", errno);
-    free(json_buffer);
+    if (json_buffer != NULL)
+        free(json_buffer);
     return ret;
 }
 /**
@@ -49,19 +60,26 @@ ManagementReturncode get_systemconfig(char *filename, SystemConfiguration *syste
 
     ret = read_file(filename, &json_buffer, &file_size);
     // empty file or no file
-    if ((ret < 0) || (file_size <= 1))
+    if ((ret < 0))
     {
         retval = MGMT_EMPTY_OBJECT_ERROR;
-        LOG_ERROR("Can't open file: %s, probably file does not exist", filename);
+        // create file for the future
+        write_file(filename, "", sizeof(""));
         goto error_occured;
     }
+    else if (file_size <= 1)
+    {
+        retval = MGMT_EMPTY_OBJECT_ERROR;
+        goto error_occured;
+    }
+
     retval = parse_buffer_to_SystemConfiguration(json_buffer, file_size, systemconfig);
     if (retval == MGMT_PARSE_ERROR)
     {
         LOG_ERROR("error parsing system configuration");
         goto error_occured;
     }
-    else if (retval < MGMT_ERROR)
+    else if (retval < MGMT_ERR)
     {
         LOG_ERROR("error occured during parsing configuration");
         goto error_occured;
@@ -69,11 +87,42 @@ ManagementReturncode get_systemconfig(char *filename, SystemConfiguration *syste
     return ret;
 
 error_occured:
-    if (retval > MGMT_ERROR)
-        retval = MGMT_ERROR;
+    if (retval > MGMT_ERR)
+        retval = MGMT_ERR;
     LOG_ERROR("Error occured in Read configuration, with error code %d", errno);
     free(json_buffer);
-    return ret;
+    return retval;
+}
+
+SystemConfiguration *get_active_config(ConfigurationManager *manager)
+{
+    if (manager->active_configuration == CFG_PRIMARY)
+    {
+        return &manager->primary;
+    }
+    else if (manager->active_configuration == CFG_SECONDARY)
+    {
+        return &manager->secondary;
+    }
+    else
+    {
+        return NULL;
+    }
+}
+SystemConfiguration *get_inactive_config(ConfigurationManager *manager)
+{
+    if (manager->active_configuration == CFG_PRIMARY)
+    {
+        return &manager->secondary;
+    }
+    else if (manager->active_configuration == CFG_SECONDARY)
+    {
+        return &manager->primary;
+    }
+    else
+    {
+        return NULL;
+    }
 }
 
 // calls the management server, if no config exists,
@@ -88,7 +137,7 @@ ManagementReturncode get_Systemconfig(ConfigurationManager *applconfig, Kritis3m
      */
     ManagementReturncode ret = 0;
     SystemConfiguration *sys_config = NULL;
-    char filepath[512];
+    char *filepath;
     SelectedConfiguration selected_configuration = CFG_NONE;
     char *application_config_path = NULL;
     int application_config_path_size = -1;
@@ -99,53 +148,33 @@ ManagementReturncode get_Systemconfig(ConfigurationManager *applconfig, Kritis3m
     selected_configuration = node_config->selected_configuration;
     application_config_path = node_config->application_configuration_path;
     application_config_path_size = node_config->application_configuration_path_size;
-    memset(filepath, 0, sizeof(filepath));
+
+    if (ret < 0)
+        goto error_occured;
 
     switch (selected_configuration)
     {
     case CFG_PRIMARY:
         applconfig->active_configuration = CFG_PRIMARY;
         sys_config = &applconfig->primary;
+        filepath = applconfig->primary_file_path;
         // get primary filepath
-        ret = create_file_path(filepath, sizeof(filepath),
-                               node_config->application_configuration_path, node_config->application_configuration_path_size,
-                               PRIMARY_FILENAME, sizeof(PRIMARY_FILENAME));
-        if (ret < 0)
-            goto error_occured;
         break;
     case CFG_SECONDARY:
         applconfig->active_configuration = CFG_SECONDARY;
         sys_config = &applconfig->secondary;
+        filepath = applconfig->secondary_file_path;
         // get secondary filepath
-        ret = create_file_path(filepath, sizeof(filepath),
-                               node_config->application_configuration_path, node_config->application_configuration_path_size,
-                               SECONDARY_FILENAME, sizeof(SECONDARY_FILENAME));
         if (ret < 0)
             goto error_occured;
         break;
     case CFG_NONE:
-        LOG_INFO("calling management server");
-        applconfig->active_configuration = CFG_PRIMARY;
-        sys_config = &applconfig->primary;
-        // get primary filepath
-        ret = create_file_path(filepath, sizeof(filepath),
-                               node_config->application_configuration_path, node_config->application_configuration_path_size,
-                               PRIMARY_FILENAME, sizeof(PRIMARY_FILENAME));
-        if (ret < 0)
-            goto error_occured;
+        LOG_INFO("selected config not provided. Use primary as new selected config");
+        return MGMT_EMPTY_OBJECT_ERROR;
         break;
     default:
-        applconfig->active_configuration = CFG_PRIMARY;
         LOG_INFO("selected config not provided. Use primary as new selected config");
-        LOG_INFO("calling management server");
-        sys_config = &applconfig->primary;
-        // get primary filepath
-        ret = create_file_path(filepath, sizeof(filepath),
-                               node_config->application_configuration_path, node_config->application_configuration_path_size,
-                               PRIMARY_FILENAME, sizeof(PRIMARY_FILENAME));
-        if (ret < 0)
-            goto error_occured;
-        LOG_INFO("calling management server");
+        return MGMT_EMPTY_OBJECT_ERROR;
         break;
     }
     // reads and parses data from filepath to sys_config object
@@ -153,11 +182,24 @@ ManagementReturncode get_Systemconfig(ConfigurationManager *applconfig, Kritis3m
     return ret;
 
 error_occured:
-    if (ret > MGMT_ERROR)
-        ret = MGMT_ERROR;
+    if (ret > MGMT_ERR)
+        ret = MGMT_ERR;
     return ret;
 }
 
+int write_SystemConfig_toflash(SystemConfiguration *sys_cfg, char *filepath, int filepath_size)
+{
+    memset(filepath, 0, sizeof(filepath));
+    // SystemConfig to json String
+    // reads and parses data from filepath to sys_config object
+    char *buffer;
+    int buffer_size;
+    int ret = write_file(filepath, buffer, buffer_size);
+    return ret;
+error_occured:
+    if (ret > -1)
+        ret = -1;
+}
 int write_Kritis3mNodeConfig_toflash(Kritis3mNodeConfiguration *config)
 
 {
@@ -219,4 +261,42 @@ Kritis3mApplications *find_application_by_application_id(Kritis3mApplications *a
 error_occured:
     LOG_ERROR("No matching applicaiton for application id %d found", appl_id);
     return NULL;
+}
+// Function to return the path of the identity folder
+
+int get_identity_folder_path(char *out_path, size_t size, const char *base_path, network_identity identity)
+{
+    if (identity < MANAGEMENT_SERVICE || identity >= max_identities)
+    {
+        fprintf(stderr, "Invalid identity\n");
+        return -1;
+    }
+
+    snprintf(out_path, size, "%s/%s", base_path, identity_folder_names[identity]);
+    return 0;
+}
+
+void free_ManagementConfiguration(Kritis3mManagemntConfiguration *config)
+{
+    free(config->management_server_url);
+    free(config->management_service_ip);
+    free(config->identity.pki_base_url);
+}
+
+void free_NodeConfig(Kritis3mNodeConfiguration *config)
+{
+    if (config != NULL)
+    {
+        if (config->config_path == NULL)
+            free(config->config_path);
+
+        if (config->pki_cert_path == NULL)
+            free(config->pki_cert_path);
+
+        if (config->machine_crypto_path == NULL)
+            free(config->machine_crypto_path);
+
+        if (config->application_configuration_path == NULL)
+            free(config->application_configuration_path);
+    }
 }

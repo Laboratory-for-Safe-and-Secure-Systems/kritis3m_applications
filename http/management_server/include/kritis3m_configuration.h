@@ -6,9 +6,10 @@
 #include <stdbool.h>
 #include <time.h>
 #include <pthread.h>
-#include "kritis3m_pki_client.h"
+// #include "kritis3m_pki_client.h"
 #include <netinet/in.h>
 
+#define MAX_FILEPATH_SIZE 400
 // lengths
 #define IPv4_LEN 16
 #define ID_LEN 256
@@ -47,8 +48,8 @@ typedef enum ManagementReturncode
     MGMT_EMPTY_OBJECT_ERROR = -4,
     MGMT_BAD_PARAMS = -3,
     MGMT_CONNECT_ERROR = -3,
-    MGMT_ERROR =-1,
-    MGMT_OK =0,
+    MGMT_ERR = -1,
+    MGMT_OK = 0,
     MGMT_FORBIDDEN = 1,
     MGMT_BUSY = 2,
 } ManagementReturncode;
@@ -138,6 +139,7 @@ typedef enum
     MANAGEMENT,
     REMOTE,
     PRODUCTION,
+    max_identities
 } network_identity;
 
 typedef struct
@@ -159,6 +161,7 @@ struct CryptoProfile
     bool UseSecureElement;
     enum asl_hybrid_signature_mode HybridSignatureMode;
     bool Keylog;
+    asl_endpoint_configuration endpoint_cfg;
     crypto_identity Identity;
 };
 
@@ -196,6 +199,9 @@ struct ApplicationConfiguration
     int number_crypto_profiles;
     CryptoProfile crypto_profile[MAX_NUMBER_CRYPTOPROFILE];
 
+    crypto_identity crypto_identity[MAX_NUMBER_CRYPTOPROFILE];
+    int number_crypto_identity;
+
     int number_applications;
     Kritis3mApplications applications[MAX_NUMBER_APPLICATIONS];
 };
@@ -216,7 +222,10 @@ struct SystemConfiguration
 
 typedef struct
 {
-    const char *folderpath;
+
+    char primary_file_path[MAX_FILEPATH_SIZE];
+    char secondary_file_path[MAX_FILEPATH_SIZE];
+
     SelectedConfiguration active_configuration;
     SystemConfiguration primary;
     SystemConfiguration secondary;
@@ -239,20 +248,76 @@ typedef struct
     char *application_configuration_path;
     int application_configuration_path_size;
 
+    char *primary_path;
+    int primary_path_size;
+
+    char *secondary_path;
+    int secondary_path_size;
+
     char *machine_crypto_path;
     int machine_crypto_path_size;
 
     char *pki_cert_path;
     int pki_cert_path_size;
 
+    char *crypto_path;
+    int crypto_path_size;
+
+    char *config_path;
+    int config_path_size;
+
     char *kritis3m_node_configuration_path;
 
     SelectedConfiguration selected_configuration;
 } Kritis3mNodeConfiguration;
 
+enum used_service
+{
+    EST_ENROLL = 0,
+    EST_REENROLL,
+    MGMT_POLICY_REQ,
+    MGMT_HEARTBEAT_REQ,
+    MGMT_POLICY_CONFIRM,
+};
+
+#define HTTP_OK 200
+#define HTTP_CREATED 201
+#define HTTP_NO_CONTENT 204
+#define HTTP_BAD_REQUEST 400
+#define HTTP_UNAUTHORIZED 401
+#define HTTP_FORBIDDEN 403
+#define HTTP_NOT_FOUND 404
+#define HTTP_METHOD_NOT_ALLOWED 405
+#define HTTP_TOO_MANY_REQUESTS 429
+#define HTTP_INTERNAL_SERVER_ERROR 500
+#define HTTP_BAD_GATEWAY 502
+#define HTTP_SERVICE_UNAVAILABLE 503
+#define HTTP_GATEWAY_TIMEOUT 504
+
+/**********ERROR MSGS **********/
+#define HTTP_OK_MSG "OK"
+#define HTTP_CREATED_MSG "Created"
+#define HTTP_NO_CONTENT_MSG "No Content"
+#define HTTP_BAD_REQUEST_MSG "Bad Request"
+#define HTTP_UNAUTHORIZED_MSG "Unauthorized"
+#define HTTP_FORBIDDEN_MSG "Forbidden"
+#define HTTP_NOT_FOUND_MSG "Not Found"
+#define HTTP_METHOD_NOT_ALLOWED_MSG "Method Not Allowed"
+#define HTTP_TOO_MANY_REQUESTS_MSG "Too Many Requests"
+#define HTTP_INTERNAL_SERVER_ERROR_MSG "Internal Server Error"
+#define HTTP_BAD_GATEWAY_MSG "Bad Gateway"
+#define HTTP_SERVICE_UNAVAILABLE_MSG "Service Unavailable"
+#define HTTP_GATEWAY_TIMEOUT_MSG "Gateway Timeout"
+#define HTTP_DEFAULT_MSG "HTTP error occured"
+
 int get_Kritis3mNodeConfiguration(char *filename, Kritis3mNodeConfiguration *config);
 int get_Systemconfig(ConfigurationManager *applconfig, Kritis3mNodeConfiguration *node_config);
+SystemConfiguration *get_active_config(ConfigurationManager *manager);
+SystemConfiguration *get_inactive_config(ConfigurationManager *manager);
 int write_Kritis3mNodeConfig_toflash(Kritis3mNodeConfiguration *config);
+int write_SystemConfig_toflash(SystemConfiguration *sys_cfg, char *filepath, int filepath_size);
 Kritis3mApplications *find_application_by_application_id(Kritis3mApplications *appls, int number_appls, int appl_id);
+int get_identity_folder_path(char *out_path, size_t size, const char *base_path, network_identity identity);
+void free_NodeConfig(Kritis3mNodeConfiguration *config);
 
 #endif // KRITIS3M_CONFIGURATION_H
