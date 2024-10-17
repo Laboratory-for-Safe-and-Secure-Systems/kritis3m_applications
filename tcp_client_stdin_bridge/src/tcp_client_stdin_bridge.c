@@ -182,7 +182,7 @@ static void* tcp_client_stdin_bridge_main_thread(void* ptr)
                                 if (event & POLLIN)
                                 {
                                         /* Receive data from stdin */
-                                        ret = recv(fd, bridge->recv_buffer, sizeof(bridge->recv_buffer), 0);
+                                        ret = read(fd, bridge->recv_buffer, sizeof(bridge->recv_buffer));
 
                                         if (ret > 0)
                                         {
@@ -200,6 +200,10 @@ static void* tcp_client_stdin_bridge_main_thread(void* ptr)
                                                         poll_set_update_events(&bridge->poll_set, bridge->tcp_socket, POLLOUT);
                                                         ret = 0;
                                                 }
+                                        }
+                                        else if (ret < 0)
+                                        {
+                                                LOG_ERROR("Error reading from stdin: %d (%s)", errno, strerror(errno));
                                         }
                                 }
                         }
