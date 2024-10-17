@@ -278,7 +278,7 @@ static void* echo_server_main_thread(void* ptr)
                         {
                                 if (event & POLLERR)
                                 {
-                                        LOG_ERROR("Error on client connection in slot %d", client->slot+1);
+                                        LOG_INFO("Client connection in slot %d closed", client->slot+1);
                                         poll_set_remove_fd(&server->poll_set, fd);
                                         client_cleanup(client);
                                         continue;

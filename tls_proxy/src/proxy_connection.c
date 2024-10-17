@@ -560,7 +560,7 @@ static void* connection_handler_thread(void *ptr)
                                 }
                                 if (event & POLLERR)
                                 {
-                                        LOG_ERROR_EX(*connection->log_module, "Error on tunnel connection");
+                                        LOG_INFO_EX(*connection->log_module, "Tunnel connection closed");
                                         shutdown = true;
                                         break;
                                 }
@@ -658,7 +658,7 @@ static void* connection_handler_thread(void *ptr)
                                 }
                                 if (event & POLLERR)
                                 {
-                                        LOG_ERROR_EX(*connection->log_module, "Error on asset connection");
+                                        LOG_INFO_EX(*connection->log_module, "Asset connection closed");
                                         shutdown = true;
                                         break;
                                 }

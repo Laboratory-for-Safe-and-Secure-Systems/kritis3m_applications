@@ -642,7 +642,7 @@ void* proxy_backend_thread(void* ptr)
                         {
                                 if ((event & POLLERR) || (event & POLLHUP))
                                 {
-                                        LOG_ERROR("Socket error");
+                                        LOG_INFO("Client connection closed");
                                         poll_set_remove_fd(&backend->poll_set, fd);
                                         proxy_connection_cleanup(proxy_connection);
                                         continue;
