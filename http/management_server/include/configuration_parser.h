@@ -6,7 +6,7 @@
 int parse_buffer_to_Config(char *json_buffer, int json_buffer_size, Kritis3mNodeConfiguration *config);
 
 // please pass an empty pointer
-ManagementReturncode parse_buffer_to_SystemConfiguration(char *json_buffer, int json_buffer_size, SystemConfiguration *config);
+ManagementReturncode parse_buffer_to_SystemConfiguration(char *json_buffer, int json_buffer_size, SystemConfiguration *config, char* crypto_path);
 
 // caller must free *buffer!!!!
 int Kritis3mNodeConfiguration_tojson(Kritis3mNodeConfiguration *config, char **buffer);

@@ -32,6 +32,7 @@
 #if defined(__ZEPHYR__)
 #include <zephyr/kernel.h>
 #include <zephyr/net/net_ip.h>
+k_timeout_t
 #else
 #define MIN(a, b) (((a) < (b)) ? (a) : (b))
 #include "linux_comp.h"
@@ -352,10 +353,10 @@ extern "C"
 	 * @return <0 if error, >=0 amount of data sent to the server
 	 */
 	int http_client_req(int sock, struct http_request *req,
-						int32_t timeout, void *user_data);
+						duration timeout, void *user_data);
 
 	int https_client_req(int sock, asl_session *session, struct http_request *req,
-						 int32_t timeout, void *user_data);
+						 duration timeout, void *user_data);
 
 #ifdef __cplusplus
 }

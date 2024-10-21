@@ -46,22 +46,6 @@ struct kritis3m_service
   asl_endpoint *client_endpoint;
 };
 
-enum ManagementState
-{
-  /*0*/ MGMT_ERROR,
-  /*1*/ MGMT_START,
-  /*2*/ MGMT_INITIALIZING,
-  /*3*/ MGMT_MGMT_UPDATE,
-  /*4*/ MGMT_CONFIG_INCOMPLETE,
-  /*5*/ MGMT_PKI_UPDATE,
-  /*6*/ MGMT_RUNNING,
-  /*7*/ MGMT_RUNNING_HB_HANDLE,
-  /*8*/ MGMT_RUNNING_MGMT_UPDATE,
-  /*9*/ MGMT_RUNNING_CONFIG_AVAILABLE,
-  /*10*/ MGMT_RUNNING_PKI_UPDATE,
-  elems_ManagementState,
-};
-
 enum service_message_type
 {
   HTTP_SERVICE,
@@ -79,201 +63,12 @@ typedef struct service_message
   } payload;
 } service_message;
 
-const enum ManagementEvents ev_error = MGMT_EV_ERROR;
-const enum ManagementEvents ev_start = MGMT_EV_START;
-const enum ManagementEvents ev_init = MGMT_EV_INIT;
-const enum ManagementEvents ev_mgm_resp = MGMT_EV_MGM_RESP;
-const enum ManagementEvents ev_cfg_available = MGMT_EV_CONFIG_AVAILABLE;
-const enum ManagementEvents ev_pki_resp = MGMT_EV_PKI_RESP;
-const enum ManagementEvents ev_clock_req = MGMT_EV_HB_CLOCK_REQ;
-const enum ManagementEvents ev_hb_resp = MGMT_EV_HB_RESP;
-const enum ManagementEvents ev_cfg_complete = MGMT_EV_CONFIG_COMPLETE;
-
-enum ManagementState state_transition_table[elems_ManagementState][elems_ManagementEvent] = {
-
-    [MGMT_ERROR] = {
-        MGMT_ERROR, // MGMT_EV_ERROR,
-        MGMT_START, // MGMT_EV_START,
-        MGMT_ERROR, // MGMT_EV_INIT
-        MGMT_ERROR, // MGMT_EV_MGM_RESP,
-        MGMT_ERROR, // MGMT_EV_CONFIG_AVAILABLE
-        MGMT_ERROR, // MGMT_EV_PKI_RESP,
-        MGMT_ERROR, // ,MGMT_EV_HB_CLOCK_REQ,
-        MGMT_ERROR, // MGMT_EV_HB_RESP,
-        MGMT_ERROR, // MGMT_EV_CONFIG_COMPLETE,
-    },
-    [MGMT_START] = {
-        MGMT_ERROR,        // MGMT_EV_ERROR,
-        MGMT_START,        // MGMT_EV_START,
-        MGMT_INITIALIZING, // MGMT_EV_INIT
-        MGMT_ERROR,        // MGMT_EV_MGM_RESP,
-        MGMT_ERROR,        // MGMT_EV_CONFIG_AVAILABLE
-        MGMT_ERROR,        // MGMT_EV_PKI_RESP,
-        MGMT_ERROR,        // MGMT_EV_HB_CLOCK_REQ,
-        MGMT_ERROR,        // MGMT_EV_HB_RESP,
-        MGMT_ERROR,        // MGMT_EV_CONFIG_COMPLETE,
-    },
-    [MGMT_INITIALIZING] = {
-        MGMT_ERROR,             // MGMT_EV_ERROR,
-        MGMT_START,             // MGMT_EV_START,
-        MGMT_INITIALIZING,      // MGMT_EV_INIT
-        MGMT_MGMT_UPDATE,       // MGMT_EV_MGM_RESP,
-        MGMT_CONFIG_INCOMPLETE, // MGMT_EV_CONFIG_AVAILABLE
-        MGMT_ERROR,             // MGMT_EV_PKI_RESP,
-        MGMT_ERROR,             // MGMT_EV_HB_CLOCK_REQ,
-        MGMT_ERROR,             // MGMT_EV_HB_RESP,
-        MGMT_ERROR,             // MGMT_EV_CONFIG_COMPLETE,
-    },
-    [MGMT_MGMT_UPDATE] = {
-        MGMT_ERROR,        // MGMT_EV_ERROR,
-        MGMT_START,        // MGMT_EV_START,
-        MGMT_ERROR,        // MGMT_EV_INIT
-        MGMT_MGMT_UPDATE,  // MGMT_EV_MGM_RESP,
-        MGMT_INITIALIZING, // MGMT_EV_CONFIG_AVAILABLE
-        MGMT_ERROR,        // MGMT_EV_PKI_RESP,
-        MGMT_ERROR,        // MGMT_EV_HB_CLOCK_REQ,
-        MGMT_ERROR,        // MGMT_EV_HB_RESP,
-        MGMT_ERROR,        // MGMT_EV_CONFIG_COMPLETE,
-    },
-    [MGMT_CONFIG_INCOMPLETE] = {
-        MGMT_ERROR,      // MGMT_EV_ERROR,
-        MGMT_START,      // MGMT_EV_START,
-        MGMT_ERROR,      // MGMT_EV_INIT
-        MGMT_ERROR,      // MGMT_EV_MGM_RESP,
-        MGMT_ERROR,      // MGMT_EV_CONFIG_AVAILABLE
-        MGMT_PKI_UPDATE, // MGMT_EV_PKI_RESP,
-        MGMT_ERROR,      // MGMT_EV_HB_CLOCK_REQ,
-        MGMT_ERROR,      // MGMT_EV_HB_RESP,
-        MGMT_RUNNING,    // MGMT_EV_CONFIG_COMPLETE,
-    },
-    [MGMT_PKI_UPDATE] = {
-        MGMT_ERROR,             // MGMT_EV_ERROR,
-        MGMT_START,             // MGMT_EV_START,
-        MGMT_ERROR,             // MGMT_EV_INIT
-        MGMT_ERROR,             // MGMT_EV_MGM_RESP,
-        MGMT_CONFIG_INCOMPLETE, // MGMT_EV_CONFIG_AVAILABLE
-        MGMT_PKI_UPDATE,        // MGMT_EV_PKI_RESP,
-        MGMT_ERROR,             // MGMT_EV_HB_CLOCK_REQ,
-        MGMT_ERROR,             // MGMT_EV_HB_RESP,
-        MGMT_ERROR,             // MGMT_EV_CONFIG_COMPLETE,
-    },
-    [MGMT_RUNNING] = {
-        MGMT_ERROR,             // MGMT_EV_ERROR,
-        MGMT_START,             // MGMT_EV_START,
-        MGMT_ERROR,             // MGMT_EV_INIT
-        MGMT_ERROR,             // MGMT_EV_MGM_RESP,
-        MGMT_ERROR,             // MGMT_EV_CONFIG_AVAILABLE
-        MGMT_ERROR,             // MGMT_EV_PKI_RESP,
-        MGMT_RUNNING,           // MGMT_EV_HB_CLOCK_REQ,
-        MGMT_RUNNING_HB_HANDLE, // MGMT_EV_HB_RESP,
-        MGMT_ERROR,             // MGMT_EV_CONFIG_COMPLETE,
-    },
-
-    [MGMT_RUNNING_MGMT_UPDATE] = {
-        MGMT_ERROR,                    // MGMT_EV_ERROR,
-        MGMT_START,                    // MGMT_EV_START,
-        MGMT_ERROR,                    // MGMT_EV_INIT
-        MGMT_ERROR,                    // MGMT_EV_MGM_RESP,
-        MGMT_RUNNING_CONFIG_AVAILABLE, // MGMT_EV_CONFIG_AVAILABLE
-        MGMT_ERROR,                    // MGMT_EV_PKI_RESP,
-        MGMT_ERROR,                    // MGMT_EV_HB_CLOCK_REQ,
-        MGMT_ERROR,                    // MGMT_EV_HB_RESP,
-        MGMT_ERROR,                    // MGMT_EV_CONFIG_COMPLETE,
-    },
-    [MGMT_RUNNING_HB_HANDLE] = {
-        MGMT_RUNNING,             // MGMT_EV_ERROR,
-        MGMT_START,               // MGMT_EV_START,
-        MGMT_ERROR,               // MGMT_EV_INIT
-        MGMT_RUNNING_MGMT_UPDATE, // MGMT_EV_MGM_RESP,
-        MGMT_ERROR,               // MGMT_EV_CONFIG_AVAILABLE
-        MGMT_ERROR,               // MGMT_EV_PKI_RESP,
-        MGMT_ERROR,               // MGMT_EV_HB_CLOCK_REQ,
-        MGMT_ERROR,               // MGMT_EV_HB_RESP,
-        MGMT_ERROR,               // MGMT_EV_CONFIG_COMPLETE,
-    },
-
-    [MGMT_RUNNING_CONFIG_AVAILABLE] = {
-        MGMT_RUNNING,            // MGMT_EV_ERROR,
-        MGMT_START,              // MGMT_EV_START,
-        MGMT_ERROR,              // MGMT_EV_INIT
-        MGMT_ERROR,              // MGMT_EV_MGM_RESP,
-        MGMT_ERROR,              // MGMT_EV_CONFIG_AVAILABLE
-        MGMT_RUNNING_PKI_UPDATE, // MGMT_EV_PKI_RESP,
-        MGMT_ERROR,              // MGMT_EV_HB_CLOCK_REQ,
-        MGMT_ERROR,              // MGMT_EV_HB_RESP,
-        MGMT_RUNNING,            // MGMT_EV_CONFIG_COMPLETE,
-    },
-    [MGMT_RUNNING_PKI_UPDATE] = {
-        MGMT_RUNNING,                  // MGMT_EV_ERROR,
-        MGMT_START,                    // MGMT_EV_START,
-        MGMT_ERROR,                    // MGMT_EV_INIT
-        MGMT_ERROR,                    // MGMT_EV_MGM_RESP,
-        MGMT_RUNNING_CONFIG_AVAILABLE, // MGMT_EV_CONFIG_AVAILABLE
-        MGMT_RUNNING_PKI_UPDATE,       // MGMT_EV_PKI_RESP,
-        MGMT_ERROR,                    // MGMT_EV_HB_CLOCK_REQ,
-        MGMT_ERROR,                    // MGMT_EV_HB_RESP,
-        MGMT_RUNNING,                  // MGMT_EV_CONFIG_COMPLETE,
-    },
-};
-typedef enum ManagementState (*StateHandler)(enum ManagementEvents event, struct kritis3m_service *svc, void *data, enum ManagementEvents const **optional_ev);
-
-enum ManagementState mgmt_error_handler(enum ManagementEvents event, struct kritis3m_service *svc, void *data, enum ManagementEvents const **optional_ev);
-enum ManagementState mgmt_start_handler(enum ManagementEvents event, struct kritis3m_service *svc, void *data, enum ManagementEvents const **optional_ev);
-enum ManagementState mgmt_initializing_handler(enum ManagementEvents event, struct kritis3m_service *svc, void *data, enum ManagementEvents const **optional_ev);
-enum ManagementState mgmt_mgmt_update_handler(enum ManagementEvents event, struct kritis3m_service *svc, void *data, enum ManagementEvents const **optional_ev);
-enum ManagementState mgmt_config_incomplete_handler(enum ManagementEvents event, struct kritis3m_service *svc, void *data, enum ManagementEvents const **optional_ev);
-enum ManagementState mgmt_pki_update_handler(enum ManagementEvents event, struct kritis3m_service *svc, void *data, enum ManagementEvents const **optional_ev);
-enum ManagementState mgmt_running_handler(enum ManagementEvents event, struct kritis3m_service *svc, void *data, enum ManagementEvents const **optional_ev);
-enum ManagementState mgmt_running_hb_handle_handler(enum ManagementEvents event, struct kritis3m_service *svc, void *data, enum ManagementEvents const **optional_ev);
-enum ManagementState mgmt_running_mgmt_update_handler(enum ManagementEvents event, struct kritis3m_service *svc, void *data, enum ManagementEvents const **optional_ev);
-enum ManagementState mgmt_running_config_available_handler(enum ManagementEvents event, struct kritis3m_service *svc, void *data, enum ManagementEvents const **optional_ev);
-enum ManagementState mgmt_running_pki_update_handler(enum ManagementEvents event, struct kritis3m_service *svc, void *data, enum ManagementEvents const **optional_ev);
-
-StateHandler state_handlers[elems_ManagementState] = {
-    mgmt_error_handler,                    // MGMT_ERROR
-    mgmt_start_handler,                    // MGMT_START
-    mgmt_initializing_handler,             // MGMT_INITIALIZING
-    mgmt_mgmt_update_handler,              // MGMT_MGMT_UPDATE
-    mgmt_config_incomplete_handler,        // MGMT_CONFIG_INCOMPLETE
-    mgmt_pki_update_handler,               // MGMT_PKI_UPDATE
-    mgmt_running_handler,                  // MGMT_RUNNING
-    mgmt_running_hb_handle_handler,        // MGMT_RUNNING_HB_HANDLE
-    mgmt_running_mgmt_update_handler,      // MGMT_RUNNING_MGMT_UPDATE
-    mgmt_running_config_available_handler, // MGMT_RUNNING_CONFIG_AVAILABLE
-    mgmt_running_pki_update_handler        // MGMT_RUNNING_PKI_UPDATE
-};
-enum ManagementState handle_event(enum ManagementState current_state, enum ManagementEvents event, struct kritis3m_service *svc, void *data)
-{
-  enum ManagementEvents const *optional_ev = NULL;
-  enum ManagementEvents current_event;
-
-  enum ManagementState next_state = state_transition_table[current_state][event];
-  if (next_state < elems_ManagementState)
-  {
-    current_state = state_handlers[next_state](event, svc, data, &optional_ev);
-  }
-  while (optional_ev != NULL)
-  {
-    event = *optional_ev;
-    optional_ev = NULL;
-    enum ManagementState next_state = state_transition_table[current_state][event];
-    if (next_state < elems_ManagementState)
-    {
-      current_state = state_handlers[next_state](event, svc, data, &optional_ev);
-    }
-  }
-  return current_state;
-}
-
 // forward declarations
 void *start_kristis3m_service(void *arg);
 int setup_socketpair(int management_socket[2], bool blocking);
 void *http_get_request(void *http_get_data);
 int init_configuration_manager(ConfigurationManager *manager, Kritis3mNodeConfiguration *node_config);
 int create_folder_structure(Kritis3mNodeConfiguration *node_cfg);
-static void http_get_cb(struct http_response *rsp,
-                        enum http_final_call final_data,
-                        void *user_data);
 
 // callbacks used from the http threads
 int initial_policy_request_cb(struct response response);
@@ -305,12 +100,6 @@ void set_kritis3m_serivce_defaults(struct kritis3m_service *svc)
 int initialize_crypto(kritis3m_service *svc)
 {
   int ret = 0;
-  // check pki management_service certificates
-  // if they are not initialized, enroll is called
-
-  // requirements: management_service_chain.pem available
-  // requirements: management_service_root.pem available
-  // requirements: management_service_privateKey.pem available
   char private_key_buffer[512];
   memset(private_key_buffer, 0, 512);
 
@@ -338,33 +127,40 @@ int init_kristis3m_service(char *config_file)
 {
   // initializations
   int ret = 0;
+  CryptoProfile default_profile = {
+      .ASLKeyExchangeMethod = ASL_KEX_DEFAULT,
+      .HybridSignatureMode = ASL_HYBRID_SIGNATURE_MODE_DEFAULT,
+      .Keylog = "/home/philipp/kritis/linux_development/kritis3m_workspace/repositories/kritis3m_tls_linux/keylog.txt",
+      .MutualAuthentication = true,
+      .Name = "default",
+      .NoEncryption = false,
+      .UseSecureElement = false,
+  };
+
   // get global node config
   set_kritis3m_serivce_defaults(&svc);
-  svc.node_configuration.kritis3m_node_configuration_path = config_file;
+  svc.node_configuration.config_path = config_file;
+  svc.node_configuration.config_path_size = strlen(config_file);
+
   ret = get_Kritis3mNodeConfiguration(config_file, &svc.node_configuration);
   if (ret < 0)
   {
     LOG_ERROR("can't parse Config, error occured: %d ", errno);
     return ret;
   }
-  // set default of main service object
-  // initialize_crypto(&svc); // enroll would be called
-  // now, the certificates for further communication with the management server should be available
-  // The PKI-Client is not implemented yet, but will be in the future
-  // The Certificates are now obtained from the file system and parsed into the asl_endpoint_configuration object
-  create_folder_structure(&svc.node_configuration);
-  char management_identity[400];
-  ret = get_identity_folder_path(management_identity, sizeof(management_identity),
-                                 svc.node_configuration.pki_cert_path,
-                                 svc.node_configuration.management_identity.identity.identity);
+  // create_folder_structure(&svc.node_configuration);
+
+  ret = create_endpoint_config(&svc.node_configuration.management_identity.identity, &default_profile, &svc.management_endpoint_config);
   if (ret < 0)
+  {
+    LOG_ERROR("endpoint config error");
     goto error_occured;
-  certificates_to_endpoint(management_identity, sizeof(management_identity),
-                           &svc.node_configuration.management_identity.identity,
-                           &svc.management_endpoint_config);
+
+  }
+
   init_http_service(&svc.node_configuration.management_identity, &svc.management_endpoint_config);
-  // initialize configuration manager
   ret = init_configuration_manager(&svc.configuration_manager, &svc.node_configuration);
+  get_Systemconfig(&svc.configuration_manager, &svc.node_configuration);
   ret = pthread_create(&svc.mainthread, &svc.thread_attr, start_kristis3m_service, &svc);
 
   return 0;
@@ -374,83 +170,26 @@ error_occured:
   // dont forget to free configuration and endpoint
   return ret;
 }
-// check secondary and primary
-int complete_crypto_dependencies()
-{
-  int ret = -1;
-  // search for identities in cryptos
-  // for each identity call pki for updates
-  LOG_INFO("call management pki");
-  LOG_INFO("call remote pki");
-  LOG_INFO("call remote pki");
 
-  return ret;
-}
 void *start_kristis3m_service(void *arg)
 {
-  // // SystemConfiguration *active_config = get_active_configuration(svc->configuration_manager);
-  // if (active_config == NULL)
-  // {
-  //   LOG_ERROR("shutdown kritis3m_service, no active config availalble");
-  //   goto terminate;
-  // }
-  // complete_crypto_dependencies();
 
-  // application_manager_config application_config;
-  // application_config.log_level = LOG_LVL_DEBUG;
-  // init_application_manager(&application_config);
-
-  // 1. call hardbeat service for updates
-  // 2. wait for response
-  // 3. ask configuration service if changed
-  // 4. Attach workers
-
-  // things to do:
-  // read config
-  // derive jobs
-  // -> call pki
-  // ->call management server
-  // others:
-  // start jobs:
-  // await jobs
-
-  struct poll_set *pollfd = NULL;
-  TimerPipe *mpipe = NULL;
-  int hb_interval_sec = 2;
-  SystemConfiguration *selected_sys_cfg = NULL;
-  int ret = 0;
-  ManagementReturncode retval = MGMT_OK;
-  asl_endpoint_configuration *ep_cfg = NULL;
   struct kritis3m_service *svc = (struct kritis3m_service *)arg;
-
-  mpipe = svc->hardbeat_timer;
-  pollfd = svc->pollfd;
-
-  enum ManagementState current_state = MGMT_START;
-  enum ManagementEvents current_event = MGMT_EV_START;
-  void *data = NULL;
-
   if (svc == NULL)
     goto terminate;
 
-  // holds both, primary and secondary configuration.
-  // either primary or secondary configuration is used by the application manager. The free configuration is used for the update process
+  struct poll_set *pollfd = svc->pollfd;
+  TimerPipe *heartbeat_timer = svc->hardbeat_timer;
+  int hb_interval_sec = 10;
+
+  int ret = 0;
+  SystemConfiguration *selected_sys_cfg = NULL;
+  ManagementReturncode retval = MGMT_OK;
+  asl_endpoint_configuration *ep_cfg = &svc->management_endpoint_config;
   Kritis3mNodeConfiguration node_configuration = svc->node_configuration;
   ConfigurationManager application_configuration_manager = svc->configuration_manager;
 
-  // retval = get_Systemconfig(&application_configuration_manager, &node_configuration);
-
-  // if ((retval == MGMT_EMPTY_OBJECT_ERROR) ||
-  //     (retval == MGMT_PARSE_ERROR) ||
-  //     (retval == MGMT_ERR))
-  // {
-  //   SelectedConfiguration selected_config = application_configuration_manager.active_configuration;
-  // }
-
-  // else if (retval < MGMT_OK)
-  //   goto terminate;
-
-  ret = poll_set_add_fd(pollfd, get_clock_signal_fd(mpipe), POLLIN | POLLERR);
+  ret = poll_set_add_fd(pollfd, get_clock_signal_fd(heartbeat_timer), POLLIN | POLLERR);
   if (ret < 0)
   {
     LOG_ERROR("cant add fd to to pollset, shutting down management service");
@@ -463,11 +202,12 @@ void *start_kristis3m_service(void *arg)
     goto terminate;
   }
 
-  ret = timer_start(mpipe, hb_interval_sec);
+  call_distribution_service(initial_policy_request_cb, node_configuration.primary_path);
+  get_Systemconfig(&application_configuration_manager, &node_configuration);
+
+  ret = timer_start(heartbeat_timer, hb_interval_sec);
   while (1)
   {
-
-    current_state = handle_event(current_state, current_event, svc, data);
     ret = poll(pollfd->fds, pollfd->num_fds, -1);
 
     if (ret == -1)
@@ -494,7 +234,7 @@ void *start_kristis3m_service(void *arg)
           }
         }
       }
-      else if (fd == get_clock_signal_fd(mpipe))
+      else if (fd == get_clock_signal_fd(heartbeat_timer))
       {
       }
 
@@ -507,8 +247,8 @@ void *start_kristis3m_service(void *arg)
 
 terminate:
   free_NodeConfig(&svc->node_configuration);
-  timer_terminate(mpipe);
-  poll_set_remove_fd(pollfd, get_clock_signal_fd(mpipe));
+  timer_terminate(heartbeat_timer);
+  poll_set_remove_fd(pollfd, get_clock_signal_fd(heartbeat_timer));
   // terminate_application_manager
   // store config
   return NULL;
@@ -593,166 +333,6 @@ static int read_management_message(int socket, service_message *msg)
   return 0;
 }
 
-enum ManagementState mgmt_error_handler(enum ManagementEvents event, struct kritis3m_service *svc, void *data, enum ManagementEvents const **optional_ev)
-{
-  printf("MGMT_ERROR: Handling event %d\n", event);
-  // Perform error handling logic here
-
-  return MGMT_ERROR;
-}
-enum ManagementState mgmt_start_handler(enum ManagementEvents event, struct kritis3m_service *svc, void *data, enum ManagementEvents const **optional_ev)
-{
-  printf("MGMT_START: Handling event %d\n", event);
-  LOG_INFO("Starting service");
-  if (optional_ev != NULL)
-    *optional_ev = &ev_init;
-  return MGMT_START;
-}
-enum ManagementState mgmt_initializing_handler(enum ManagementEvents event, struct kritis3m_service *svc, void *data, enum ManagementEvents const **optional_ev)
-{
-  if (optional_ev != NULL)
-    *optional_ev = NULL;
-  printf("MGMT_INITIALIZING: Handling event %d\n", event);
-  LOG_INFO("reading config");
-  Kritis3mNodeConfiguration node_configuration = svc->node_configuration;
-  ConfigurationManager application_configuration_manager = svc->configuration_manager;
-  call_distribution_service(initial_policy_request_cb, application_configuration_manager.primary_file_path);
-  return MGMT_INITIALIZING;
-}
-
-enum ManagementState mgmt_mgmt_update_handler(enum ManagementEvents event, struct kritis3m_service *svc, void *data, enum ManagementEvents const **optional_ev)
-{
-  if (optional_ev == NULL)
-    *optional_ev = NULL;
-  printf("MGMT_MGMT_UPDATE: Handling event %d\n", event);
-  int ret = 0;
-  struct response *rsp = (struct response *)data;
-
-  if ((rsp->service_used == MGMT_POLICY_REQ) && (rsp->ret == MGMT_OK))
-  {
-    // ret = write_SystemConfig_toflash(&svc->configuration_manager, rsp->buffer, rsp->bytes_received);
-    if (ret < 0)
-    {
-      LOG_ERROR("can't store response to flash");
-      return MGMT_ERROR;
-    }
-  }
-  else
-  {
-    LOG_ERROR("service returned with error");
-    return MGMT_ERROR;
-  }
-  *optional_ev = &ev_init;
-  return MGMT_MGMT_UPDATE;
-}
-enum ManagementState mgmt_config_incomplete_handler(enum ManagementEvents event, struct kritis3m_service *svc, void *data, enum ManagementEvents const **optional_ev)
-{
-  printf("MGMT_CONFIG_INCOMPLETE: Handling event %d\n", event);
-  // read out all certificates
-  int ret = -1;
-  SystemConfiguration *active_config = get_active_config(&svc->configuration_manager);
-  if (active_config == NULL)
-    return MGMT_ERROR;
-  for (int i = 0; i < active_config->application_config.number_crypto_identity; i++)
-  {
-    // call pki server
-    // will be implemented in the fututure
-  }
-  for (int i = 0; i < active_config->application_config.number_crypto_profiles; i++)
-  {
-    ret = initialize_crypto_endpoint(
-        svc->node_configuration.pki_cert_path,
-        svc->node_configuration.pki_cert_path_size,
-        &active_config->application_config.crypto_profile[i]);
-    if (ret < 0)
-    {
-      LOG_ERROR("can't parse crypto to endpoint");
-    }
-    return MGMT_ERROR;
-  }
-
-  if (event == MGMT_EV_PKI_RESP)
-  {
-    // handle pki event. By now its a shell skript
-    return MGMT_CONFIG_INCOMPLETE;
-  }
-  if (optional_ev != NULL)
-    *optional_ev = &ev_cfg_complete;
-  return MGMT_CONFIG_INCOMPLETE;
-}
-enum ManagementState mgmt_pki_update_handler(enum ManagementEvents event, struct kritis3m_service *svc, void *data, enum ManagementEvents const **optional_ev)
-{
-  if (optional_ev != NULL)
-    *optional_ev = &ev_cfg_available;
-  return MGMT_PKI_UPDATE;
-}
-enum ManagementState mgmt_running_handler(enum ManagementEvents event, struct kritis3m_service *svc, void *data, enum ManagementEvents const **optional_ev)
-{
-  printf("MGMT_RUNNING: Handling event %d\n", event);
-  SystemConfiguration *appl_config = NULL;
-  int ret = 0;
-  if (event == MGMT_EV_CONFIG_COMPLETE)
-  {
-    if (is_running())
-    {
-      stop_application_manager();
-    }
-    appl_config = get_active_config(&svc->configuration_manager);
-    if (appl_config != NULL)
-    {
-      ret = start_application_manager(&appl_config->application_config);
-      if (ret < 0)
-        return MGMT_ERROR;
-    }
-  }
-  else if (event == MGMT_EV_HB_CLOCK_REQ)
-  {
-    // do_heartbeat_request()
-  }
-  else
-  {
-    LOG_INFO("state running");
-  }
-  return MGMT_RUNNING;
-}
-enum ManagementState mgmt_running_hb_handle_handler(enum ManagementEvents event, struct kritis3m_service *svc, void *data, enum ManagementEvents const **optional_ev)
-{
-  *optional_ev = NULL;
-  printf("MGMT_RUNNING_HB_HANDLE: Handling event %d\n", event);
-  if (event == MGMT_EV_MGM_RESP)
-  {
-    return MGMT_RUNNING_MGMT_UPDATE;
-  }
-  return MGMT_RUNNING_HB_HANDLE;
-}
-enum ManagementState mgmt_running_mgmt_update_handler(enum ManagementEvents event, struct kritis3m_service *svc, void *data, enum ManagementEvents const **optional_ev)
-{
-  printf("MGMT_RUNNING_MGMT_UPDATE: Handling event %d\n", event);
-  if (event == MGMT_EV_CONFIG_AVAILABLE)
-  {
-    return MGMT_RUNNING_CONFIG_AVAILABLE;
-  }
-  return MGMT_RUNNING_MGMT_UPDATE;
-}
-enum ManagementState mgmt_running_config_available_handler(enum ManagementEvents event, struct kritis3m_service *svc, void *data, enum ManagementEvents const **optional_ev)
-{
-  printf("MGMT_RUNNING_CONFIG_AVAILABLE: Handling event %d\n", event);
-  if (event == MGMT_EV_PKI_RESP)
-  {
-    return MGMT_RUNNING_PKI_UPDATE;
-  }
-  return MGMT_RUNNING_CONFIG_AVAILABLE;
-}
-enum ManagementState mgmt_running_pki_update_handler(enum ManagementEvents event, struct kritis3m_service *svc, void *data, enum ManagementEvents const **optional_ev)
-{
-  printf("MGMT_RUNNING_PKI_UPDATE: Handling event %d\n", event);
-  if (event == MGMT_EV_CONFIG_COMPLETE)
-  {
-    return MGMT_RUNNING;
-  }
-  return MGMT_RUNNING_PKI_UPDATE;
-}
-
 int create_identity_folder(const char *base_path, network_identity identity)
 {
   char identity_path[256];
@@ -777,8 +357,6 @@ int create_folder_structure(Kritis3mNodeConfiguration *node_config)
     return -1;
   if (create_directory(node_config->crypto_path) == -1)
     return -1;
-  if (create_directory(node_config->application_configuration_path) == -1)
-    return -1;
   if (create_directory(node_config->pki_cert_path) == -1)
     return -1;
   if (create_directory(node_config->machine_crypto_path) == -1)
@@ -793,20 +371,12 @@ int create_folder_structure(Kritis3mNodeConfiguration *node_config)
 
 int init_configuration_manager(ConfigurationManager *manager, Kritis3mNodeConfiguration *node_config)
 {
-  int ret = 0;
-  memset(&manager->primary, 0, sizeof(SystemConfiguration));
-  memset(&manager->secondary, 0, sizeof(SystemConfiguration));
-  ret = create_file_path(manager->primary_file_path, MAX_FILEPATH_SIZE,
-                         node_config->application_configuration_path, node_config->application_configuration_path_size,
-                         PRIMARY_FILENAME, sizeof(PRIMARY_FILENAME));
-  if (ret < 0)
-    return -1;
-  ret = create_file_path(manager->secondary_file_path, MAX_FILEPATH_SIZE,
-                         node_config->application_configuration_path, node_config->application_configuration_path_size,
-                         SECONDARY_FILENAME, sizeof(SECONDARY_FILENAME));
-
-  if (ret < 0)
-    return -1;
+  int ret = -1;
+  manager->active_configuration = CFG_NONE;
+  strncpy(manager->primary_file_path, node_config->primary_path, MAX_FILEPATH_SIZE);
+  strncpy(manager->secondary_file_path, node_config->secondary_path, MAX_FILEPATH_SIZE);
+  cleanup_Systemconfiguration(&manager->primary);
+  cleanup_Systemconfiguration(&manager->secondary);
 
   return ret;
 }
@@ -820,10 +390,9 @@ int initial_policy_request_cb(struct response response)
 
   if (response.ret != MGMT_OK)
     goto error_occured;
-  if (response.buffer != NULL)
+  if (response.buffer == NULL)
     goto error_occured;
   LOG_INFO("Received %d bytes from mgmt server: ", response.bytes_received);
-
   if (response.meta.policy_req.destination_path == NULL)
     goto error_occured;
   ret = write_file(response.meta.policy_req.destination_path, response.buffer_frag_start, response.bytes_received);

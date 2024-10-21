@@ -16,10 +16,11 @@
 #define NAME_LEN 256
 #define DESCRIPTION_LEN 256
 #define IPv4_PORT_LEN 40
+#define MAX_TRUSTED_APPLICATIONS 10
+#define MAX_NAME_SIZE 256
 #define MAX_NUMBER_CRYPTOPROFILE 20
 #define MAX_NUMBER_APPLICATIONS 7
 #define MAX_NUMBER_TRUSTED_CLIENTS 7
-#define NUMBER_STD_APK 4
 #define HARDBEAT_DEFAULT_S 24 * 60 * 60
 #define HARDBEAT_MIN_S 20
 #define HARDBEAT_MAX_S 60 * 60 * 24
@@ -92,6 +93,21 @@ typedef enum Kritis3mProto
     UDP = 3
 } Kritis3mProto;
 
+typedef struct certificates
+{
+    uint8_t *chain_buffer; /* Entity and intermediate certificates */
+    size_t chain_buffer_size;
+
+    uint8_t *key_buffer;
+    size_t key_buffer_size;
+
+    uint8_t *additional_key_buffer;
+    size_t additional_key_buffer_size;
+
+    uint8_t *root_buffer;
+    size_t root_buffer_size;
+} certificates;
+
 /**
  * @brief ConnectionWhitelist details the allowed connections for the proxy applications based on the client IP and Port
  */
@@ -144,25 +160,36 @@ typedef enum
 
 typedef struct
 {
+    int32_t id;
     network_identity identity;
-    char *pki_base_url;
-    int pki_base_url_size;
-    int revocation_days;
-    int32_t algorithm; // the algorithm is a feature of the identity and does not define it
+
+    char *revocation_list_url;
+    int revocation_list_url_size;
+
+    char *server_addr;
+    int server_addr_size;
+
+    char *server_url;
+    int server_url_size;
+
+    char *filepath;
+    int32_t filepath_size;
+
+    bool certificates_available;
+    certificates certificates;
 } crypto_identity;
 
 struct CryptoProfile
 {
-    uint32_t ID;
-    char Name[256];
+    int32_t id;
+    char Name[MAX_NAME_SIZE];
     bool MutualAuthentication;
     bool NoEncryption;
     enum asl_key_exchange_method ASLKeyExchangeMethod;
     bool UseSecureElement;
     enum asl_hybrid_signature_mode HybridSignatureMode;
     bool Keylog;
-    asl_endpoint_configuration endpoint_cfg;
-    crypto_identity Identity;
+    int32_t crypto_identity_id;
 };
 
 typedef struct
@@ -170,8 +197,8 @@ typedef struct
     uint32_t config_id;
     uint32_t id;
     Kritis3mApplicationtype type;
-    char *server_ip_port;
-    char *client_ip_port;
+    char server_ip_port[IPv4_PORT_LEN];
+    char client_ip_port[IPv4_PORT_LEN];
     bool state;
     uint32_t ep1_id;
     uint32_t ep2_id;
@@ -180,10 +207,11 @@ typedef struct
 
 typedef struct
 {
+    int32_t id;
     char client_ip_port[IPv4_PORT_LEN];
     struct sockaddr_in addr;
     int number_trusted_applications;
-    int trusted_applications_id[10];
+    int trusted_applications_id[MAX_TRUSTED_APPLICATIONS];
 } TrustedClients;
 
 typedef struct
@@ -196,6 +224,7 @@ struct ApplicationConfiguration
 {
     pthread_mutex_t lock;
     Whitelist whitelist;
+
     int number_crypto_profiles;
     CryptoProfile crypto_profile[MAX_NUMBER_CRYPTOPROFILE];
 
@@ -210,8 +239,8 @@ struct SystemConfiguration
 {
     uint32_t id;
     uint32_t node_id;
-    char locality[256];
-    char serial_number[256];
+    char locality[NAME_LEN];
+    char serial_number[NAME_LEN];
     uint32_t node_network_index;
 
     uint64_t heartbeat_interval;
@@ -235,18 +264,14 @@ typedef struct
 typedef struct
 {
     char serial_number[SERIAL_NUMBER_SIZE];
-    char *management_server_url;
-    int management_server_url_size;
-
-    char *management_service_ip;
+    char *server_addr;
+    int server_addr_size;
     crypto_identity identity;
 } Kritis3mManagemntConfiguration;
 
 typedef struct
 {
     Kritis3mManagemntConfiguration management_identity;
-    char *application_configuration_path;
-    int application_configuration_path_size;
 
     char *primary_path;
     int primary_path_size;
@@ -265,8 +290,6 @@ typedef struct
 
     char *config_path;
     int config_path_size;
-
-    char *kritis3m_node_configuration_path;
 
     SelectedConfiguration selected_configuration;
 } Kritis3mNodeConfiguration;
@@ -318,6 +341,12 @@ int write_Kritis3mNodeConfig_toflash(Kritis3mNodeConfiguration *config);
 int write_SystemConfig_toflash(SystemConfiguration *sys_cfg, char *filepath, int filepath_size);
 Kritis3mApplications *find_application_by_application_id(Kritis3mApplications *appls, int number_appls, int appl_id);
 int get_identity_folder_path(char *out_path, size_t size, const char *base_path, network_identity identity);
+
+/*Cleanup Functions */
+
+void cleanup_Systemconfiguration(SystemConfiguration *systemconfiguration);
+void free_ManagementConfiguration(Kritis3mManagemntConfiguration *config);
+void free_CryptoIdentity(crypto_identity *identity);
 void free_NodeConfig(Kritis3mNodeConfiguration *config);
 
 #endif // KRITIS3M_CONFIGURATION_H

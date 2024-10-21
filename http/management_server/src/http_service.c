@@ -12,10 +12,11 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include "logging.h"
+#include "linux_comp.h"
 LOG_MODULE_CREATE(http_service);
 
 #define MAX_NUMBER_THREADS 6
-#define DISTRIBUTION_BUFFER_SIZE 3000
+#define DISTRIBUTION_BUFFER_SIZE 10000
 #define HEARTBEAT_BUFFER_SIZE 1000
 #define PKI_BUFFER_SIZE 4000
 
@@ -94,7 +95,8 @@ int init_http_service(Kritis3mManagemntConfiguration *management_config, asl_end
     http_service_module_defaults();
     http_service.serial_number = management_config->serial_number;
     http_service.client_enpoint = asl_setup_client_endpoint(endpoint_config);
-    ret = extract_addr_from_url(management_config->management_server_url, &http_service.management.mgmt_sockaddr);
+
+    ret = parse_ip_port_to_sockaddr_in(management_config->server_addr, &http_service.management.mgmt_sockaddr);
     if (ret < 0)
         return -1;
     // ret = extract_addr_from_url(management_config->identity.pki_base_url, &http_service.management.mgmt_pkiaddr);
@@ -182,6 +184,8 @@ static void http_get_cb(struct http_response *rsp,
 
             break;
         }
+    }else{
+        LOG_ERROR("bla");
     }
     return;
 error_occured:
@@ -211,7 +215,10 @@ void *http_get_request(void *http_get_data)
     if (cb == NULL ||
         session == NULL ||
         url == NULL)
+    {
+        LOG_INFO("bad initialisation");
         goto shutdown;
+    }
 
     // Convert the IP address from network byte order to string
     if (inet_ntop(AF_INET, &(http_req_data->server_addr.sin_addr), ip_str, INET_ADDRSTRLEN) == NULL)
@@ -230,13 +237,14 @@ void *http_get_request(void *http_get_data)
     req.port = port;
     req.method = HTTP_GET;
     req.protocol = "HTTP/1.1";
+    req.response = http_get_cb;
 
     if (http_req_data->response.buffer == NULL)
         goto shutdown;
     req.recv_buf = http_req_data->response.buffer;
     req.recv_buf_len = http_req_data->response.buffer_size;
 
-    int32_t timeout = 3 * MSEC_PER_SEC;
+    duration timeout = ms_toduration(5 *1000);
 
     ret = https_client_req(fd, session, &req, timeout, response);
     if (ret < 0)
@@ -244,8 +252,8 @@ void *http_get_request(void *http_get_data)
         LOG_ERROR("error on client req. need to implment error handler");
         goto shutdown;
     }
-    signal_thread_finished(thread_id);
     cb(*response);
+    signal_thread_finished(thread_id);
     if (session != NULL)
         asl_free_session(session);
     if (fd > 0)
@@ -292,20 +300,40 @@ int call_distribution_service(t_http_get_cb response_callback, char *destination
     http_get.thread_id = thread_id;
 
     fd = socket(AF_INET, SOCK_STREAM, 0);
+    http_get.fd = fd;
     ret = connect(fd, (struct sockaddr *)&http_get.server_addr, sizeof(http_get.server_addr));
     if (ret < 0)
     {
         LOG_ERROR("can't conenct");
         goto error_occured;
     }
+    http_get.session = asl_create_session(http_service.client_enpoint, fd);
+    if (http_get.session == NULL)
+        goto error_occured;
+    ret = asl_handshake(http_get.session);
+    if (ret < 0)
+    {
+        LOG_ERROR("failed in the handshake");
+        goto error_occured;
+    }
 
-    pthread_create(&http_service.pool.threads[thread_id], &http_service.pool.thread_attr, http_get_request, &http_get);
+    // ret = asl_send(http_get.session, "moin", sizeof("moin"));
+    // LOG_INFO("ret is : %d",ret);
+    // ret = asl_send(http_get.session, "moin", sizeof("moin"));
+    // LOG_INFO("ret is : %d",ret);
+    // ret =asl_send(http_get.session, "moin", sizeof("moin"));
+    // LOG_INFO("ret : %d", ret);
+void * result = http_get_request(&http_get);
+
+    // pthread_create(&http_service.pool.threads[thread_id], &http_service.pool.thread_attr, , &http_get);
     return ret;
     /**
      *  Service Initialisation
      */
 
 error_occured:
+    if (http_get.session != NULL)
+        free(http_get.session);
     if (fd > 0)
         close(fd);
     if (http_get.response.buffer != NULL)
@@ -350,7 +378,7 @@ char *get_init_policy_url()
 {
     int ret = -1;
     static char policy_url[500];
-    ret = snprintf(policy_url, 500, "/api/node/%s/register", http_service.serial_number);
+    ret = snprintf(policy_url, 500, "/api/node/%s/initial/register", http_service.serial_number);
     if (ret < 0)
         return NULL;
     return policy_url;

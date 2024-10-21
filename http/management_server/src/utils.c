@@ -221,7 +221,7 @@ int parse_port_fromIpPort(const char *src_ip_port)
  * this function dynamically allocates a buffer for the files content and stores it into buffer.
  * The file size is stored into buffersize
  * !free buffer after its usage */
-int read_file(const char *filename, char **buffer, int *buffer_size)
+int read_file(const char *filename, uint8_t **buffer, int *buffer_size)
 {
     int ret = 0;
     if ((filename == NULL) || (buffer == NULL))

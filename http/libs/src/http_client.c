@@ -50,39 +50,8 @@ LOG_MODULE_CREATE(http);
 #define HTTP_CONTENT_LEN_SIZE 11
 #define MAX_SEND_BUF_LEN 192
 
-/***
- * This function can be used to send data (http fraction or full http request) to an endpoint
- * @param req_end_timepoint - is the timeout value in ms used in poll()
- * @todo timeout
- * @todo remove function, since asl_send is already sendall
- */
-static int asl_sendall(asl_session *session,
-					   const void *buf,
-					   size_t len,
-					   const k_timepoint_t req_end_timepoint)
-{
-	int ret = 0;
-	ret = asl_send(session, buf, len);
-	switch (ret)
-	{
-	case ASL_SUCCESS:
-		return 0;
-		break;
-	case ASL_ARGUMENT_ERROR:
-		LOG_ERROR("asl error");
-		return -1;
-		break;
-	case ASL_WANT_READ:
-		LOG_ERROR("asl error");
-		return -1;
-		break;
-	}
-	return -1;
-}
-
 static int https_send_data(asl_session *session, char *send_buf,
 						   size_t send_buf_max_len, size_t *send_buf_pos,
-						   const k_timepoint_t req_end_timepoint,
 						   ...)
 {
 	const char *data;
@@ -91,7 +60,8 @@ static int https_send_data(asl_session *session, char *send_buf,
 	int end_of_data, remaining_len;
 	int sent = 0;
 
-	va_start(va, req_end_timepoint);
+	// Corrected va_start usage
+	va_start(va, send_buf_pos);
 
 	data = va_arg(va, const char *);
 
@@ -117,7 +87,7 @@ static int https_send_data(asl_session *session, char *send_buf,
 				remaining_len -= to_be_copied;
 				// LOG_HEXDUMP_DBG(send_buf, end_of_send,
 				// 		"Data to send");
-				ret = asl_sendall(session, send_buf, end_of_send, req_end_timepoint);
+				ret = asl_send(session, send_buf, end_of_send);
 				if (ret < 0)
 				{
 					LOG_DEBUG("Cannot send %d bytes (%d)",
@@ -167,7 +137,7 @@ err:
 static int sendall(int sock,
 				   const void *buf,
 				   size_t len,
-				   const k_timepoint_t req_end_timepoint)
+				   timepoint timepoint)
 {
 	while (len)
 	{
@@ -177,9 +147,9 @@ static int sendall(int sock,
 		{
 			struct pollfd pfd;
 			int pollres;
-			k_ticks_t req_timeout_ticks =
-				sys_timepoint_timeout(req_end_timepoint).ticks;
-			int req_timeout_ms = k_ticks_to_ms_floor32(req_timeout_ticks);
+			int req_timeout_ms = duration_toms(get_remaining_duration_reference_now(timepoint));
+			if (req_timeout_ms < 0)
+				return -ETIMEDOUT;
 
 			pfd.fd = sock;
 			pfd.events = POLLOUT;
@@ -211,7 +181,7 @@ static int sendall(int sock,
 
 static int http_send_data(int sock, char *send_buf,
 						  size_t send_buf_max_len, size_t *send_buf_pos,
-						  const k_timepoint_t req_end_timepoint,
+						  timepoint end_timepoint,
 						  ...)
 {
 	const char *data;
@@ -220,7 +190,7 @@ static int http_send_data(int sock, char *send_buf,
 	int end_of_data, remaining_len;
 	int sent = 0;
 
-	va_start(va, req_end_timepoint);
+	va_start(va, end_timepoint);
 
 	data = va_arg(va, const char *);
 
@@ -247,7 +217,7 @@ static int http_send_data(int sock, char *send_buf,
 				// LOG_HEXDUMP_DBG(send_buf, end_of_send,
 				// 		"Data to send");
 
-				ret = sendall(sock, send_buf, end_of_send, req_end_timepoint);
+				ret = sendall(sock, send_buf, end_of_send, end_timepoint);
 				if (ret < 0)
 				{
 					LOG_DEBUG("Cannot send %d bytes (%d)",
@@ -290,17 +260,11 @@ err:
 	return ret;
 }
 
-static int https_flush_data(asl_session *session, const char *send_buf, size_t send_buf_len,
-							const k_timepoint_t req_end_timepoint)
+static int https_flush_data(asl_session *session, const char *send_buf, size_t send_buf_len)
 {
 	int ret;
-
+	ret = asl_send(session, send_buf, send_buf_len);
 	// LOG_HEXDUMP_DBG(send_buf, send_buf_len, "Data to send");
-	ret = asl_sendall(session, send_buf, send_buf_len, req_end_timepoint);
-	/**
-	 * @todo test if workaround is sufficient
-	 */
-	// ret = sendall(sock, send_buf, send_buf_len, req_end_timepoint);
 	if (ret < 0)
 
 	{
@@ -311,14 +275,13 @@ static int https_flush_data(asl_session *session, const char *send_buf, size_t s
 	return (int)send_buf_len;
 }
 
-static int http_flush_data(int sock, const char *send_buf, size_t send_buf_len,
-						   const k_timepoint_t req_end_timepoint)
+static int http_flush_data(int sock, const char *send_buf, size_t send_buf_len, timepoint timepoinit)
 {
 	int ret;
 
 	// LOG_HEXDUMP_DBG(send_buf, send_buf_len, "Data to send");
 
-	ret = sendall(sock, send_buf, send_buf_len, req_end_timepoint);
+	ret = sendall(sock, send_buf, send_buf_len, timepoinit);
 	if (ret < 0)
 	{
 		return ret;
@@ -664,7 +627,7 @@ static void http_report_progress(struct http_request *req)
 }
 static int https_wait_data(int sock, asl_session *session,
 						   struct http_request *req,
-						   const k_timepoint_t req_end_timepoint)
+						   timepoint endtimeout)
 {
 	int total_received = 0;
 	size_t offset = 0;
@@ -677,12 +640,14 @@ static int https_wait_data(int sock, asl_session *session,
 
 	do
 	{
-		k_ticks_t req_timeout_ticks =
-			sys_timepoint_timeout(req_end_timepoint).ticks;
-		int req_timeout_ms = k_ticks_to_ms_floor32(req_timeout_ticks);
+		int remaining_duration = duration_toms(get_remaining_duration_reference_now(endtimeout));
+		if (remaining_duration < 0)
+		{
+			goto error;
+		}
 
-		ret = poll(fds, nfds, req_timeout_ms);
-		if (ret == 0)
+		ret = poll(fds, nfds, remaining_duration);
+			if (ret == 0)
 		{
 			LOG_DEBUG("Timeout");
 			ret = -ETIMEDOUT;
@@ -783,7 +748,7 @@ error:
 	return ret;
 }
 
-static int http_wait_data(int sock, struct http_request *req, const k_timepoint_t req_end_timepoint)
+static int http_wait_data(int sock, struct http_request *req, const timepoint req_end_timepoint)
 {
 	int total_received = 0;
 	size_t offset = 0;
@@ -796,11 +761,9 @@ static int http_wait_data(int sock, struct http_request *req, const k_timepoint_
 
 	do
 	{
-		k_ticks_t req_timeout_ticks =
-			sys_timepoint_timeout(req_end_timepoint).ticks;
-		int req_timeout_ms = k_ticks_to_ms_floor32(req_timeout_ticks);
+		int reamaining_time_ms = duration_toms(get_remaining_duration_reference_now(req_end_timepoint));
 
-		ret = poll(fds, nfds, req_timeout_ms);
+		ret = poll(fds, nfds, reamaining_time_ms);
 		if (ret == 0)
 		{
 			LOG_DEBUG("Timeout");
@@ -896,7 +859,7 @@ error:
 }
 
 int http_client_req(int sock, struct http_request *req,
-					int32_t timeout, void *user_data)
+					duration timeout_duration, void *user_data)
 {
 	/* Utilize the network usage by sending data in bigger blocks */
 	char send_buf[MAX_SEND_BUF_LEN];
@@ -905,8 +868,7 @@ int http_client_req(int sock, struct http_request *req,
 	int total_sent = 0;
 	int ret, total_recv, i;
 	const char *method;
-	k_timeout_t req_timeout = K_MSEC(timeout);
-	k_timepoint_t req_end_timepoint = sys_timepoint_calc(req_timeout);
+	timepoint req_end_timepoint = get_timepoint_in(timeout_duration);
 
 	if (sock < 0 || req == NULL || req->response == NULL ||
 		req->recv_buf == NULL || req->recv_buf_len == 0)
@@ -926,9 +888,14 @@ int http_client_req(int sock, struct http_request *req,
 	method = http_method_str(req->method);
 
 	ret = http_send_data(sock, send_buf, send_buf_max_len, &send_buf_pos,
-						 req_end_timepoint, method,
-						 " ", req->url, " ", req->protocol,
-						 HTTP_CRLF, NULL);
+						 req_end_timepoint,
+						 method,
+						 " ",
+						 req->url,
+						 " ",
+						 req->protocol,
+						 HTTP_CRLF,
+						 NULL);
 	if (ret < 0)
 	{
 		goto out;
@@ -1145,7 +1112,7 @@ out:
 }
 
 int https_client_req(int sock, asl_session *session, struct http_request *req,
-					 int32_t timeout, void *user_data)
+					 duration timeout, void *user_data)
 {
 	/* Utilize the network usage by sending data in bigger blocks */
 	char send_buf[MAX_SEND_BUF_LEN];
@@ -1154,8 +1121,7 @@ int https_client_req(int sock, asl_session *session, struct http_request *req,
 	int total_sent = 0;
 	int ret, total_recv, i;
 	const char *method;
-	k_timeout_t req_timeout = K_MSEC(timeout);
-	k_timepoint_t req_end_timepoint = sys_timepoint_calc(req_timeout);
+	timepoint req_end_timepoint = get_timepoint_in(timeout);
 
 	if (sock < 0 || session == NULL || req == NULL || req->response == NULL ||
 		req->recv_buf == NULL || req->recv_buf_len == 0)
@@ -1174,10 +1140,17 @@ int https_client_req(int sock, asl_session *session, struct http_request *req,
 
 	method = http_method_str(req->method);
 
-	ret = https_send_data(session, send_buf, send_buf_max_len, &send_buf_pos,
-						  req_end_timepoint, method,
-						  " ", req->url, " ", req->protocol,
-						  HTTP_CRLF, NULL);
+	ret = https_send_data(session,
+						  send_buf,
+						  send_buf_max_len,
+						  &send_buf_pos,
+						  method,
+						  " ",
+						  req->url,
+						  " ",
+						  req->protocol,
+						  HTTP_CRLF,
+						  NULL);
 	if (ret < 0)
 	{
 		goto out;
@@ -1187,9 +1160,17 @@ int https_client_req(int sock, asl_session *session, struct http_request *req,
 
 	if (req->port)
 	{
-		ret = https_send_data(session, send_buf, send_buf_max_len,
-							  &send_buf_pos, req_end_timepoint, "Host", ": ", req->host,
-							  ":", req->port, HTTP_CRLF, NULL);
+		ret = https_send_data(session,
+							  send_buf,
+							  send_buf_max_len,
+							  &send_buf_pos,
+							  "Host",
+							  ": ",
+							  req->host,
+							  ":",
+							  req->port,
+							  HTTP_CRLF,
+							  NULL);
 
 		if (ret < 0)
 		{
@@ -1201,7 +1182,7 @@ int https_client_req(int sock, asl_session *session, struct http_request *req,
 	else
 	{
 		ret = https_send_data(session, send_buf, send_buf_max_len,
-							  &send_buf_pos, req_end_timepoint, "Host", ": ", req->host,
+							  &send_buf_pos, "Host", ": ", req->host,
 							  HTTP_CRLF, NULL);
 
 		if (ret < 0)
@@ -1214,7 +1195,7 @@ int https_client_req(int sock, asl_session *session, struct http_request *req,
 
 	if (req->optional_headers_cb)
 	{
-		ret = https_flush_data(session, send_buf, send_buf_pos, req_end_timepoint);
+		ret = https_flush_data(session, send_buf, send_buf_pos);
 		if (ret < 0)
 		{
 			goto out;
@@ -1238,7 +1219,7 @@ int https_client_req(int sock, asl_session *session, struct http_request *req,
 			 i++)
 		{
 			ret = https_send_data(session, send_buf, send_buf_max_len,
-								  &send_buf_pos, req_end_timepoint,
+								  &send_buf_pos,
 								  req->optional_headers[i], NULL);
 			if (ret < 0)
 			{
@@ -1252,7 +1233,7 @@ int https_client_req(int sock, asl_session *session, struct http_request *req,
 	for (i = 0; req->header_fields && req->header_fields[i]; i++)
 	{
 		ret = https_send_data(session, send_buf, send_buf_max_len,
-							  &send_buf_pos, req_end_timepoint, req->header_fields[i],
+							  &send_buf_pos, req->header_fields[i],
 							  NULL);
 		if (ret < 0)
 		{
@@ -1265,7 +1246,7 @@ int https_client_req(int sock, asl_session *session, struct http_request *req,
 	if (req->content_type_value)
 	{
 		ret = https_send_data(session, send_buf, send_buf_max_len,
-							  &send_buf_pos, req_end_timepoint, "Content-Type", ": ",
+							  &send_buf_pos, "Content-Type", ": ",
 							  req->content_type_value, HTTP_CRLF, NULL);
 		if (ret < 0)
 		{
@@ -1290,7 +1271,7 @@ int https_client_req(int sock, asl_session *session, struct http_request *req,
 			}
 
 			ret = https_send_data(session, send_buf, send_buf_max_len,
-								  &send_buf_pos, req_end_timepoint,
+								  &send_buf_pos,
 								  "Content-Length", ": ",
 								  content_len_str, HTTP_CRLF,
 								  HTTP_CRLF, NULL);
@@ -1298,7 +1279,7 @@ int https_client_req(int sock, asl_session *session, struct http_request *req,
 		else
 		{
 			ret = https_send_data(session, send_buf, send_buf_max_len,
-								  &send_buf_pos, req_end_timepoint, HTTP_CRLF, NULL);
+								  &send_buf_pos, HTTP_CRLF, NULL);
 		}
 
 		if (ret < 0)
@@ -1308,7 +1289,7 @@ int https_client_req(int sock, asl_session *session, struct http_request *req,
 
 		total_sent += ret;
 
-		ret = https_flush_data(session, send_buf, send_buf_pos, req_end_timepoint);
+		ret = https_flush_data(session, send_buf, send_buf_pos);
 		if (ret < 0)
 		{
 			goto out;
@@ -1340,7 +1321,7 @@ int https_client_req(int sock, asl_session *session, struct http_request *req,
 				length = req->payload_len;
 			}
 
-			ret = asl_sendall(session, req->payload, length, req_end_timepoint);
+			ret = asl_send(session, req->payload, length);
 			if (ret < 0)
 			{
 				goto out;
@@ -1352,7 +1333,7 @@ int https_client_req(int sock, asl_session *session, struct http_request *req,
 	else
 	{
 		ret = https_send_data(session, send_buf, send_buf_max_len,
-							  &send_buf_pos, req_end_timepoint, HTTP_CRLF, NULL);
+							  &send_buf_pos, HTTP_CRLF, NULL);
 		if (ret < 0)
 		{
 			goto out;
@@ -1363,7 +1344,7 @@ int https_client_req(int sock, asl_session *session, struct http_request *req,
 
 	if (send_buf_pos > 0)
 	{
-		ret = https_flush_data(session, send_buf, send_buf_pos, req_end_timepoint);
+		ret = https_flush_data(session, send_buf, send_buf_pos);
 		if (ret < 0)
 		{
 			goto out;
