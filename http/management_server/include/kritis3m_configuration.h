@@ -42,6 +42,9 @@
 #define REMOTE_STR "remote"
 #define PRODUCTION_STR "production"
 
+#define THREAD_INT 0
+#define THREAD_EXT 1
+
 typedef enum ManagementReturncode
 {
     MGMT_BAD_REQUEST = -6,
@@ -200,8 +203,8 @@ typedef struct
     char server_ip_port[IPv4_PORT_LEN];
     char client_ip_port[IPv4_PORT_LEN];
     bool state;
-    uint32_t ep1_id;
-    uint32_t ep2_id;
+    int32_t ep1_id;
+    int32_t ep2_id;
     int log_level;
 } Kritis3mApplications;
 
@@ -237,14 +240,14 @@ struct ApplicationConfiguration
 
 struct SystemConfiguration
 {
-    uint32_t id;
+    uint32_t cfg_id;
     uint32_t node_id;
     char locality[NAME_LEN];
     char serial_number[NAME_LEN];
     uint32_t node_network_index;
 
     uint64_t heartbeat_interval;
-    uint64_t updated_at;
+
     uint32_t version;
     ApplicationConfiguration application_config;
 };

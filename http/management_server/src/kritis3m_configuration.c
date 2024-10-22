@@ -147,12 +147,9 @@ ManagementReturncode get_Systemconfig(ConfigurationManager *applconfig, Kritis3m
     if ((applconfig == NULL) || (node_config == NULL))
         goto error_occured;
 
-    selected_configuration = node_config->selected_configuration;
 
-    if (ret < 0)
-        goto error_occured;
 
-    switch (selected_configuration)
+    switch (applconfig->active_configuration)
     {
     case CFG_PRIMARY:
         applconfig->active_configuration = CFG_PRIMARY;
@@ -169,6 +166,7 @@ ManagementReturncode get_Systemconfig(ConfigurationManager *applconfig, Kritis3m
             goto error_occured;
         break;
     case CFG_NONE:
+        applconfig->active_configuration = CFG_PRIMARY;
         LOG_INFO("selected config not provided. Use primary as new selected config");
         return MGMT_EMPTY_OBJECT_ERROR;
         break;
@@ -178,7 +176,7 @@ ManagementReturncode get_Systemconfig(ConfigurationManager *applconfig, Kritis3m
         break;
     }
     // reads and parses data from filepath to sys_config object
-    ret = get_systemconfig(filepath, sys_config, node_config->crypto_path);
+    ret = get_systemconfig(filepath, sys_config, node_config->pki_cert_path);
     return ret;
 
 error_occured:
@@ -346,13 +344,12 @@ void free_NodeConfig(Kritis3mNodeConfiguration *config)
 void cleanup_Systemconfiguration(SystemConfiguration *systemconfiguration)
 {
 
-    systemconfiguration->id = 0;
+    systemconfiguration->cfg_id = 0;
     systemconfiguration->node_id = 0;
-    memset(systemconfiguration->locality, 0, sizeof(NAME_LEN));
-    memset(systemconfiguration->serial_number, 0, sizeof(NAME_LEN));
+    memset(systemconfiguration->locality, 0, NAME_LEN);
+    memset(systemconfiguration->serial_number, 0, NAME_LEN);
     systemconfiguration->node_network_index = 0;
     systemconfiguration->heartbeat_interval = 0;
-    systemconfiguration->updated_at = 0;
     systemconfiguration->version = 0;
     Whitelist *whitelist = &systemconfiguration->application_config.whitelist;
     for (int i = 0; i < whitelist->number_trusted_clients; i++)

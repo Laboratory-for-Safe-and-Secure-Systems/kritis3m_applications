@@ -99,9 +99,6 @@ int init_http_service(Kritis3mManagemntConfiguration *management_config, asl_end
     ret = parse_ip_port_to_sockaddr_in(management_config->server_addr, &http_service.management.mgmt_sockaddr);
     if (ret < 0)
         return -1;
-    // ret = extract_addr_from_url(management_config->identity.pki_base_url, &http_service.management.mgmt_pkiaddr);
-    if (ret < 0)
-        return -1;
     return 0;
 }
 
@@ -253,13 +250,14 @@ void *http_get_request(void *http_get_data)
         goto shutdown;
     }
     cb(*response);
-    signal_thread_finished(thread_id);
+    // signal_thread_finished(thread_id);
     if (session != NULL)
         asl_free_session(session);
     if (fd > 0)
         close(fd);
-    signal_thread_finished(thread_id);
-    pthread_exit(NULL);
+    // signal_thread_finished(thread_id);
+    // pthread_exit(NULL);
+    return 0;
 shutdown:
     LOG_ERROR("shutting down http get");
     response->ret = MGMT_ERR;

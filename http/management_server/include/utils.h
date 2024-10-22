@@ -24,4 +24,5 @@ char *duplicate_string(char const *source);
 int create_directory(const char *path);
 void ensure_trailing_slash(char *path, size_t size);
 
+uint64_t parse_time_string(const char *time_str); 
 #endif

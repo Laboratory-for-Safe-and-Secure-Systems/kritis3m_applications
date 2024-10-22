@@ -31,7 +31,7 @@ TimerPipe *get_timer_pipe() {return &timer_pipe;}
 
 int get_clock_signal_fd(TimerPipe *pipe)
 {
-    int ret = pipe->pipe_fds[0];
+    int ret = pipe->pipe_fds[THREAD_INT];
     if (ret < 0)
     {
         LOG_ERROR("Error: Invalid file descriptor");
@@ -44,7 +44,7 @@ static void timer_handler(union sigval arg)
 {
     TimerPipe *tp = (TimerPipe *)arg.sival_ptr;
     uint8_t signal = 1;
-    write(tp->pipe_fds[1], &signal, sizeof(signal)); // Notify the pipe on timer expiration
+    write(tp->pipe_fds[THREAD_EXT], &signal, sizeof(signal)); // Notify the pipe on timer expiration
 }
 
 // Function to start the timer with the given interval

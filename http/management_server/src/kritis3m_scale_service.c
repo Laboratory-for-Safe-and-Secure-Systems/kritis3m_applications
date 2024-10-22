@@ -13,6 +13,7 @@ LOG_MODULE_CREATE(kritis3m_service);
 #include "utils.h"
 #include <errno.h>
 #include <pthread.h>
+
 #define SIMULTANIOUS_REQs 5
 #define ENROLL_BUFFER_SIZE 2000
 #define REENROLL_BUFFER_SIZE 2000
@@ -67,7 +68,7 @@ typedef struct service_message
 void *start_kristis3m_service(void *arg);
 int setup_socketpair(int management_socket[2], bool blocking);
 void *http_get_request(void *http_get_data);
-int init_configuration_manager(ConfigurationManager *manager, Kritis3mNodeConfiguration *node_config);
+void init_configuration_manager(ConfigurationManager *manager, Kritis3mNodeConfiguration *node_config);
 int create_folder_structure(Kritis3mNodeConfiguration *node_cfg);
 
 // callbacks used from the http threads
@@ -88,8 +89,8 @@ void set_kritis3m_serivce_defaults(struct kritis3m_service *svc)
   memset(&svc->configuration_manager, 0, sizeof(ConfigurationManager));
   memset(&svc->management_endpoint_config, 0, sizeof(asl_endpoint_configuration));
   memset(&svc->node_configuration, 0, sizeof(Kritis3mNodeConfiguration));
-  svc->management_socket[0] = -1;
-  svc->management_socket[1] = -1;
+  svc->management_socket[THREAD_EXT] = -1;
+  svc->management_socket[THREAD_INT] = -1;
   pthread_attr_init(&svc->thread_attr);
   pthread_attr_setdetachstate(&svc->thread_attr, PTHREAD_CREATE_JOINABLE);
   init_posix_timer(svc->hardbeat_timer);
@@ -155,12 +156,27 @@ int init_kristis3m_service(char *config_file)
   {
     LOG_ERROR("endpoint config error");
     goto error_occured;
-
   }
 
-  init_http_service(&svc.node_configuration.management_identity, &svc.management_endpoint_config);
-  ret = init_configuration_manager(&svc.configuration_manager, &svc.node_configuration);
-  get_Systemconfig(&svc.configuration_manager, &svc.node_configuration);
+  ret = init_http_service(&svc.node_configuration.management_identity, &svc.management_endpoint_config);
+  if (ret < 0)
+  {
+    LOG_ERROR("can't init http_service");
+  }
+  init_configuration_manager(&svc.configuration_manager, &svc.node_configuration);
+  call_distribution_service(initial_policy_request_cb, svc.node_configuration.primary_path);
+  if (svc.configuration_manager.active_configuration == CFG_NONE)
+  {
+    LOG_INFO("no configuration selected. Starting with primary configuration");
+    svc.configuration_manager.active_configuration = CFG_PRIMARY;
+  }
+  ManagementReturncode retval = get_Systemconfig(&svc.configuration_manager, &svc.node_configuration);
+  if (retval != MGMT_OK)
+    goto error_occured;
+  
+  svc.initialized = true;
+
+
   ret = pthread_create(&svc.mainthread, &svc.thread_attr, start_kristis3m_service, &svc);
 
   return 0;
@@ -189,21 +205,22 @@ void *start_kristis3m_service(void *arg)
   Kritis3mNodeConfiguration node_configuration = svc->node_configuration;
   ConfigurationManager application_configuration_manager = svc->configuration_manager;
 
+
+
+
+
   ret = poll_set_add_fd(pollfd, get_clock_signal_fd(heartbeat_timer), POLLIN | POLLERR);
   if (ret < 0)
   {
     LOG_ERROR("cant add fd to to pollset, shutting down management service");
     goto terminate;
   }
-  ret = poll_set_add_fd(pollfd, svc->management_socket[1], POLLIN | POLLERR);
+  ret = poll_set_add_fd(pollfd, svc->management_socket[THREAD_INT], POLLIN | POLLERR);
   if (ret < 0)
   {
     LOG_ERROR("cant add fd to to pollset, shutting down management service");
     goto terminate;
   }
-
-  call_distribution_service(initial_policy_request_cb, node_configuration.primary_path);
-  get_Systemconfig(&application_configuration_manager, &node_configuration);
 
   ret = timer_start(heartbeat_timer, hb_interval_sec);
   while (1)
@@ -236,6 +253,9 @@ void *start_kristis3m_service(void *arg)
       }
       else if (fd == get_clock_signal_fd(heartbeat_timer))
       {
+        int buffer;
+        read(fd, &buffer, sizeof(int));
+        LOG_INFO("Heartbeat timer expired");
       }
 
       // services to embedd:
@@ -369,16 +389,13 @@ int create_folder_structure(Kritis3mNodeConfiguration *node_config)
   return 0;
 }
 
-int init_configuration_manager(ConfigurationManager *manager, Kritis3mNodeConfiguration *node_config)
+void init_configuration_manager(ConfigurationManager *manager, Kritis3mNodeConfiguration *node_config)
 {
-  int ret = -1;
-  manager->active_configuration = CFG_NONE;
+  manager->active_configuration = node_config->selected_configuration;
   strncpy(manager->primary_file_path, node_config->primary_path, MAX_FILEPATH_SIZE);
   strncpy(manager->secondary_file_path, node_config->secondary_path, MAX_FILEPATH_SIZE);
   cleanup_Systemconfiguration(&manager->primary);
   cleanup_Systemconfiguration(&manager->secondary);
-
-  return ret;
 }
 
 int initial_policy_request_cb(struct response response)
@@ -400,26 +417,27 @@ int initial_policy_request_cb(struct response response)
   {
     LOG_ERROR("can't write response into buffer");
   }
+  return ret;
 
-  req.msg_type = HTTP_SERVICE;
-  req.payload.event = MGMT_EV_MGM_RESP;
+  // req.msg_type = HTTP_SERVICE;
+  // req.payload.event = MGMT_EV_MGM_RESP;
 
-  ret = send_management_message(svc.management_socket[0], &req);
-  if (ret < 0)
-  {
-    LOG_ERROR("cant send mgmt message");
-    goto error_occured;
-  }
-  ret = read_management_message(svc.management_socket[0], &resp);
-  if (ret < 0)
-  {
-    LOG_ERROR("receive mgmt_message");
-    goto error_occured;
-  }
-  if ((resp.msg_type == RESPONSE) && (resp.payload.return_code == 0))
-  {
-    LOG_ERROR("Resposne was succefull ");
-  }
+  // ret = send_management_message(svc.management_socket[THREAD_EXT], &req);
+  // if (ret < 0)
+  // {
+  //   LOG_ERROR("cant send mgmt message");
+  //   goto error_occured;
+  // }
+  // ret = read_management_message(svc.management_socket[THREAD_EXT], &resp);
+  // if (ret < 0)
+  // {
+  //   LOG_ERROR("receive mgmt_message");
+  //   goto error_occured;
+  // }
+  // if ((resp.msg_type == RESPONSE) && (resp.payload.return_code == 0))
+  // {
+  //   LOG_ERROR("Resposne was succefull ");
+  // }
 
   if (response.buffer != NULL)
     free(response.buffer);

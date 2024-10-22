@@ -13,7 +13,7 @@ int parse_whitelist(cJSON *json_obj, Whitelist *whitelist);
 int parse_crypo_config(cJSON *json_obj, CryptoProfile *CryptoProfile);
 int parse_crypo_identity(cJSON *json_obj, crypto_identity *crypto_identity, char *crypto_identity_path);
 int parse_application(cJSON *json_obj, Kritis3mApplications *application);
-int set_crypto_filepath(Kritis3mApplications *application,char* crypto_path);
+int set_crypto_filepath(Kritis3mApplications *application, char *crypto_path);
 
 int parse_json_to_ManagementConfig(cJSON *json_management_service, Kritis3mManagemntConfiguration *config, char *identity_path)
 {
@@ -172,6 +172,7 @@ ManagementReturncode parse_buffer_to_SystemConfiguration(char *json_buffer, int 
     ManagementReturncode retval = MGMT_OK;
     cJSON *root = cJSON_ParseWithLength(json_buffer, json_buffer_size);
 
+    /********************************* NODE PARSING*****************************************/
     // Parse primary configuration
     cJSON *node = cJSON_GetObjectItem(root, "node");
     if (node == NULL)
@@ -182,62 +183,72 @@ ManagementReturncode parse_buffer_to_SystemConfiguration(char *json_buffer, int 
     if (item == NULL)
         goto error_occured;
     else
-        strcpy(config->serial_number, item->valuestring);
+        strncpy(config->serial_number, item->valuestring, NAME_LEN);
 
     item = cJSON_GetObjectItem(node, "network_index");
     if (item == NULL)
         goto error_occured;
     else
         config->node_network_index = item->valueint;
-    item = cJSON_GetObjectItem(node, "node_id");
-    if (item == NULL)
-        goto error_occured;
-    else
-        config->node_id = item->valueint;
     item = cJSON_GetObjectItem(node, "id");
     if (item == NULL)
         goto error_occured;
-    else
-        config->id = item->valueint;
-    item = cJSON_GetObjectItem(node, "hb_interval");
-    if (item == NULL)
-        goto error_occured;
-    else
-        // check if valueint can hold uint64_t
-        config->heartbeat_interval = cJSON_GetNumberValue(item);
-    item = cJSON_GetObjectItem(node, "updated_at");
-    if (item == NULL)
-        goto error_occured;
-    else
-        config->updated_at = cJSON_GetNumberValue(item);
-    // These parameters are not required but can be usefull for logging purposes
+    config->node_id = item->valueint;
+
     item = cJSON_GetObjectItem(node, "locality");
     if (item != NULL)
-        // change this to strncpy in the future
-        strcpy(config->locality, item->valuestring);
-    item = cJSON_GetObjectItem(node, "updated_at");
-    if (item != NULL)
-        config->updated_at = cJSON_GetNumberValue(item);
-    item = cJSON_GetObjectItem(node, "version");
-    if (item != NULL)
-        config->version = item->valueint;
-    else
-        LOG_WARN("no version provided");
-    item = cJSON_GetObjectItem(node, "whitelist");
+        strncpy(config->locality, item->valuestring, NAME_LEN);
+
+    /********************************* END NODE PARSING *************************************/
+
+    /********************************* CONFIGURATION PARSING *************************************/
+    cJSON *configs = cJSON_GetObjectItem(node, "configs");
+    if (configs == NULL)
+        goto error_occured;
+    int n = cJSON_GetArraySize(configs);
+    if (n != 1)
+        goto error_occured;
+    configs = cJSON_GetArrayItem(configs, 0);
+
+    item = cJSON_GetObjectItem(configs, "id");
     if (item == NULL)
         goto error_occured;
-    //*******************WHITELIST*******************************************/
+    config->cfg_id = item->valueint;
+
+    item = cJSON_GetObjectItem(configs, "hb_interval");
+    if (item == NULL)
+        goto error_occured;
+    config->heartbeat_interval = item->valueint;
+
+    item = cJSON_GetObjectItem(configs, "version");
+    // if (item == NULL)
+    // goto error_occured;
+    // config->version = item->valueint;
+    /********************************** END CONFIGURATION ****************************/
+
+    /*********************************** WHITELIST  **********************************/
+    item = cJSON_GetObjectItem(configs, "whitelist");
+    if (item == NULL)
+        goto error_occured;
     retval = parse_whitelist(item, &config->application_config.whitelist);
     if (retval < MGMT_OK)
         goto error_occured;
+    /***********************************END  WHITELIST  **********************************/
+
     //*******************CRYPTO PROFILES *******************************************/
-    cJSON *crypto_profiles = cJSON_GetObjectItem(node, "crypto_config");
+    cJSON *crypto_profiles = cJSON_GetObjectItem(root, "crypto_config");
+
     int number_crypto_profiles = cJSON_GetArraySize(crypto_profiles);
     if (number_crypto_profiles == 0)
         LOG_WARN("no crypto profiles provided");
     else if (number_crypto_profiles > MAX_NUMBER_CRYPTOPROFILE)
+    {
+
+        LOG_ERROR("too many crypto profiles provided");
         goto error_occured;
+    }
     config->application_config.number_crypto_profiles = number_crypto_profiles;
+
     for (int i = 0; i < number_crypto_profiles; i++)
     {
         cJSON *crypto = cJSON_GetArrayItem(crypto_profiles, i);
@@ -247,10 +258,13 @@ ManagementReturncode parse_buffer_to_SystemConfiguration(char *json_buffer, int 
     }
     /*******************CRYPTO IDENTITIES*********************************************/
 
-    cJSON *crypto_identity_json = cJSON_GetObjectItem(node, "crypto_config");
+    cJSON *crypto_identity_json = cJSON_GetObjectItem(root, "identities");
     int number_crypto_identities = cJSON_GetArraySize(crypto_identity_json);
-    if (number_crypto_identities == 0)
-        LOG_WARN("no crypto identities provided");
+    if ((number_crypto_identities == 0) || (number_crypto_identities > MAX_NUMBER_CRYPTOPROFILE))
+    {
+        LOG_WARN("no crypto identities provided, or to many ");
+        goto error_occured;
+    }
     config->application_config.number_crypto_identity = number_crypto_identities;
     for (int i = 0; i < number_crypto_identities; i++)
     {
@@ -263,8 +277,16 @@ ManagementReturncode parse_buffer_to_SystemConfiguration(char *json_buffer, int 
             goto error_occured;
     }
     //*******************APPLICATION CONFIG*******************************************/
-    cJSON *json_applications = cJSON_GetObjectItem(node, "applications");
+    cJSON *json_applications = cJSON_GetObjectItem(configs, "applications");
     int number_applications = cJSON_GetArraySize(json_applications);
+
+    if (number_applications == 0)
+        LOG_WARN("no applications provided");
+    if (number_applications > MAX_NUMBER_APPLICATIONS)
+    {
+        LOG_WARN("Too many appls provided. Can't init %d applications ", MAX_NUMBER_APPLICATIONS - number_applications);
+        number_applications = MAX_NUMBER_APPLICATIONS;
+    }
 
     config->application_config.number_applications = number_applications;
     if (number_applications == 0)
@@ -308,7 +330,7 @@ ManagementReturncode parse_whitelist(cJSON *json_obj, Whitelist *whitelist)
         cJSON *client_ip = cJSON_GetObjectItem(trusted_client_json, "client_ip_port");
         if ((client_ip == NULL) || (strlen(client_ip->valuestring) < 1))
             goto error_occured;
-        strncpy(whitelist->TrustedClients[i].client_ip_port, trusted_client_json->valuestring, IPv4_PORT_LEN);
+        strncpy(whitelist->TrustedClients[i].client_ip_port, client_ip->valuestring, IPv4_PORT_LEN);
 
         ret = parse_ip_port_to_sockaddr_in(whitelist->TrustedClients[i].client_ip_port, &whitelist->TrustedClients[i].addr);
         if (ret < 0)
@@ -349,10 +371,10 @@ ManagementReturncode parse_application(cJSON *json_obj, Kritis3mApplications *ap
         goto error_occured;
     application->type = item->valueint;
 
-    item = cJSON_GetObjectItem(json_obj, "servier_ip_port");
+    item = cJSON_GetObjectItem(json_obj, "server_ip_port");
     if (item == NULL)
         goto error_occured;
-    strncpy(application->server_ip_port, item->valuestring,IPv4_PORT_LEN);
+    strncpy(application->server_ip_port, item->valuestring, IPv4_PORT_LEN);
 
     item = cJSON_GetObjectItem(json_obj, "client_ip_port");
     if (item == NULL)
@@ -365,15 +387,10 @@ ManagementReturncode parse_application(cJSON *json_obj, Kritis3mApplications *ap
     application->ep1_id = item->valueint;
 
     item = cJSON_GetObjectItem(json_obj, "ep2_id");
-    if (item == NULL)
-        LOG_INFO("Ep2_config not in Application config with application id: %d", application->id);
-    application->ep2_id = item->valueint;
+    application->ep2_id = (item == NULL) ? -1 : item->valueint;
 
     item = cJSON_GetObjectItem(json_obj, "log_level");
-    if (item == NULL)
-        LOG_WARN("No Log levle included. Default log_level will be selected");
-    else
-        application->log_level = item->valueint;
+    application->log_level = ( item == NULL) ? LOG_LVL_WARN : item->valueint ; 
 
     application->state = false;
     return ret;
@@ -396,8 +413,8 @@ ManagementReturncode parse_crypo_identity(cJSON *identity_json, crypto_identity 
         goto error_occured;
     identity->identity = item->valueint;
 
-    identity->filepath = malloc(FILENAME_MAX);
-    identity->filepath_size;
+    identity->filepath_size = strlen(crypto_identity_path) + 50;
+    identity->filepath = malloc(identity->filepath_size);
 
     ret = get_identity_folder_path(identity->filepath, identity->filepath_size, crypto_identity_path, identity->identity);
     if (ret < 0)
@@ -422,9 +439,9 @@ ManagementReturncode parse_crypo_identity(cJSON *identity_json, crypto_identity 
         identity->server_url = duplicate_string(item->valuestring);
         identity->server_url_size = strlen(identity->server_addr) + 1;
     }
-
     return ret;
 error_occured:
+    free_CryptoIdentity(identity);
     LOG_ERROR("error in parsing crypto profile");
     ret = MGMT_PARSE_ERROR;
     return ret;
@@ -442,7 +459,7 @@ ManagementReturncode parse_crypo_config(cJSON *json_obj, CryptoProfile *profile)
     item = cJSON_GetObjectItem(json_obj, "name");
     if (item == NULL)
         goto error_occured;
-    strcpy(profile->Name, item->valuestring);
+    strncpy(profile->Name, item->valuestring, NAME_LEN);
 
     item = cJSON_GetObjectItem(json_obj, "mutual_auth");
     if (item == NULL)
