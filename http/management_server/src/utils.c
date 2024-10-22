@@ -239,7 +239,6 @@ error_occured:
     ret = -1;
     return ret;
 }
-
 int parse_port_fromIpPort(const char *src_ip_port)
 {
     // Find the position of the colon
@@ -247,9 +246,23 @@ int parse_port_fromIpPort(const char *src_ip_port)
 
     if (colon_pos != NULL)
     {
-        // found
-        return atoi(colon_pos + 1);
+        // Check if the port part is a wildcard '*'
+        if (strcmp(colon_pos + 1, "*") == 0)
+        {
+            return 0; // Assign port 0 if wildcard is found
+        }
+
+        // Otherwise, convert the port to an integer
+        int port = atoi(colon_pos + 1);
+
+        // Validate the port number range (0 to 65535)
+        if (port >= 0 && port <= 65535)
+        {
+            return port;
+        }
     }
+
+    // Return -1 for invalid format or out-of-range port
     return -1;
 }
 

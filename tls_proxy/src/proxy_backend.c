@@ -13,6 +13,7 @@
 #include "proxy_management.h"
 #include "proxy_connection.h"
 #include "proxy_backend.h"
+#include "kritis3m_application_manager.h"
 
 #include "logging.h"
 #include "poll_set.h"
@@ -568,7 +569,7 @@ void *proxy_backend_thread(void *ptr)
         asl_configuration asl_config = asl_default_config();
         asl_config.logging_enabled = true;
         asl_config.log_level = LOG_LVL_GET();
-        asl_config.custom_log_callback = asl_log_callback;
+        asl_config.log_callback = asl_log_callback;
 
         int ret = asl_init(&asl_config);
         if (ret != 0)
@@ -640,6 +641,9 @@ void *proxy_backend_thread(void *ptr)
                                                         LOG_ERROR("accept error: %d (fd=%d)", error, proxy->incoming_sock);
                                                 continue;
                                         }
+                                        bool allowed = confirm_client(proxy->application_id, (struct sockaddr_in *)&client_addr);
+                                        if (!allowed)
+                                                continue;
 
                                         /* Handle new client */
                                         proxy_connection = add_new_connection_to_proxy(proxy,

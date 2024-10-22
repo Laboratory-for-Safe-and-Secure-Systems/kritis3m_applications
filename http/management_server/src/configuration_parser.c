@@ -374,12 +374,33 @@ ManagementReturncode parse_application(cJSON *json_obj, Kritis3mApplications *ap
     item = cJSON_GetObjectItem(json_obj, "server_ip_port");
     if (item == NULL)
         goto error_occured;
-    strncpy(application->server_ip_port, item->valuestring, IPv4_PORT_LEN);
+    ret = parse_IPv4_fromIpPort(item->valuestring, application->server_ip);
+    if (ret < 0 ){
+        LOG_ERROR("cant parse ip addr from ip:port");
+        goto error_occured;
+    }
+    int port  = parse_port_fromIpPort(item->valuestring);
+    if (port  < 0){
+        LOG_ERROR("no correct port in addr");
+        goto error_occured;
+    }
+    application->server_port = port;
+
 
     item = cJSON_GetObjectItem(json_obj, "client_ip_port");
     if (item == NULL)
         goto error_occured;
-    strncpy(application->client_ip_port, item->valuestring, IPv4_PORT_LEN);
+    ret = parse_IPv4_fromIpPort(item->valuestring, application->client_ip);
+    if (ret < 0 ){
+        LOG_ERROR("cant parse ip addr from ip:port");
+        goto error_occured;
+    }
+    port  = parse_port_fromIpPort(item->valuestring);
+    if (port  < 0){
+        LOG_ERROR("no correct port in addr");
+        goto error_occured;
+    }
+    application->client_port= port;
 
     item = cJSON_GetObjectItem(json_obj, "ep1_id");
     if (item == NULL)

@@ -200,8 +200,12 @@ typedef struct
     uint32_t config_id;
     uint32_t id;
     Kritis3mApplicationtype type;
-    char server_ip_port[IPv4_PORT_LEN];
-    char client_ip_port[IPv4_PORT_LEN];
+    char server_ip[INET_ADDRSTRLEN];
+    uint16_t server_port;
+
+    char client_ip[INET_ADDRSTRLEN];
+    uint16_t client_port;
+
     bool state;
     int32_t ep1_id;
     int32_t ep2_id;

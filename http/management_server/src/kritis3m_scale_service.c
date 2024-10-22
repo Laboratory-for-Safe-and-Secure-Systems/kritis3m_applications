@@ -1,7 +1,6 @@
 
 
 #include "kritis3m_scale_service.h"
-#include "kritis3m_application_manager.h"
 #include "logging.h"
 LOG_MODULE_CREATE(kritis3m_service);
 #include "cJSON.h"
@@ -13,6 +12,8 @@ LOG_MODULE_CREATE(kritis3m_service);
 #include "utils.h"
 #include <errno.h>
 #include <pthread.h>
+#include "kritis3m_application_manager.h"
+
 
 #define SIMULTANIOUS_REQs 5
 #define ENROLL_BUFFER_SIZE 2000
@@ -176,6 +177,13 @@ int init_kristis3m_service(char *config_file)
   
   svc.initialized = true;
 
+  init_application_manager();
+  start_application_manager(&svc.configuration_manager.primary.application_config);
+  while(1){
+usleep(10* 1000);
+
+  }
+
 
   ret = pthread_create(&svc.mainthread, &svc.thread_attr, start_kristis3m_service, &svc);
 
@@ -330,23 +338,6 @@ static int send_management_message(int socket, service_message *msg)
   if (retries >= max_retries)
   {
     LOG_ERROR("Failed to send message after %d retries", max_retries);
-    return -1;
-  }
-
-  return 0;
-}
-
-static int read_management_message(int socket, service_message *msg)
-{
-  int ret = recv(socket, msg, sizeof(service_message), 0);
-  if (ret < 0)
-  {
-    LOG_ERROR("Error receiving message: %d (%s)", errno, strerror(errno));
-    return -1;
-  }
-  else if (ret != sizeof(service_message))
-  {
-    LOG_ERROR("Received invalid response (ret=%d; expected=%lu)", ret, sizeof(application_message));
     return -1;
   }
 

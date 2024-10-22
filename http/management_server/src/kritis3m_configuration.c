@@ -385,8 +385,10 @@ void cleanup_Systemconfiguration(SystemConfiguration *systemconfiguration)
         appl->log_level = -1;
         appl->state = 0;
         appl->type = UNDEFINED;
-        memset(appl->client_ip_port, 0, IPv4_PORT_LEN);
-        memset(appl->server_ip_port, 0, IPv4_PORT_LEN);
+        memset(appl->client_ip, 0, INET_ADDRSTRLEN);
+        appl->client_port = 0;
+        memset(appl->server_ip, 0, INET_ADDRSTRLEN);
+        appl->server_port= 0;
     }
 
     for (int i = 0; i < MAX_NUMBER_CRYPTOPROFILE; i++)
