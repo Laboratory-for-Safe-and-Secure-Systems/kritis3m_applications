@@ -664,9 +664,10 @@ void* proxy_backend_thread(void* ptr)
                                                         asl_handshake_metrics metrics;
                                                         metrics = asl_get_handshake_metrics(proxy_connection->tls_session);
 
-                                                        LOG_INFO("Handshake done\r\n\tDuration: %.3f milliseconds\r\n\tTx bytes: "\
-                                                                "%d\r\n\tRx bytes: %d", metrics.duration_us / 1000.0,
-                                                                metrics.tx_bytes, metrics.rx_bytes);
+                                                        // LOG_INFO("Handshake done\r\n\tDuration: %.3f milliseconds\r\n\tTx bytes: "\
+                                                        //         "%d\r\n\tRx bytes: %d", metrics.duration_us / 1000.0,
+                                                        //         metrics.tx_bytes, metrics.rx_bytes);
+                                                        LOG_INFO("Handshake done (took %.3f ms)", metrics.duration_us / 1000.0);
                                                 }
 
                                                 /* Start thread for connection handling */
