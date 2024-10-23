@@ -703,7 +703,7 @@ void* proxy_backend_thread(void* ptr)
                 }
         }
 
-        LOG_INFO("Proxy backend thread terminated");
+        LOG_DEBUG("Proxy backend thread terminated");
 
         proxy_backend_cleanup(backend);
 
