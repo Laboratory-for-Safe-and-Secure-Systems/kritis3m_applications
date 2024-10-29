@@ -49,7 +49,7 @@ typedef struct proxy
         enum tls_proxy_direction direction;
         int incoming_sock;
         uint16_t incoming_port;
-        struct sockaddr_in target_addr;
+        struct addrinfo* target_addr;
         asl_endpoint* tls_endpoint;
         log_module log_module;
         int num_connections;

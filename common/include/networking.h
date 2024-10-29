@@ -24,6 +24,10 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <netdb.h>
+
 #define closesocket close
 
 #define net_addr_ntop inet_ntop
@@ -61,5 +65,10 @@ int setblocking(int fd, bool val);
 
 /* Generic method to create a socketpair for inter-thread communication */
 int create_socketpair(int socket_pair[2]);
+
+
+/* Lookup the provided destination and fill the struct accordingly. */
+int address_lookup(char const* dest, uint16_t port, struct addrinfo** addr);
+
 
 #endif

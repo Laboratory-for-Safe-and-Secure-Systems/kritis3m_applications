@@ -72,6 +72,7 @@ void init_proxy_pool(void)
                 proxy_pool[i].direction = REVERSE_PROXY;
                 proxy_pool[i].incoming_sock = -1;
                 proxy_pool[i].incoming_port = 0;
+                proxy_pool[i].target_addr = NULL;
                 proxy_pool[i].tls_endpoint = NULL;
                 proxy_pool[i].log_module.name = NULL;
                 proxy_pool[i].log_module.level = LOG_LVL_WARN;
@@ -224,10 +225,10 @@ static int add_new_proxy(enum tls_proxy_direction direction, proxy_config const*
         /* Set the new socket to non-blocking */
         setblocking(proxy->incoming_sock, false);
 
-        /* Configure TCP client */
-        proxy->target_addr.sin_family = AF_INET;
-        proxy->target_addr.sin_port = htons(config->target_port);
-        net_addr_pton(proxy->target_addr.sin_family, config->target_ip_address, &proxy->target_addr.sin_addr);
+        /* Do a DNS lookup to make sure we have an IP address. If we already have an IP, this
+         * results in a noop. */
+        if (address_lookup(config->target_ip_address, config->target_port, &proxy->target_addr) < 0)
+                ERROR_OUT_EX(proxy->log_module, "Error looking up target IP address");
 
         LOG_DEBUG_EX(proxy->log_module, "Waiting for incoming connections on port %d", config->listening_port);
 
@@ -310,6 +311,13 @@ static void kill_proxy(proxy* proxy)
         {
                 free((void*) proxy->log_module.name);
                 proxy->log_module.name = NULL;
+        }
+
+        /* Clear the target address */
+        if (proxy->target_addr != NULL)
+        {
+                freeaddrinfo(proxy->target_addr);
+                proxy->target_addr = NULL;
         }
 
         proxy->incoming_sock = 0;

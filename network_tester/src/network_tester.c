@@ -75,7 +75,7 @@ typedef struct network_tester
         int progress_percent;
         int total_iterations;
         int tcp_socket;
-        struct sockaddr_in target_addr;
+        struct addrinfo* target_addr;
         network_tester_config* config;
         asl_endpoint* tls_endpoint;
         asl_session* tls_session;
@@ -96,7 +96,7 @@ static network_tester the_tester = {
         .progress_percent = 0,
         .total_iterations = 0,
         .tcp_socket = -1,
-        .target_addr = {0},
+        .target_addr = NULL,
         .config = NULL,
         .tls_endpoint = NULL,
         .tls_session = NULL,
@@ -197,11 +197,11 @@ static int network_init(network_tester* tester)
                         ERROR_OUT("Error initializing ASL: %d (%s)", ret, asl_error_message(ret));
         }
 
-        /* Configure TCP destination */
-        tester->target_addr.sin_family = AF_INET;
-        tester->target_addr.sin_port = htons(tester->config->target_port);
-        inet_pton(tester->target_addr.sin_family, tester->config->target_ip,
-                  &tester->target_addr.sin_addr);
+        /* Configure TCP destination.
+         * Do a DNS lookup to make sure we have an IP address. If we already have an IP, this
+         * results in a noop. */
+        if (address_lookup(tester->config->target_ip, tester->config->target_port, &tester->target_addr) < 0)
+                ERROR_OUT("Error looking up target IP address");
 
         /* Configure TLS endpoint */
         if (tester->config->use_tls == true)
@@ -223,7 +223,7 @@ static int connection_setup(network_tester* tester)
         int ret = 0;
 
         /* Create the TCP socket for the outgoing connection */
-        tester->tcp_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        tester->tcp_socket = socket(tester->target_addr->ai_family, SOCK_STREAM, IPPROTO_TCP);
         if (tester->tcp_socket == -1)
                 ERROR_OUT("Error creating TCP socket");
 
@@ -419,7 +419,7 @@ static void* network_tester_main_thread(void* ptr)
 
                 /* Connect to the peer */
                 LOG_DEBUG("Establishing TCP connection");
-                ret = connect(tester->tcp_socket, (struct sockaddr*) &tester->target_addr, sizeof(tester->target_addr));
+                ret = connect(tester->tcp_socket, (struct sockaddr*) tester->target_addr->ai_addr, tester->target_addr->ai_addrlen);
                 if ((ret != 0) &&
                 #if defined(_WIN32)
                         (WSAGetLastError() != WSAEWOULDBLOCK))
@@ -726,6 +726,12 @@ static void tester_cleanup(network_tester* tester)
         {
                 closesocket(tester->management_socket_pair[1]);
                 tester->management_socket_pair[1] = -1;
+        }
+
+        if (tester->target_addr != NULL)
+        {
+                freeaddrinfo(tester->target_addr);
+                tester->target_addr = NULL;
         }
 
         tester->running = false;

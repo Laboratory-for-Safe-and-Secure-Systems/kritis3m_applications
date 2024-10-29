@@ -124,7 +124,7 @@ proxy_connection* add_new_connection_to_proxy(proxy* proxy, int client_socket,
                 connection->asset_sock = client_socket;
 
                 /* Create the socket for the tunnel  */
-                connection->tunnel_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+                connection->tunnel_sock = socket(proxy->target_addr->ai_family, SOCK_STREAM, IPPROTO_TCP);
                 if (connection->tunnel_sock == -1)
                         ERROR_OUT_EX(proxy->log_module, "Error creating tunnel socket, errno: %d",
                                      errno);
@@ -134,7 +134,7 @@ proxy_connection* add_new_connection_to_proxy(proxy* proxy, int client_socket,
                 connection->tunnel_sock = client_socket;
 
                 /* Create the socket for the asset connection */
-                connection->asset_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+                connection->asset_sock = socket(proxy->target_addr->ai_family, SOCK_STREAM, IPPROTO_TCP);
                 if (connection->asset_sock == -1)
                         ERROR_OUT_EX(proxy->log_module, "Error creating asset socket, errno: %d",
                                      errno);
@@ -160,7 +160,8 @@ proxy_connection* add_new_connection_to_proxy(proxy* proxy, int client_socket,
         #endif
 
                 /* Connect to the peer */
-                ret = connect(connection->tunnel_sock, (struct sockaddr*) &proxy->target_addr, sizeof(proxy->target_addr));
+                ret = connect(connection->tunnel_sock, (struct sockaddr*) proxy->target_addr->ai_addr,
+                              proxy->target_addr->ai_addrlen);
         }
         else if (connection->direction == REVERSE_PROXY)
         {
@@ -171,7 +172,8 @@ proxy_connection* add_new_connection_to_proxy(proxy* proxy, int client_socket,
         #endif
 
                 /* Connect to the peer */
-                ret = connect(connection->asset_sock, (struct sockaddr*) &proxy->target_addr, sizeof(proxy->target_addr));
+                ret = connect(connection->asset_sock, (struct sockaddr*) proxy->target_addr->ai_addr,
+                              proxy->target_addr->ai_addrlen);
         }
         if ((ret != 0) &&
         #if defined(_WIN32)

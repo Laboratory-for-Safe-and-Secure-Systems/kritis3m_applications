@@ -476,3 +476,19 @@ int create_socketpair(int socket_pair[2])
 	return ret;
 #endif
 }
+
+
+/* Lookup the provided destination and fill the struct accordingly. */
+int address_lookup(char const* dest, uint16_t port, struct addrinfo** addr)
+{
+	struct addrinfo hints = {
+		.ai_family = AF_INET,
+		.ai_socktype = SOCK_STREAM,
+		.ai_protocol = IPPROTO_TCP
+	};
+
+	char port_str[6];
+	snprintf(port_str, sizeof(port_str), "%d", port);
+
+	return getaddrinfo(dest, port_str, &hints, addr);
+}

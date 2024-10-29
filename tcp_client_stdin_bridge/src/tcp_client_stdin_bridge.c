@@ -59,6 +59,7 @@ typedef struct tcp_client_stdin_bridge
 {
         bool running;
         int tcp_socket;
+        struct addrinfo* target_addr;
         pthread_t thread;
         pthread_attr_t thread_attr;
         poll_set poll_set;
@@ -354,6 +355,12 @@ static void bridge_cleanup(tcp_client_stdin_bridge* bridge)
                 bridge->management_socket_pair[1] = -1;
         }
 
+        if (bridge->target_addr != NULL)
+        {
+                freeaddrinfo(bridge->target_addr);
+                bridge->target_addr = NULL;
+        }
+
         bridge->running = false;
 }
 
@@ -389,6 +396,7 @@ int tcp_client_stdin_bridge_run(tcp_client_stdin_bridge_config const* config)
         /* Init */
         poll_set_init(&client_stdin_bridge.poll_set);
         client_stdin_bridge.num_of_bytes_in_recv_buffer = 0;
+        client_stdin_bridge.target_addr = NULL;
 
         /* Create the socket pair for external management */
         int ret = create_socketpair(client_stdin_bridge.management_socket_pair);
@@ -398,19 +406,17 @@ int tcp_client_stdin_bridge_run(tcp_client_stdin_bridge_config const* config)
         LOG_DEBUG("Created management socket pair (%d, %d)", client_stdin_bridge.management_socket_pair[0],
                                                              client_stdin_bridge.management_socket_pair[1]);
 
-        /* Create the TCP socket for the outgoing connection */
-        client_stdin_bridge.tcp_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-        if (client_stdin_bridge.tcp_socket == -1)
-                ERROR_OUT("Error creating TCP socket");
-
         LOG_INFO("Connecting to %s:%d", config->target_ip_address, config->target_port);
 
-        /* Configure TCP server */
-        struct sockaddr_in target_addr = {
-                        .sin_family = AF_INET,
-                        .sin_port = htons(config->target_port)
-        };
-        net_addr_pton(target_addr.sin_family, config->target_ip_address, &target_addr.sin_addr);
+         /* Do a DNS lookup to make sure we have an IP address. If we already have an IP, this
+         * results in a noop. */
+        if (address_lookup(config->target_ip_address, config->target_port, &client_stdin_bridge.target_addr) < 0)
+                ERROR_OUT("Error looking up target IP address");
+
+        /* Create the TCP socket for the outgoing connection */
+        client_stdin_bridge.tcp_socket = socket(client_stdin_bridge.target_addr->ai_family, SOCK_STREAM, IPPROTO_TCP);
+        if (client_stdin_bridge.tcp_socket == -1)
+                ERROR_OUT("Error creating TCP socket");
 
         /* Set the new socket to non-blocking */
         setblocking(client_stdin_bridge.tcp_socket, false);
@@ -426,7 +432,8 @@ int tcp_client_stdin_bridge_run(tcp_client_stdin_bridge_config const* config)
 #endif
 
         /* Connect to the peer */
-        ret = connect(client_stdin_bridge.tcp_socket, (struct sockaddr*) &target_addr, sizeof(target_addr));
+        ret = connect(client_stdin_bridge.tcp_socket, (struct sockaddr*) client_stdin_bridge.target_addr->ai_addr,
+                      client_stdin_bridge.target_addr->ai_addrlen);
         if ((ret != 0) &&
         #if defined(_WIN32)
                 (WSAGetLastError() != WSAEWOULDBLOCK))
