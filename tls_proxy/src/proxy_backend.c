@@ -639,7 +639,7 @@ void* proxy_backend_thread(void* ptr)
                                 if (event & POLLIN)
                                 {
                                         /* New client connection, try to handle it */
-                                        int client_socket = accept(fd, &client_addr, &client_addr_len);
+                                        int client_socket = accept(fd, (struct sockaddr*)&client_addr, &client_addr_len);
                                         if (client_socket < 0)
                                         {
                                                 int error = errno;

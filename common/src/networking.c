@@ -525,7 +525,7 @@ int address_lookup_server(char const* dest, uint16_t port, struct addrinfo** add
  *
  * Return value is the socket file descriptor or -1 in case of an error.
  */
-int create_listening_socket(sa_family_t type, struct sockaddr* addr, socklen_t addr_len)
+int create_listening_socket(int type, struct sockaddr* addr, socklen_t addr_len)
 {
 	int sock = -1;
 	char ip_str[INET6_ADDRSTRLEN];
