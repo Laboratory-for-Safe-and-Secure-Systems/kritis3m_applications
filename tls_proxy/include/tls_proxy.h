@@ -36,7 +36,8 @@ proxy_config;
 typedef struct proxy_status
 {
         bool is_running;
-	uint16_t incoming_port;
+	uint16_t incoming_port_v4;
+	uint16_t incoming_port_v6;
 	enum tls_proxy_direction direction;
         uint32_t num_connections;
 }

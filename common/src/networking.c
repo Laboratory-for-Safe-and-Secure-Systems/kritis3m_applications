@@ -30,9 +30,12 @@
 #endif
 
 
-
 #include "networking.h"
 #include "logging.h"
+
+
+#define ERROR_OUT(...) { LOG_ERROR(__VA_ARGS__); goto cleanup; }
+
 
 LOG_MODULE_CREATE(networking);
 
@@ -95,7 +98,7 @@ static void iface_up_handler(struct net_mgmt_event_callback *cb, uint32_t mgmt_e
 
 
 /* Initialize the network interfaces */
-int initialize_network_interfaces()
+int initialize_network_interfaces(int32_t log_level)
 {
 	/* Add an event handler to track ethernet link changes */
 	static struct net_mgmt_event_callback iface_up_cb;
@@ -211,9 +214,11 @@ int remove_ipv4_address(void* iface, struct in_addr ipv4_addr)
 #include <stdio.h>
 
 /* Initialize the network interfaces */
-int initialize_network_interfaces()
+int initialize_network_interfaces(int32_t log_level)
 {
 	WSADATA wsaData;
+
+	LOG_LVL_SET(log_level);
 
 	if(WSAStartup(0x202, &wsaData) == 0)
 	{
@@ -221,7 +226,7 @@ int initialize_network_interfaces()
 	}
 	else
 	{
-		printf("ERROR: Initialization failure.\n");
+		LOG_ERROR("Network initialization failed.\n");
 		return -1;
 	}
 }
@@ -229,13 +234,15 @@ int initialize_network_interfaces()
 #else //defined (__ZEPHYR__)
 
 /* Initialize the network interfaces */
-int initialize_network_interfaces()
+int initialize_network_interfaces(int32_t log_level)
 {
-    ifaces.management = "eth0";
-    ifaces.lan = "vlan400";
-    ifaces.wan = "vlan300";
+	ifaces.management = "eth0";
+	ifaces.lan = "vlan400";
+	ifaces.wan = "vlan300";
 
-    return 0;
+	LOG_LVL_SET(log_level);
+
+	return 0;
 }
 
 
@@ -478,17 +485,95 @@ int create_socketpair(int socket_pair[2])
 }
 
 
-/* Lookup the provided destination and fill the struct accordingly. */
-int address_lookup(char const* dest, uint16_t port, struct addrinfo** addr)
+static int address_lookup_internal(char const* dest, uint16_t port, struct addrinfo** addr,
+				   int flags)
 {
 	struct addrinfo hints = {
-		.ai_family = AF_INET,
+		.ai_family = AF_UNSPEC,
 		.ai_socktype = SOCK_STREAM,
-		.ai_protocol = IPPROTO_TCP
+		.ai_protocol = IPPROTO_TCP,
+		.ai_flags = flags
 	};
 
 	char port_str[6];
 	snprintf(port_str, sizeof(port_str), "%d", port);
 
-	return getaddrinfo(dest, port_str, &hints, addr);
+	if (getaddrinfo(dest, port_str, &hints, addr) != 0)
+	{
+		LOG_ERROR("getaddrinfo failed for %s:%d: %s", dest, port, gai_strerror(errno));
+		return -1;
+	}
+
+	return 0;
+}
+
+/* Lookup the provided outgoing destination and fill the linked-list accordingly. */
+int address_lookup_client(char const* dest, uint16_t port, struct addrinfo** addr)
+{
+	return address_lookup_internal(dest, port, addr, AI_NUMERICSERV | AI_ADDRCONFIG);
+}
+
+
+/* Lookup the provided incoming destination and fill the linked-list accordingly. */
+int address_lookup_server(char const* dest, uint16_t port, struct addrinfo** addr)
+{
+	return address_lookup_internal(dest, port, addr, AI_PASSIVE | AI_NUMERICSERV | AI_ADDRCONFIG);
+}
+
+
+/* Create a new listening socket for given type and address.
+ *
+ * Return value is the socket file descriptor or -1 in case of an error.
+ */
+int create_listening_socket(sa_family_t type, struct sockaddr* addr, socklen_t addr_len)
+{
+	int sock = -1;
+	char ip_str[INET6_ADDRSTRLEN];
+
+	if (type == AF_INET)
+		net_addr_ntop(type, &((struct sockaddr_in*)addr)->sin_addr, ip_str, sizeof(ip_str));
+	else if (type == AF_INET6)
+		net_addr_ntop(type, &((struct sockaddr_in6*)addr)->sin6_addr, ip_str, sizeof(ip_str));
+
+	/* Prepare the socket */
+	sock = socket(type, SOCK_STREAM, IPPROTO_TCP);
+
+	if (sock == -1)
+		ERROR_OUT("Error creating incoming TCP socket");
+
+	if (type == AF_INET6)
+	{
+		if (setsockopt(sock, IPPROTO_IPV6, IPV6_V6ONLY, &(char){0}, sizeof(int)) < 0)
+			ERROR_OUT("setsockopt(IPV6_V6ONLY) failed: error %d\n", errno);
+	}
+
+	if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &(char){1}, sizeof(int)) < 0)
+		ERROR_OUT("setsockopt(SO_REUSEADDR) failed: error %d\n", errno);
+
+	if (bind(sock, addr, addr_len) < 0)
+		ERROR_OUT("Cannot bind socket %d to %s:%d: error %d\n", sock, ip_str,
+			  ntohs(((struct sockaddr_in*)addr)->sin_port), errno);
+
+	/* If a random port have been used, obtain the actually selected one */
+	if (ntohs(((struct sockaddr_in*)addr)->sin_port) == 0)
+	{
+		if (getsockname(sock, addr, &addr_len) < 0)
+                        ERROR_OUT("getsockname failed with errno: %d", errno);
+	}
+
+	if (listen(sock, 5) < 0)
+		ERROR_OUT("Error listening on socket %d: %d", sock, errno);
+
+	if (setblocking(sock, false) != 0)
+		ERROR_OUT("Error setting socket to non-blocking");
+
+	LOG_DEBUG("Listening on %s:%d", ip_str, ntohs(((struct sockaddr_in*)addr)->sin_port));
+
+	return sock;
+
+cleanup:
+	if (sock != -1)
+		closesocket(sock);
+
+	return -1;
 }

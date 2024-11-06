@@ -67,8 +67,19 @@ int setblocking(int fd, bool val);
 int create_socketpair(int socket_pair[2]);
 
 
-/* Lookup the provided destination and fill the struct accordingly. */
-int address_lookup(char const* dest, uint16_t port, struct addrinfo** addr);
+/* Lookup the provided outgoing destination and fill the linked-list accordingly. */
+int address_lookup_client(char const* dest, uint16_t port, struct addrinfo** addr);
+
+
+/* Lookup the provided incoming destination and fill the linked-list accordingly. */
+int address_lookup_server(char const* dest, uint16_t port, struct addrinfo** addr);
+
+
+/* Create a new listening socket for given type and address.
+ *
+ * Return value is the socket file descriptor or -1 in case of an error.
+ */
+int create_listening_socket(sa_family_t type, struct sockaddr* addr, socklen_t addr_len);
 
 
 #endif

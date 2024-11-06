@@ -410,7 +410,7 @@ int tcp_client_stdin_bridge_run(tcp_client_stdin_bridge_config const* config)
 
          /* Do a DNS lookup to make sure we have an IP address. If we already have an IP, this
          * results in a noop. */
-        if (address_lookup(config->target_ip_address, config->target_port, &client_stdin_bridge.target_addr) < 0)
+        if (address_lookup_client(config->target_ip_address, config->target_port, &client_stdin_bridge.target_addr) < 0)
                 ERROR_OUT("Error looking up target IP address");
 
         /* Create the TCP socket for the outgoing connection */

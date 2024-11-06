@@ -23,7 +23,8 @@ echo_server_config;
 typedef struct echo_server_status
 {
         bool is_running;
-        uint16_t listening_port;
+        uint16_t listening_port_v4;
+        uint16_t listening_port_v6;
         uint32_t num_connections;
 }
 echo_server_status;

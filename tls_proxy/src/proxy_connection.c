@@ -76,7 +76,7 @@ void init_proxy_connection_pool(void)
 
 
 proxy_connection* add_new_connection_to_proxy(proxy* proxy, int client_socket,
-                                              struct sockaddr* client_addr)
+                                              struct sockaddr_in6* client_addr)
 {
         int ret = 0;
 
@@ -192,11 +192,15 @@ proxy_connection* add_new_connection_to_proxy(proxy* proxy, int client_socket,
         proxy->connections[freeSlotProxyConnectionsArray] = connection;
 
         /* Print info */
-        struct sockaddr_in* client_data = (struct sockaddr_in*) client_addr;
-        char peer_ip[20];
-        net_addr_ntop(AF_INET, &client_data->sin_addr, peer_ip, sizeof(peer_ip));
+        char peer_ip[INET6_ADDRSTRLEN];
+
+        if (client_addr->sin6_family == AF_INET)
+                net_addr_ntop(AF_INET, &((struct sockaddr_in*)client_addr)->sin_addr, peer_ip, sizeof(peer_ip));
+        else if (client_addr->sin6_family == AF_INET6)
+                net_addr_ntop(AF_INET6, &((struct sockaddr_in6*)client_addr)->sin6_addr, peer_ip, sizeof(peer_ip));
+
         LOG_INFO_EX(proxy->log_module, "New connection from %s:%d, using slot %d/%d",
-                peer_ip, ntohs(client_data->sin_port),
+                peer_ip, ntohs(((struct sockaddr_in*)client_addr)->sin_port),
                 freeSlotConnectionPool+1, MAX_CONNECTIONS_PER_PROXY);
 
         return connection;

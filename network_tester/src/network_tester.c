@@ -200,7 +200,7 @@ static int network_init(network_tester* tester)
         /* Configure TCP destination.
          * Do a DNS lookup to make sure we have an IP address. If we already have an IP, this
          * results in a noop. */
-        if (address_lookup(tester->config->target_ip, tester->config->target_port, &tester->target_addr) < 0)
+        if (address_lookup_client(tester->config->target_ip, tester->config->target_port, &tester->target_addr) < 0)
                 ERROR_OUT("Error looking up target IP address");
 
         /* Configure TLS endpoint */

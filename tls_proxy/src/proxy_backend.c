@@ -36,11 +36,12 @@ LOG_MODULE_CREATE(proxy_backend);
 #define ERROR_OUT(...) { LOG_ERROR(__VA_ARGS__); goto cleanup; }
 #define ERROR_OUT_EX(module, ...) { LOG_ERROR_EX(module, __VA_ARGS__); goto cleanup; }
 
+#define IPv4 0
+#define IPv6 1
 
 
 /* File global variables */
 static proxy proxy_pool[MAX_PROXYS];
-
 
 
 #if defined(__ZEPHYR__)
@@ -70,8 +71,10 @@ void init_proxy_pool(void)
         {
                 proxy_pool[i].in_use = false;
                 proxy_pool[i].direction = REVERSE_PROXY;
-                proxy_pool[i].incoming_sock = -1;
-                proxy_pool[i].incoming_port = 0;
+                proxy_pool[i].incoming_sock[IPv4] = -1;
+                proxy_pool[i].incoming_sock[IPv6] = -1;
+                proxy_pool[i].incoming_port[IPv4] = 0;
+                proxy_pool[i].incoming_port[IPv6] = 0;
                 proxy_pool[i].target_addr = NULL;
                 proxy_pool[i].tls_endpoint = NULL;
                 proxy_pool[i].log_module.name = NULL;
@@ -188,46 +191,43 @@ static int add_new_proxy(enum tls_proxy_direction direction, proxy_config const*
         if (proxy->tls_endpoint == NULL)
                 ERROR_OUT_EX(proxy->log_module, "Error creating TLS endpoint");
 
-        /* Create the TCP socket for the incoming connection */
-        proxy->incoming_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-        if (proxy->incoming_sock == -1)
-                ERROR_OUT_EX(proxy->log_module, "Error creating incoming TCP socket");
+        /* Create the TCP sockets for the incoming connections (IPv4 and IPv6).
+         * Do a DNS lookup to make sure we have an IP address. If we already have an IP, this
+         * results in a noop. */
+        struct addrinfo* bind_addr = NULL;
+        if (address_lookup_server(config->own_ip_address, config->listening_port, &bind_addr) < 0)
+                ERROR_OUT_EX(proxy->log_module, "Error looking up bind IP address");
 
-        if (setsockopt(proxy->incoming_sock, SOL_SOCKET, SO_REUSEADDR, &(char){1}, sizeof(int)) < 0)
-                ERROR_OUT_EX(proxy->log_module, "setsockopt(SO_REUSEADDR) failed: errer %d", errno);
+        /* Iterate over the linked-list of results */
+        struct addrinfo* tmp_addr = bind_addr;
+        while (tmp_addr != NULL)
+        {
+                int sock = -1;
 
-        /* Configure TCP server */
-        struct sockaddr_in bind_addr = {
-                        .sin_family = AF_INET,
-                        .sin_port = htons(config->listening_port)
-        };
-        net_addr_pton(bind_addr.sin_family, config->own_ip_address, &bind_addr.sin_addr);
-        proxy->incoming_port = config->listening_port;
+                /* Create listening socket */
+                sock = create_listening_socket(tmp_addr->ai_family, tmp_addr->ai_addr, tmp_addr->ai_addrlen);
+                if (sock == -1)
+                        ERROR_OUT_EX(proxy->log_module, "Error creating incoming TCP socket");
 
-        /* Bind server socket to its destined IPv4 address */
-        if (bind(proxy->incoming_sock, (struct sockaddr*) &bind_addr, sizeof(bind_addr)) == -1)
-                ERROR_OUT_EX(proxy->log_module, "Cannot bind socket %d to %s:%d: error %d",
-                        proxy->incoming_sock, config->own_ip_address, config->listening_port, errno);
+                if (tmp_addr->ai_family == AF_INET)
+                {
+                        proxy->incoming_sock[IPv4] = sock;
+                        proxy->incoming_port[IPv4] = ntohs(((struct sockaddr_in*)tmp_addr->ai_addr)->sin_port);
+                }
+                else if (tmp_addr->ai_family == AF_INET6)
+                {
+                        proxy->incoming_sock[IPv6] = sock;
+                        proxy->incoming_port[IPv6] = ntohs(((struct sockaddr_in6*)tmp_addr->ai_addr)->sin6_port);
+                }
 
-        /* If a random port have been used, obtain the actually selected one */
-	if (config->listening_port == 0)
-	{
-		socklen_t sockaddr_len = sizeof(bind_addr);
-		if (getsockname(proxy->incoming_sock, (struct sockaddr*)&bind_addr, &sockaddr_len) < 0)
-                        ERROR_OUT_EX(proxy->log_module, "getsockname failed with errno: %d", errno);
+                tmp_addr = tmp_addr->ai_next;
+        }
 
-		proxy->incoming_port = ntohs(bind_addr.sin_port);
-	}
-
-        /* Start listening for incoming connections */
-        listen(proxy->incoming_sock, MAX_CONNECTIONS_PER_PROXY);
-
-        /* Set the new socket to non-blocking */
-        setblocking(proxy->incoming_sock, false);
+        freeaddrinfo(bind_addr);
 
         /* Do a DNS lookup to make sure we have an IP address. If we already have an IP, this
          * results in a noop. */
-        if (address_lookup(config->target_ip_address, config->target_port, &proxy->target_addr) < 0)
+        if (address_lookup_client(config->target_ip_address, config->target_port, &proxy->target_addr) < 0)
                 ERROR_OUT_EX(proxy->log_module, "Error looking up target IP address");
 
         LOG_DEBUG_EX(proxy->log_module, "Waiting for incoming connections on port %d", config->listening_port);
@@ -245,7 +245,7 @@ static proxy* find_proxy_by_fd(int fd)
 {
         for (int i = 0; i < MAX_PROXYS; i++)
         {
-                if (proxy_pool[i].incoming_sock == fd)
+                if ((fd == proxy_pool[i].incoming_sock[IPv4]) || (fd == proxy_pool[i].incoming_sock[IPv6]))
                 {
                         return &proxy_pool[i];
                 }
@@ -271,11 +271,16 @@ static proxy* find_proxy_by_id(int id)
 /* Stop a running proxy and cleanup afterwards */
 static void kill_proxy(proxy* proxy)
 {
-        /* Stop the listening socket and clear it from the poll_set */
-        if (proxy->incoming_sock >= 0)
+        /* Stop the listening sockets and clear it from the poll_set */
+        if (proxy->incoming_sock[IPv4] >= 0)
         {
-                closesocket(proxy->incoming_sock);
-                proxy->incoming_sock = -1;
+                closesocket(proxy->incoming_sock[IPv4]);
+                proxy->incoming_sock[IPv4] = -1;
+        }
+        if (proxy->incoming_sock[IPv6] >= 0)
+        {
+                closesocket(proxy->incoming_sock[IPv6]);
+                proxy->incoming_sock[IPv6] = -1;
         }
 
         /* Kill all connections */
@@ -320,7 +325,8 @@ static void kill_proxy(proxy* proxy)
                 proxy->target_addr = NULL;
         }
 
-        proxy->incoming_sock = 0;
+        proxy->incoming_port[IPv4] = 0;
+        proxy->incoming_port[IPv6] = 0;
         proxy->in_use = false;
 }
 
@@ -344,12 +350,26 @@ static int handle_management_message(proxy_backend* backend, int socket, proxy_m
                         {
                                 /* Add proxy to the poll_set */
                                 proxy* new_proxy = find_proxy_by_id(proxy_id);
-                                int ret = poll_set_add_fd(&backend->poll_set, new_proxy->incoming_sock, POLLIN);
-                                if (ret != 0)
+                                if (new_proxy && new_proxy->incoming_sock[IPv4] >= 0)
                                 {
-                                        LOG_ERROR("Error adding new proxy to poll_set");
-                                        kill_proxy(new_proxy);
-                                        proxy_id = -1;
+                                        ret = poll_set_add_fd(&backend->poll_set, new_proxy->incoming_sock[IPv4], POLLIN);
+                                        if (ret != 0)
+                                        {
+                                                LOG_ERROR("Error adding new proxy to poll_set");
+                                                kill_proxy(new_proxy);
+                                                proxy_id = -1;
+                                        }
+                                }
+                                if (ret == 0 && new_proxy && new_proxy->incoming_sock[IPv6] >= 0)
+                                {
+                                        ret = poll_set_add_fd(&backend->poll_set, new_proxy->incoming_sock[IPv6], POLLIN);
+                                        if (ret != 0)
+                                        {
+                                                LOG_ERROR("Error adding new proxy to poll_set");
+                                                poll_set_remove_fd(&backend->poll_set, new_proxy->incoming_sock[IPv4]);
+                                                kill_proxy(new_proxy);
+                                                proxy_id = -1;
+                                        }
                                 }
                         }
 
@@ -369,12 +389,25 @@ static int handle_management_message(proxy_backend* backend, int socket, proxy_m
                         {
                                 /* Add proxy to the poll_set */
                                 proxy* new_proxy = find_proxy_by_id(proxy_id);
-                                int ret = poll_set_add_fd(&backend->poll_set, new_proxy->incoming_sock, POLLIN);
-                                if (ret != 0)
+                                if (new_proxy && new_proxy->incoming_sock[IPv4] >= 0)
                                 {
-                                        LOG_ERROR("Error adding new proxy to poll_set");
-                                        kill_proxy(new_proxy);
-                                        proxy_id = -1;
+                                        ret = poll_set_add_fd(&backend->poll_set, new_proxy->incoming_sock[IPv4], POLLIN);
+                                        if (ret != 0)
+                                        {
+                                                LOG_ERROR("Error adding new proxy to poll_set");
+                                                kill_proxy(new_proxy);
+                                                proxy_id = -1;
+                                        }
+                                }
+                                if (ret == 0 && new_proxy && new_proxy->incoming_sock[IPv6] >= 0)
+                                {
+                                        ret = poll_set_add_fd(&backend->poll_set, new_proxy->incoming_sock[IPv6], POLLIN);
+                                        if (ret != 0)
+                                        {
+                                                LOG_ERROR("Error adding new proxy to poll_set");
+                                                kill_proxy(new_proxy);
+                                                proxy_id = -1;
+                                        }
                                 }
                         }
 
@@ -396,7 +429,8 @@ static int handle_management_message(proxy_backend* backend, int socket, proxy_m
                         {
                                 proxy_status* status = msg->payload.status_req.status_obj_ptr;
                                 status->is_running = true;
-                                status->incoming_port = proxy->incoming_port;
+                                status->incoming_port_v4 = proxy->incoming_port[IPv4];
+                                status->incoming_port_v6 = proxy->incoming_port[IPv6];
                                 status->direction = proxy->direction;
                                 status->num_connections = proxy->num_connections;
                         }
@@ -404,7 +438,8 @@ static int handle_management_message(proxy_backend* backend, int socket, proxy_m
                         {
                                 proxy_status* status = msg->payload.status_req.status_obj_ptr;
                                 status->is_running = false;
-                                status->incoming_port = 0;
+                                status->incoming_port_v4 = 0;
+                                status->incoming_port_v6 = 0;
                                 status->num_connections = 0;
                         }
 
@@ -422,7 +457,8 @@ static int handle_management_message(proxy_backend* backend, int socket, proxy_m
                         proxy* proxy_to_be_killed = find_proxy_by_id(msg->payload.proxy_id);
                         if (proxy_to_be_killed != NULL)
                         {
-                                poll_set_remove_fd(&backend->poll_set, proxy_to_be_killed->incoming_sock);
+                                poll_set_remove_fd(&backend->poll_set, proxy_to_be_killed->incoming_sock[IPv4]);
+                                poll_set_remove_fd(&backend->poll_set, proxy_to_be_killed->incoming_sock[IPv6]);
                                 kill_proxy(proxy_to_be_killed);
                         }
                         /* Send response */
@@ -470,7 +506,8 @@ static void kill_all_proxies(proxy_backend* backend)
                 if (proxy_to_kill != NULL)
                 {
                         LOG_DEBUG("Killing proxy %d", id);
-                        poll_set_remove_fd(&backend->poll_set, proxy_to_kill->incoming_sock);
+                        poll_set_remove_fd(&backend->poll_set, proxy_to_kill->incoming_sock[IPv4]);
+                        poll_set_remove_fd(&backend->poll_set, proxy_to_kill->incoming_sock[IPv6]);
                         kill_proxy(proxy_to_kill);
                 }
         }
@@ -548,7 +585,7 @@ void* proxy_backend_thread(void* ptr)
 
         while (!shutdown)
         {
-                struct sockaddr client_addr;
+                struct sockaddr_in6 client_addr;
                 socklen_t client_addr_len = sizeof(client_addr);
 
                 /* Block and wait for incoming events (new connections, received data, ...) */
@@ -602,12 +639,12 @@ void* proxy_backend_thread(void* ptr)
                                 if (event & POLLIN)
                                 {
                                         /* New client connection, try to handle it */
-                                        int client_socket = accept(proxy->incoming_sock, &client_addr, &client_addr_len);
+                                        int client_socket = accept(fd, &client_addr, &client_addr_len);
                                         if (client_socket < 0)
                                         {
                                                 int error = errno;
                                                 if (error != EAGAIN)
-                                                        LOG_ERROR("accept error: %d (fd=%d)", error, proxy->incoming_sock);
+                                                        LOG_ERROR("accept error: %d (fd=%d)", error, fd);
                                                 continue;
                                         }
 

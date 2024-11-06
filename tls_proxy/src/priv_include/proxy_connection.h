@@ -63,7 +63,7 @@ proxy_connection;
 void init_proxy_connection_pool(void);
 
 proxy_connection* add_new_connection_to_proxy(proxy* proxy, int client_socket,
-                                              struct sockaddr* client_addr);
+                                              struct sockaddr_in6* client_addr);
 
 proxy_connection* find_proxy_connection_by_fd(int fd);
 

@@ -47,8 +47,8 @@ typedef struct proxy
 {
         bool in_use;
         enum tls_proxy_direction direction;
-        int incoming_sock;
-        uint16_t incoming_port;
+        int incoming_sock[2]; // IPv4 and IPv6
+        uint16_t incoming_port[2]; // IPv4 and IPv6
         struct addrinfo* target_addr;
         asl_endpoint* tls_endpoint;
         log_module log_module;

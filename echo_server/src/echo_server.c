@@ -28,6 +28,8 @@ LOG_MODULE_CREATE(echo_server);
 
 #define ERROR_OUT(...) { LOG_ERROR(__VA_ARGS__); goto cleanup; }
 
+#define IPv4 0
+#define IPv6 1
 
 #if defined(__ZEPHYR__)
 
@@ -70,8 +72,8 @@ typedef struct echo_server
 {
         bool running;
         bool use_tls;
-        int server_socket;
-        uint16_t listening_port;
+        int server_socket[2]; // IPv4 and IPv6
+        uint16_t listening_port[2]; // IPv4 and IPv6
         uint16_t num_clients;
         asl_endpoint* tls_endpoint;
         int management_socket_pair[2];
@@ -99,8 +101,8 @@ echo_client;
 static echo_server the_server = {
         .running = false,
         .use_tls = false,
-        .server_socket = -1,
-        .listening_port = 0,
+        .server_socket = {-1, -1},
+        .listening_port = {0, 0},
         .num_clients = 0,
         .tls_endpoint = NULL,
         .management_socket_pair = {-1, -1},
@@ -126,7 +128,7 @@ static echo_client client_pool[MAX_CLIENTS];
 static void asl_log_callback(int32_t level, char const* message);
 static void* echo_server_main_thread(void* ptr);
 static int prepare_server(echo_server* server, echo_server_config const* config);
-static echo_client* add_new_client(echo_server* server, int client_socket, struct sockaddr* client_addr);
+static echo_client* add_new_client(echo_server* server, int client_socket, struct sockaddr_in6* client_addr);
 static echo_client* find_client_by_fd(int fd);
 static int do_echo(echo_server* server, echo_client* client, int event);
 static void client_cleanup(echo_client* client);
@@ -201,7 +203,7 @@ static void* echo_server_main_thread(void* ptr)
 
         while (!shutdown)
         {
-                struct sockaddr client_addr;
+                struct sockaddr_in6 client_addr;
                 socklen_t client_addr_len = sizeof(client_addr);
 
                 /* Block and wait for incoming events (new connections, received data, ...) */
@@ -238,23 +240,22 @@ static void* echo_server_main_thread(void* ptr)
                                 }
                         }
                         /* Check server fd */
-                        else if (fd == server->server_socket)
+                        else if ((fd == server->server_socket[IPv4]) || (fd == server->server_socket[IPv6]))
                         {
                                 if (event & POLLIN)
                                 {
                                         /* New client connection, try to handle it */
-                                        int client_socket = accept(server->server_socket, &client_addr, &client_addr_len);
+                                        int client_socket = accept(fd, &client_addr, &client_addr_len);
                                         if (client_socket < 0)
                                         {
                                                 int error = errno;
                                                 if (error != EAGAIN)
-                                                        LOG_ERROR("accept error: %d (fd=%d)", error, server->server_socket);
+                                                        LOG_ERROR("accept error: %d (fd=%d)", error, fd);
                                                 continue;
                                         }
 
                                         /* Handle new client */
-                                        client = add_new_client(server, client_socket,
-                                                                &client_addr);
+                                        client = add_new_client(server, client_socket, &client_addr);
                                         if (client == NULL)
                                         {
                                                 LOG_ERROR("Error adding new client");
@@ -298,9 +299,10 @@ static void* echo_server_main_thread(void* ptr)
                                                 asl_handshake_metrics metrics;
                                                 metrics = asl_get_handshake_metrics(client->tls_session);
 
-                                                LOG_INFO("Handshake done\r\n\tDuration: %.3f milliseconds\r\n\tTx bytes: "\
-                                                        "%d\r\n\tRx bytes: %d", metrics.duration_us / 1000.0,
-                                                        metrics.tx_bytes, metrics.rx_bytes);
+                                                // LOG_INFO("Handshake done\r\n\tDuration: %.3f milliseconds\r\n\tTx bytes: "\
+                                                //         "%d\r\n\tRx bytes: %d", metrics.duration_us / 1000.0,
+                                                //         metrics.tx_bytes, metrics.rx_bytes);
+                                                LOG_INFO("Handshake done (took %.3f ms)", metrics.duration_us / 1000.0);
                                         }
                                         else if (ret == ASL_WANT_READ)
                                         {
@@ -360,6 +362,10 @@ static int prepare_server(echo_server* server, echo_server_config const* config)
         server->running = true;
         server->use_tls = config->use_tls;
         server->num_clients = 0;
+        server->server_socket[IPv4] = -1;
+        server->server_socket[IPv6] = -1;
+        server->listening_port[IPv4] = 0;
+        server->listening_port[IPv6] = 0;
 
         /* Init client pool */
         for (int i = 0; i < MAX_CLIENTS; i++)
@@ -374,7 +380,45 @@ static int prepare_server(echo_server* server, echo_server_config const* config)
 
         poll_set_init(&server->poll_set);
 
-        /* Initialize the Agile Security Library */
+        /* Create the listening sockets for incoming client connections.
+         * Do a DNS lookup to make sure we have an IP address. If we already have an IP, this
+         * results in a noop. */
+        struct addrinfo* bind_addr = NULL;
+        if (address_lookup_server(config->own_ip_address, config->listening_port, &bind_addr) < 0)
+                ERROR_OUT("Error looking up target IP address");
+
+        /* Iterate over the linked-list of results */
+        struct addrinfo* tmp_addr = bind_addr;
+        while (tmp_addr != NULL)
+        {
+                int sock = -1;
+
+                /* Create listening socket */
+                sock = create_listening_socket(tmp_addr->ai_family, tmp_addr->ai_addr, tmp_addr->ai_addrlen);
+                if (sock == -1)
+                        ERROR_OUT("Error creating incoming TCP socket");
+
+                /* Add the socket to the poll_set */
+                if (poll_set_add_fd(&server->poll_set, sock, POLLIN) != 0)
+                        ERROR_OUT("Error adding socket to poll_set");
+
+                if (tmp_addr->ai_family == AF_INET)
+                {
+                        server->server_socket[IPv4] = sock;
+                        server->listening_port[IPv4] = ntohs(((struct sockaddr_in*)tmp_addr->ai_addr)->sin_port);
+                }
+                else if (tmp_addr->ai_family == AF_INET6)
+                {
+                        server->server_socket[IPv6] = sock;
+                        server->listening_port[IPv6] = ntohs(((struct sockaddr_in6*)tmp_addr->ai_addr)->sin6_port);
+                }
+
+                tmp_addr = tmp_addr->ai_next;
+        }
+
+        freeaddrinfo(bind_addr);
+
+        /* Initialize the Agile Security Library and configure TLS endpoint */
         if (config->use_tls == true)
         {
                 LOG_DEBUG("Initializing ASL");
@@ -387,42 +431,7 @@ static int prepare_server(echo_server* server, echo_server_config const* config)
                 ret = asl_init(&asl_config);
                 if (ret != ASL_SUCCESS)
                         ERROR_OUT("Error initializing ASL: %d (%s)", ret, asl_error_message(ret));
-        }
 
-        /* Create the TCP socket for the incoming connection */
-        server->server_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-        if (server->server_socket == -1)
-                ERROR_OUT("Error creating incoming TCP socket");
-
-        if (setsockopt(server->server_socket, SOL_SOCKET, SO_REUSEADDR, &(char){1}, sizeof(int)) < 0)
-                ERROR_OUT("setsockopt(SO_REUSEADDR) failed: error %d\n", errno);
-
-        /* Configure TCP server */
-        server->listening_port = config->listening_port;
-        struct sockaddr_in bind_addr = {
-                        .sin_family = AF_INET,
-                        .sin_port = htons(config->listening_port)
-        };
-        net_addr_pton(bind_addr.sin_family, config->own_ip_address, &bind_addr.sin_addr);
-
-        /* Bind server socket to its destined IPv4 address */
-        if (bind(server->server_socket, (struct sockaddr*) &bind_addr, sizeof(bind_addr)) == -1)
-                ERROR_OUT("Cannot bind socket %d to %s:%d: error %d\n",
-                          server->server_socket, config->own_ip_address, config->listening_port, errno);
-
-        /* If a random port have been used, obtain the actually selected one */
-        if (config->listening_port == 0)
-        {
-                socklen_t sockaddr_len = sizeof(bind_addr);
-                if (getsockname(server->server_socket, (struct sockaddr*)&bind_addr, &sockaddr_len) < 0)
-                        ERROR_OUT("getsockname failed with errno: %d", errno);
-
-                server->listening_port = ntohs(bind_addr.sin_port);
-        }
-
-        /* Configure TLS endpoint */
-        if (config->use_tls == true)
-        {
                 LOG_DEBUG("Setting up TLS server endpoint");
 
                 server->tls_endpoint = asl_setup_server_endpoint(&config->tls_config);
@@ -433,24 +442,13 @@ static int prepare_server(echo_server* server, echo_server_config const* config)
                 }
         }
 
-        /* Start listening for incoming connections */
-        listen(server->server_socket, MAX_CLIENTS);
-
-        /* Set the new socket to non-blocking */
-        setblocking(server->server_socket, false);
-
-        /* Add new server to the poll_set */
-        ret = poll_set_add_fd(&server->poll_set, server->server_socket, POLLIN);
-        if (ret != 0)
-                ERROR_OUT("Error adding socket to poll_set");
-
 cleanup:
         return ret;
 }
 
 
 static echo_client* add_new_client(echo_server* server, int client_socket,
-                                   struct sockaddr* client_addr)
+                                   struct sockaddr_in6* client_addr)
 {
         /* Search for a free client slot in the pool */
         int freeSlot = -1;
@@ -505,11 +503,15 @@ static echo_client* add_new_client(echo_server* server, int client_socket,
                 client->handshake_done = true;
 
         /* Print info */
-        struct sockaddr_in* client_data = (struct sockaddr_in*) client_addr;
-        char peer_ip[20];
-        net_addr_ntop(AF_INET, &client_data->sin_addr, peer_ip, sizeof(peer_ip));
+        char peer_ip[INET6_ADDRSTRLEN];
+
+        if (client_addr->sin6_family == AF_INET)
+                net_addr_ntop(AF_INET, &((struct sockaddr_in*)client_addr)->sin_addr, peer_ip, sizeof(peer_ip));
+        else if (client_addr->sin6_family == AF_INET6)
+                net_addr_ntop(AF_INET6, &((struct sockaddr_in6*)client_addr)->sin6_addr, peer_ip, sizeof(peer_ip));
+
         LOG_INFO("New client connection from %s:%d, using slot %d/%d",
-                peer_ip, ntohs(client_data->sin_port),
+                peer_ip, ntohs(((struct sockaddr_in*)client_addr)->sin_port),
                 freeSlot+1, MAX_CLIENTS);
 
         return client;
@@ -773,7 +775,8 @@ static int handle_management_message(echo_server* server, int socket)
                         /* Fill status object */
                         echo_server_status* status = msg.payload.status_ptr;
                         status->is_running = server->running;
-                        status->listening_port = server->listening_port;
+                        status->listening_port_v4 = server->listening_port[IPv4];
+                        status->listening_port_v6 = server->listening_port[IPv6];
                         status->num_connections = server->num_clients;
 
                         /* Send response */
@@ -815,11 +818,16 @@ static void echo_server_cleanup(echo_server* server)
                 client_cleanup(&client_pool[i]);
         }
 
-        /* Stop the listening socket */
-        if (server->server_socket > 0)
+        /* Stop the listening sockets */
+        if (server->server_socket[IPv4] > 0)
         {
-                closesocket(server->server_socket);
-                server->server_socket = -1;
+                closesocket(server->server_socket[IPv4]);
+                server->server_socket[IPv4] = -1;
+        }
+        if (server->server_socket[IPv6] > 0)
+        {
+                closesocket(server->server_socket[IPv6]);
+                server->server_socket[IPv6] = -1;
         }
 
         /* Clean the TLS endpoint */
@@ -871,16 +879,8 @@ int echo_server_run(echo_server_config const* config)
 
         if (the_server.running == true)
         {
-                if (config->listening_port != the_server.listening_port)
-                {
-                        LOG_ERROR("TCP echo server is already running on port %d, killing it", the_server.listening_port);
-                        echo_server_terminate();
-                }
-                else
-                {
-                        LOG_INFO("TCP echo server is already running on port %d", the_server.listening_port);
-                        return 0;
-                }
+                LOG_ERROR("TCP echo server is already running , killing it");
+                echo_server_terminate();
         }
 
         /* Create the socket pair for external management */
