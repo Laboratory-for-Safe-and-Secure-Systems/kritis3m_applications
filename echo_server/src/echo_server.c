@@ -298,10 +298,6 @@ static void* echo_server_main_thread(void* ptr)
                                                 /* Print handshake metrics */
                                                 asl_handshake_metrics metrics;
                                                 metrics = asl_get_handshake_metrics(client->tls_session);
-
-                                                // LOG_INFO("Handshake done\r\n\tDuration: %.3f milliseconds\r\n\tTx bytes: "\
-                                                //         "%d\r\n\tRx bytes: %d", metrics.duration_us / 1000.0,
-                                                //         metrics.tx_bytes, metrics.rx_bytes);
                                                 LOG_INFO("Handshake done (took %.3f ms)", metrics.duration_us / 1000.0);
                                         }
                                         else if (ret == ASL_WANT_READ)

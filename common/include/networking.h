@@ -4,8 +4,10 @@
 #if defined(__ZEPHYR__)
 
 #include <zephyr/net/net_if.h>
+#include <zephyr/net/socket.h>
 
 #define closesocket close
+#define addrinfo zsock_addrinfo
 
 #elif defined(_WIN32)
 
@@ -44,7 +46,7 @@ struct network_interfaces
 
 
 /* Initialize the network interfaces */
-int initialize_network_interfaces();
+int initialize_network_interfaces(int32_t log_level);
 
 
 /* Get a const pointer to the initialized structure containing the network interfaces */
