@@ -346,13 +346,15 @@ static void bridge_cleanup(tcp_client_stdin_bridge* bridge)
         /* Close the management socket pair */
         if (bridge->management_socket_pair[0] != -1)
         {
-                closesocket(bridge->management_socket_pair[0]);
+                int sock = bridge->management_socket_pair[0];
                 bridge->management_socket_pair[0] = -1;
+                closesocket(sock);
         }
         if (bridge->management_socket_pair[1] != -1)
         {
-                closesocket(bridge->management_socket_pair[1]);
+                int sock = bridge->management_socket_pair[1];
                 bridge->management_socket_pair[1] = -1;
+                closesocket(sock);
         }
 
         if (bridge->target_addr != NULL)
@@ -422,12 +424,12 @@ int tcp_client_stdin_bridge_run(tcp_client_stdin_bridge_config const* config)
         setblocking(client_stdin_bridge.tcp_socket, false);
 
         /* Set TCP_NODELAY option to disable Nagle algorithm */
-        if (setsockopt(client_stdin_bridge.tcp_socket, IPPROTO_TCP, TCP_NODELAY, &(char){1}, sizeof(int)) < 0)
+        if (setsockopt(client_stdin_bridge.tcp_socket, IPPROTO_TCP, TCP_NODELAY, (char*)&(int){1}, sizeof(int)) < 0)
                 ERROR_OUT("setsockopt(TCP_NODELAY) failed: error %d", errno);
 
 #if !defined(_WIN32)
         /* Set retry count to send a total of 3 SYN packets => Timeout ~7s */
-        if (setsockopt(client_stdin_bridge.tcp_socket, IPPROTO_TCP, TCP_SYNCNT, &(int){2}, sizeof(int)) < 0)
+        if (setsockopt(client_stdin_bridge.tcp_socket, IPPROTO_TCP, TCP_SYNCNT, (char*)&(int){2}, sizeof(int)) < 0)
                 ERROR_OUT("setsockopt(TCP_SYNCNT) failed: error %d", errno);
 #endif
 

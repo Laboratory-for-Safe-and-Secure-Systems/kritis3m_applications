@@ -145,17 +145,17 @@ proxy_connection* add_new_connection_to_proxy(proxy* proxy, int client_socket,
         setblocking(connection->asset_sock, false);
 
         /* Set TCP_NODELAY option to disable Nagle algorithm */
-        if (setsockopt(connection->tunnel_sock, IPPROTO_TCP, TCP_NODELAY, &(char){1}, sizeof(int)) < 0)
+        if (setsockopt(connection->tunnel_sock, IPPROTO_TCP, TCP_NODELAY, (char*)&(int){1}, sizeof(int)) < 0)
                 ERROR_OUT_EX(proxy->log_module, "setsockopt(TCP_NODELAY) tunnel_sock failed: error %d", errno);
 
-        if (setsockopt(connection->asset_sock, IPPROTO_TCP, TCP_NODELAY, &(char){1}, sizeof(int)) < 0)
+        if (setsockopt(connection->asset_sock, IPPROTO_TCP, TCP_NODELAY, (char*)&(int){1}, sizeof(int)) < 0)
                 ERROR_OUT_EX(proxy->log_module, "setsockopt(TCP_NODELAY) asset_sock failed: error %d", errno);
 
         if (connection->direction == FORWARD_PROXY)
         {
         #if !defined(__ZEPHYR__) && !defined(_WIN32)
                 /* Set retry count to send a total of 3 SYN packets => Timeout ~7s */
-                if (setsockopt(connection->tunnel_sock, IPPROTO_TCP, TCP_SYNCNT, &(int){2}, sizeof(int)) < 0)
+                if (setsockopt(connection->tunnel_sock, IPPROTO_TCP, TCP_SYNCNT, (char*)&(int){2}, sizeof(int)) < 0)
                         ERROR_OUT_EX(proxy->log_module, "setsockopt(TCP_SYNCNT) tunnel_sock failed: error %d", errno);
         #endif
 
@@ -167,7 +167,7 @@ proxy_connection* add_new_connection_to_proxy(proxy* proxy, int client_socket,
         {
         #if !defined(__ZEPHYR__) && !defined(_WIN32)
                 /* Set retry count to send a total of 3 SYN packets => Timeout ~7s */
-                if (setsockopt(connection->asset_sock, IPPROTO_TCP, TCP_SYNCNT, &(int){2}, sizeof(int)) < 0)
+                if (setsockopt(connection->asset_sock, IPPROTO_TCP, TCP_SYNCNT, (char*)&(int){2}, sizeof(int)) < 0)
                         ERROR_OUT_EX(proxy->log_module, "setsockopt(TCP_SYNCNT) asset_sock failed: error %d", errno);
         #endif
 

@@ -498,9 +498,13 @@ static int address_lookup_internal(char const* dest, uint16_t port, struct addri
 	char port_str[6];
 	snprintf(port_str, sizeof(port_str), "%d", port);
 
-	if (getaddrinfo(dest, port_str, &hints, addr) != 0)
+	int ret = getaddrinfo(dest, port_str, &hints, addr);
+	if (ret != 0)
 	{
-		LOG_ERROR("getaddrinfo failed for %s:%d: %s", dest, port, gai_strerror(errno));
+		if (dest)
+			LOG_ERROR("getaddrinfo failed for %s:%d: %s", dest, port, gai_strerror(ret));
+		else
+			LOG_ERROR("getaddrinfo failed for port %d: %s", port, gai_strerror(ret));
 		return -1;
 	}
 
@@ -543,11 +547,11 @@ int create_listening_socket(int type, struct sockaddr* addr, socklen_t addr_len)
 
 	if (type == AF_INET6)
 	{
-		if (setsockopt(sock, IPPROTO_IPV6, IPV6_V6ONLY, &(char){0}, sizeof(int)) < 0)
+		if (setsockopt(sock, IPPROTO_IPV6, IPV6_V6ONLY, (char*)&(int){1}, sizeof(int)) < 0)
 			ERROR_OUT("setsockopt(IPV6_V6ONLY) failed: error %d\n", errno);
 	}
 
-	if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &(char){1}, sizeof(int)) < 0)
+	if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (char*)&(int){1}, sizeof(int)) < 0)
 		ERROR_OUT("setsockopt(SO_REUSEADDR) failed: error %d\n", errno);
 
 	if (bind(sock, addr, addr_len) < 0)

@@ -186,7 +186,10 @@ static void* echo_server_main_thread(void* ptr)
         /* Start the server */
         ret = prepare_server(server, config);
         if (ret != 0)
-                ERROR_OUT("Error preparing server");
+        {
+                shutdown = true;
+                LOG_ERROR("Error preparing server");
+        }
 
         /* Set the management socket to non-blocking and add it to the poll_set */
         setblocking(server->management_socket_pair[1], false);
@@ -194,7 +197,7 @@ static void* echo_server_main_thread(void* ptr)
 
         /* Send response */
         start_msg.type = MANAGEMENT_RESPONSE;
-        start_msg.payload.response_code = 0;
+        start_msg.payload.response_code = ret;
         ret = send_management_message(server->management_socket_pair[1], &start_msg);
         if (ret < 0)
         {
@@ -380,7 +383,8 @@ static int prepare_server(echo_server* server, echo_server_config const* config)
          * Do a DNS lookup to make sure we have an IP address. If we already have an IP, this
          * results in a noop. */
         struct addrinfo* bind_addr = NULL;
-        if (address_lookup_server(config->own_ip_address, config->listening_port, &bind_addr) < 0)
+        ret = address_lookup_server(config->own_ip_address, config->listening_port, &bind_addr);
+        if (ret < 0)
                 ERROR_OUT("Error looking up target IP address");
 
         /* Iterate over the linked-list of results */
@@ -392,10 +396,14 @@ static int prepare_server(echo_server* server, echo_server_config const* config)
                 /* Create listening socket */
                 sock = create_listening_socket(tmp_addr->ai_family, tmp_addr->ai_addr, tmp_addr->ai_addrlen);
                 if (sock == -1)
+                {
+                        ret = -1;
                         ERROR_OUT("Error creating incoming TCP socket");
+                }
 
                 /* Add the socket to the poll_set */
-                if (poll_set_add_fd(&server->poll_set, sock, POLLIN) != 0)
+                ret = poll_set_add_fd(&server->poll_set, sock, POLLIN);
+                if (ret != 0)
                         ERROR_OUT("Error adding socket to poll_set");
 
                 if (tmp_addr->ai_family == AF_INET)
@@ -411,8 +419,6 @@ static int prepare_server(echo_server* server, echo_server_config const* config)
 
                 tmp_addr = tmp_addr->ai_next;
         }
-
-        freeaddrinfo(bind_addr);
 
         /* Initialize the Agile Security Library and configure TLS endpoint */
         if (config->use_tls == true)
@@ -439,6 +445,9 @@ static int prepare_server(echo_server* server, echo_server_config const* config)
         }
 
 cleanup:
+        if (bind_addr != NULL)
+                freeaddrinfo(bind_addr);
+
         return ret;
 }
 
@@ -474,7 +483,7 @@ static echo_client* add_new_client(echo_server* server, int client_socket,
 
         setblocking(client->socket, false);
 
-        if (setsockopt(client->socket, IPPROTO_TCP, TCP_NODELAY, &(char){1}, sizeof(int)) < 0)
+        if (setsockopt(client->socket, IPPROTO_TCP, TCP_NODELAY, (char*)&(int){1}, sizeof(int)) < 0)
         {
                 LOG_ERROR("setsockopt(TCP_NODELAY) for client socket failed: error %d", errno);
                 client_cleanup(client);
@@ -831,19 +840,23 @@ static void echo_server_cleanup(echo_server* server)
         {
                 asl_free_endpoint(server->tls_endpoint);
                 asl_cleanup();
+                server->tls_endpoint = NULL;
         }
 
         /* Close the management socket pair */
         if (server->management_socket_pair[0] != -1)
         {
-                closesocket(server->management_socket_pair[0]);
+                int sock = server->management_socket_pair[0];
                 server->management_socket_pair[0] = -1;
+                closesocket(sock);
         }
         if (server->management_socket_pair[1] != -1)
         {
-                closesocket(server->management_socket_pair[1]);
+                int sock = server->management_socket_pair[1];
                 server->management_socket_pair[1] = -1;
+                closesocket(sock);
         }
+
 
         server->running = false;
 }

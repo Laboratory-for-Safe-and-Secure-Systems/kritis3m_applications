@@ -93,7 +93,7 @@ network_tester;
 /* File global variables */
 static network_tester the_tester = {
         .running = false,
-        .progress_percent = 0,
+        .progress_percent = -1,
         .total_iterations = 0,
         .tcp_socket = -1,
         .target_addr = NULL,
@@ -228,12 +228,12 @@ static int connection_setup(network_tester* tester)
                 ERROR_OUT("Error creating TCP socket");
 
         /* Set TCP_NODELAY option to disable Nagle algorithm */
-        if (setsockopt(tester->tcp_socket, IPPROTO_TCP, TCP_NODELAY, &(char){1}, sizeof(int)) < 0)
+        if (setsockopt(tester->tcp_socket, IPPROTO_TCP, TCP_NODELAY, (char*)&(int){1}, sizeof(int)) < 0)
                 ERROR_OUT("setsockopt(TCP_NODELAY) failed: error %d", errno);
 
 #if !defined(__ZEPHYR__) && !defined(_WIN32)
         /* Set retry count to send a total of 3 SYN packets => Timeout ~7s */
-        if (setsockopt(tester->tcp_socket, IPPROTO_TCP, TCP_SYNCNT, &(int){2}, sizeof(int)) < 0)
+        if (setsockopt(tester->tcp_socket, IPPROTO_TCP, TCP_SYNCNT, (char*)&(int){2}, sizeof(int)) < 0)
                 ERROR_OUT("setsockopt(TCP_SYNCNT) failed: error %d", errno);
 #endif
 
@@ -400,7 +400,10 @@ static void* network_tester_main_thread(void* ptr)
         }
 
         if (tester->config->silent_test == false)
+        {
                 printf("\r\n"); /* New line necessary for proper progress print */
+                print_progress(tester, 0);
+        }
 
 
         /* Loop over all handshake iterations we want to perform. We use a do {} while() loop here
@@ -708,6 +711,7 @@ static void tester_cleanup(network_tester* tester)
         {
                 asl_free_endpoint(tester->tls_endpoint);
                 asl_cleanup();
+                tester->tls_endpoint = NULL;
         }
         if (tester->tcp_socket != -1)
         {
@@ -719,13 +723,15 @@ static void tester_cleanup(network_tester* tester)
         /* Close the management socket pair */
         if (tester->management_socket_pair[0] != -1)
         {
-                closesocket(tester->management_socket_pair[0]);
+                int sock = tester->management_socket_pair[0];
                 tester->management_socket_pair[0] = -1;
+                closesocket(sock);
         }
         if (tester->management_socket_pair[1] != -1)
         {
-                closesocket(tester->management_socket_pair[1]);
+                int sock = tester->management_socket_pair[1];
                 tester->management_socket_pair[1] = -1;
+                closesocket(sock);
         }
 
         if (tester->target_addr != NULL)
@@ -734,6 +740,7 @@ static void tester_cleanup(network_tester* tester)
                 tester->target_addr = NULL;
         }
 
+        tester->progress_percent = -1;
         tester->running = false;
 }
 

@@ -223,8 +223,6 @@ static int add_new_proxy(enum tls_proxy_direction direction, proxy_config const*
                 tmp_addr = tmp_addr->ai_next;
         }
 
-        freeaddrinfo(bind_addr);
-
         /* Do a DNS lookup to make sure we have an IP address. If we already have an IP, this
          * results in a noop. */
         if (address_lookup_client(config->target_ip_address, config->target_port, &proxy->target_addr) < 0)
@@ -232,9 +230,15 @@ static int add_new_proxy(enum tls_proxy_direction direction, proxy_config const*
 
         LOG_DEBUG_EX(proxy->log_module, "Waiting for incoming connections on port %d", config->listening_port);
 
+        if (bind_addr != NULL)
+                freeaddrinfo(bind_addr);
+
         return freeSlot+1;
 
 cleanup:
+        if (bind_addr != NULL)
+                freeaddrinfo(bind_addr);
+
         kill_proxy(proxy);
 
         return -1;
@@ -519,13 +523,15 @@ void proxy_backend_cleanup(proxy_backend* backend)
         /* Close the management socket pair */
         if (backend->management_socket_pair[0] >= 0)
         {
-                closesocket(backend->management_socket_pair[0]);
+                int sock = backend->management_socket_pair[0];
                 backend->management_socket_pair[0] = -1;
+                closesocket(sock);
         }
         if (backend->management_socket_pair[1] >= 0)
         {
-                closesocket(backend->management_socket_pair[1]);
+                int sock = backend->management_socket_pair[1];
                 backend->management_socket_pair[1] = -1;
+                closesocket(sock);
         }
 
         backend->running = false;
