@@ -15,6 +15,49 @@ int parse_crypo_identity(cJSON *json_obj, crypto_identity *crypto_identity, char
 int parse_application(cJSON *json_obj, Kritis3mApplications *application);
 int set_crypto_filepath(Kritis3mApplications *application, char *crypto_path);
 
+int parseGenericIP(cJSON *json, struct GenericIP *result) {
+    // Validate input
+    if (!cJSON_IsObject(json)) {
+        return 0;
+    }
+
+    // Extract IP address
+    cJSON *ip_json = cJSON_GetObjectItemCaseSensitive(json, "ip");
+    if (!cJSON_IsString(ip_json) || ip_json->valuestring == NULL) {
+        return 0;
+    }
+    strncpy(result->ip, ip_json->valuestring, INET6_ADDRSTRLEN - 1);
+    result->ip[INET6_ADDRSTRLEN - 1] = '\0';
+
+    // Extract and validate port
+    cJSON *port_json = cJSON_GetObjectItemCaseSensitive(json, "port");
+    if (!cJSON_IsNumber(port_json)) {
+        return 0;
+    }
+    int port = port_json->valueint;
+    if (port <= 0 || port > 65535) {
+        return 0;
+    }
+    result->port = (uint16_t)port;
+
+    // Validate IP and determine family
+    struct in_addr ipv4;
+    struct in6_addr ipv6;
+    
+    if (inet_pton(AF_INET, result->ip, &ipv4) == 1) {
+        result->domain = AF_INET;
+        return 1;
+    }
+    
+    if (inet_pton(AF_INET6, result->ip, &ipv6) == 1) {
+        result->domain = AF_INET6;
+        return 1;
+    }
+
+    return 0;
+}
+
+
 int parse_json_to_ManagementConfig(cJSON *json_management_service, Kritis3mManagemntConfiguration *config, char *identity_path)
 {
     int ret = 0;

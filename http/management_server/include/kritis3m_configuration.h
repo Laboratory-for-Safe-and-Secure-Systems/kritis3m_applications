@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include "asl.h"
 #include <stdbool.h>
+#include <sys/socket.h>
 #include <time.h>
 #include <pthread.h>
 // #include "kritis3m_pki_client.h"
@@ -111,15 +112,7 @@ typedef struct certificates
     size_t root_buffer_size;
 } certificates;
 
-/**
- * @brief ConnectionWhitelist details the allowed connections for the proxy applications based on the client IP and Port
- */
 
-struct ConnectionWhitelist
-{
-    char allowed_client_ip_port[IPv4_PORT_LEN];
-    int number_connections;
-};
 
 /**
  * @note when extending Kritis3mApplicationtype: DTLS_R_PROXY = MIN && TLS_R_PROXY = MAX
@@ -161,6 +154,12 @@ typedef enum
     max_identities
 } network_identity;
 
+typedef struct GenericIP{
+    int domain; //AF_INET or AF_INET6
+    char ip[INET6_ADDRSTRLEN];
+    uint16_t port;
+}GenericIP;
+
 typedef struct
 {
     int32_t id;
@@ -168,9 +167,7 @@ typedef struct
 
     char *revocation_list_url;
     int revocation_list_url_size;
-
-    char *server_addr;
-    int server_addr_size;
+    GenericIP server;
 
     char *server_url;
     int server_url_size;
@@ -195,16 +192,15 @@ struct CryptoProfile
     int32_t crypto_identity_id;
 };
 
+
 typedef struct
 {
     uint32_t config_id;
     uint32_t id;
     Kritis3mApplicationtype type;
-    char server_ip[INET_ADDRSTRLEN];
-    uint16_t server_port;
 
-    char client_ip[INET_ADDRSTRLEN];
-    uint16_t client_port;
+    GenericIP server_ip_port;
+    GenericIP client_ip_port;
 
     bool state;
     int32_t ep1_id;
@@ -215,8 +211,9 @@ typedef struct
 typedef struct
 {
     int32_t id;
-    char client_ip_port[IPv4_PORT_LEN];
-    struct sockaddr_in addr;
+    GenericIP trusted_client;
+    struct sockaddr_storage addr;
+
     int number_trusted_applications;
     int trusted_applications_id[MAX_TRUSTED_APPLICATIONS];
 } TrustedClients;
