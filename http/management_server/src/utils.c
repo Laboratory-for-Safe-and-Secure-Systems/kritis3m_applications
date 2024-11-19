@@ -86,41 +86,41 @@ int parse_IPv4_fromIpPort(const char *src_ip_port, char *dst_ip)
     return -1;
 }
 
-uint64_t parse_time_string(const char *time_str) {
-    struct tm tm = {0};
-    char *fraction_ptr;
-    long timezone_offset = 0;
-    long nanoseconds = 0;
-    int offset_sign = 1;
+// uint64_t parse_time_string(const char *time_str) {
+//     struct tm tm = {0};
+//     char *fraction_ptr;
+//     long timezone_offset = 0;
+//     long nanoseconds = 0;
+//     int offset_sign = 1;
 
-    // Parse the date and time part
-    strptime(time_str, "%Y-%m-%dT%H:%M:%S", &tm);
+//     // Parse the date and time part
+//     strptime(time_str, "%Y-%m-%dT%H:%M:%S", &tm);
 
-    // Find the start of the fractional seconds and timezone
-    fraction_ptr = strchr(time_str, '.');
-    if (fraction_ptr) {
-        // Parse the fractional part (nanoseconds)
-        sscanf(fraction_ptr, ".%9ld", &nanoseconds);
+//     // Find the start of the fractional seconds and timezone
+//     fraction_ptr = strchr(time_str, '.');
+//     if (fraction_ptr) {
+//         // Parse the fractional part (nanoseconds)
+//         sscanf(fraction_ptr, ".%9ld", &nanoseconds);
 
-        // Parse timezone offset (+02:00) part after the seconds
-        char sign;
-        int hours, minutes;
-        sscanf(fraction_ptr + 10, "%c%02d:%02d", &sign, &hours, &minutes);
-        offset_sign = (sign == '-') ? -1 : 1;
-        timezone_offset = offset_sign * (hours * 3600 + minutes * 60);
-    }
+//         // Parse timezone offset (+02:00) part after the seconds
+//         char sign;
+//         int hours, minutes;
+//         sscanf(fraction_ptr + 10, "%c%02d:%02d", &sign, &hours, &minutes);
+//         offset_sign = (sign == '-') ? -1 : 1;
+//         timezone_offset = offset_sign * (hours * 3600 + minutes * 60);
+//     }
 
-    // Convert tm to time_t (seconds since epoch)
-    time_t epoch_seconds = mktime(&tm);
+//     // Convert tm to time_t (seconds since epoch)
+//     time_t epoch_seconds = mktime(&tm);
 
-    // Apply the timezone offset
-    epoch_seconds -= timezone_offset;
+//     // Apply the timezone offset
+//     epoch_seconds -= timezone_offset;
 
-    // Convert to nanoseconds and add fractional nanoseconds
-    uint64_t total_nanoseconds = (uint64_t)epoch_seconds * 1000000000ULL + nanoseconds;
+//     // Convert to nanoseconds and add fractional nanoseconds
+//     uint64_t total_nanoseconds = (uint64_t)epoch_seconds * 1000000000ULL + nanoseconds;
 
-    return total_nanoseconds;
-}
+//     return total_nanoseconds;
+// }
 
 int parse_ip_port_to_sockaddr_in(char *ip_port, struct sockaddr_in *dst)
 {

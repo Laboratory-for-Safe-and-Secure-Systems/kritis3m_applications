@@ -1,11 +1,14 @@
 
+
+#include <arpa/inet.h>
+#include <stdlib.h>
+#include <stdio.h>
+
 #include "cJSON.h"
 #include "logging.h"
 #include "utils.h"
 #include "errno.h"
 #include "string.h"
-#include <stdlib.h>
-#include <stdio.h>
 #include "configuration_parser.h"
 LOG_MODULE_CREATE(kritis3m_config_paser);
 
@@ -15,48 +18,73 @@ int parse_crypo_identity(cJSON *json_obj, crypto_identity *crypto_identity, char
 int parse_application(cJSON *json_obj, Kritis3mApplications *application);
 int set_crypto_filepath(Kritis3mApplications *application, char *crypto_path);
 
-int parseGenericIP(cJSON *json, struct GenericIP *result) {
+int parseGenericIP(cJSON *json, Kritis3mSockaddr *dst)
+{
     // Validate input
-    if (!cJSON_IsObject(json)) {
-        return 0;
+    if (!cJSON_IsObject(json))
+    {
+        goto error_occured;
     }
 
     // Extract IP address
     cJSON *ip_json = cJSON_GetObjectItemCaseSensitive(json, "ip");
-    if (!cJSON_IsString(ip_json) || ip_json->valuestring == NULL) {
-        return 0;
+    if (!cJSON_IsString(ip_json) || ip_json->valuestring == NULL)
+    {
+        goto error_occured;
     }
-    strncpy(result->ip, ip_json->valuestring, INET6_ADDRSTRLEN - 1);
-    result->ip[INET6_ADDRSTRLEN - 1] = '\0';
 
-    // Extract and validate port
+    cJSON *js_family = cJSON_GetObjectItemCaseSensitive(json, "family");
+    if ((js_family == NULL) || cJSON_IsString(js_family))
+    {
+        goto error_occured;
+    }
+
+    // Extract port
     cJSON *port_json = cJSON_GetObjectItemCaseSensitive(json, "port");
-    if (!cJSON_IsNumber(port_json)) {
-        return 0;
+    if (!cJSON_IsNumber(port_json))
+    {
+        goto error_occured;
     }
-    int port = port_json->valueint;
-    if (port <= 0 || port > 65535) {
-        return 0;
-    }
-    result->port = (uint16_t)port;
+    uint16_t port = (uint16_t)port_json->valueint;
 
-    // Validate IP and determine family
-    struct in_addr ipv4;
-    struct in6_addr ipv6;
-    
-    if (inet_pton(AF_INET, result->ip, &ipv4) == 1) {
-        result->domain = AF_INET;
-        return 1;
+    // parse ipv4
+    if (js_family->valueint == AF_INET)
+    {
+        struct sockaddr_in *addr = &dst->sockaddr_in;
+        memset(addr, 0, sizeof(struct sockaddr_in));
+        addr->sin_family = AF_INET;
+        addr->sin_port = htons(port);
+        
+        if (inet_pton(AF_INET, ip_json->valuestring, &(addr->sin_addr)) != 1)
+        {
+            goto error_occured;
+        }
     }
-    
-    if (inet_pton(AF_INET6, result->ip, &ipv6) == 1) {
-        result->domain = AF_INET6;
-        return 1;
+    // parse ipv6
+    else if (js_family->valueint == AF_INET6)
+    {
+        struct sockaddr_in6 *addr = &dst->sockaddr_in6;
+        memset(addr, 0, sizeof(struct sockaddr_in6));
+        addr->sin6_family = AF_INET6;
+        addr->sin6_port = htons(port);
+        
+        if (inet_pton(AF_INET6, ip_json->valuestring, &(addr->sin6_addr)) != 1)
+        {
+            goto error_occured;
+        }
+    }
+    // can't parse
+    else
+    {
+        goto error_occured;
     }
 
     return 0;
-}
 
+error_occured:
+    LOG_ERROR("can't parse json ip format to KRITIS3MSocket");
+    return -1;
+}
 
 int parse_json_to_ManagementConfig(cJSON *json_management_service, Kritis3mManagemntConfiguration *config, char *identity_path)
 {
@@ -418,32 +446,35 @@ ManagementReturncode parse_application(cJSON *json_obj, Kritis3mApplications *ap
     if (item == NULL)
         goto error_occured;
     ret = parse_IPv4_fromIpPort(item->valuestring, application->server_ip);
-    if (ret < 0 ){
+    if (ret < 0)
+    {
         LOG_ERROR("cant parse ip addr from ip:port");
         goto error_occured;
     }
-    int port  = parse_port_fromIpPort(item->valuestring);
-    if (port  < 0){
+    int port = parse_port_fromIpPort(item->valuestring);
+    if (port < 0)
+    {
         LOG_ERROR("no correct port in addr");
         goto error_occured;
     }
     application->server_port = port;
 
-
     item = cJSON_GetObjectItem(json_obj, "client_ip_port");
     if (item == NULL)
         goto error_occured;
     ret = parse_IPv4_fromIpPort(item->valuestring, application->client_ip);
-    if (ret < 0 ){
+    if (ret < 0)
+    {
         LOG_ERROR("cant parse ip addr from ip:port");
         goto error_occured;
     }
-    port  = parse_port_fromIpPort(item->valuestring);
-    if (port  < 0){
+    port = parse_port_fromIpPort(item->valuestring);
+    if (port < 0)
+    {
         LOG_ERROR("no correct port in addr");
         goto error_occured;
     }
-    application->client_port= port;
+    application->client_port = port;
 
     item = cJSON_GetObjectItem(json_obj, "ep1_id");
     if (item == NULL)
@@ -454,7 +485,7 @@ ManagementReturncode parse_application(cJSON *json_obj, Kritis3mApplications *ap
     application->ep2_id = (item == NULL) ? -1 : item->valueint;
 
     item = cJSON_GetObjectItem(json_obj, "log_level");
-    application->log_level = ( item == NULL) ? LOG_LVL_WARN : item->valueint ; 
+    application->log_level = (item == NULL) ? LOG_LVL_WARN : item->valueint;
 
     application->state = false;
     return ret;

@@ -181,7 +181,9 @@ static void http_get_cb(struct http_response *rsp,
 
             break;
         }
-    }else{
+    }
+    else
+    {
         LOG_ERROR("bla");
     }
     return;
@@ -241,7 +243,7 @@ void *http_get_request(void *http_get_data)
     req.recv_buf = http_req_data->response.buffer;
     req.recv_buf_len = http_req_data->response.buffer_size;
 
-    duration timeout = ms_toduration(5 *1000);
+    duration timeout = ms_toduration(5 * 1000);
 
     ret = https_client_req(fd, session, &req, timeout, response);
     if (ret < 0)
@@ -269,6 +271,67 @@ shutdown:
     if (fd > 0)
         close(fd);
     pthread_exit(NULL);
+}
+
+int call_heartbeat_service(t_http_get_cb response_callback, char *destination_path, char *version)
+{
+    struct response response = {0};
+    http_get http_get = {0};
+    static char *url[520];
+    int ret = 0;
+    int fd = -1;
+
+    if ((destination_path == NULL) || (response_callback == NULL))
+        goto error_occured;
+
+    http_get.response.service_used = MGMT_HEARTBEAT_REQ;
+    http_get.response.buffer = (char *)malloc(HEARTBEAT_BUFFER_SIZE);
+    http_get.response.buffer_size = HEARTBEAT_BUFFER_SIZE;
+    http_get.response.buffer_frag_start = 0;
+    http_get.response.meta.policy_req.destination_path = destination_path;
+
+    http_get.server_addr = http_service.management.mgmt_sockaddr;
+    http_get.get_cb = response_callback;
+    http_get.url = get_heartbeat_url(version);
+
+    int thread_id = get_free_thread_id(&http_service.pool);
+    if (thread_id < 0)
+        goto error_occured;
+    http_get.thread_id = thread_id;
+
+    fd = socket(AF_INET, SOCK_STREAM, 0);
+    http_get.fd = fd;
+    ret = connect(fd, (struct sockaddr *)&http_get.server_addr, sizeof(http_get.server_addr));
+    if (ret < 0)
+    {
+        LOG_ERROR("can't conenct");
+        goto error_occured;
+    }
+    http_get.session = asl_create_session(http_service.client_enpoint, fd);
+    if (http_get.session == NULL)
+        goto error_occured;
+    ret = asl_handshake(http_get.session);
+    if (ret < 0)
+    {
+        LOG_ERROR("failed in the handshake");
+        goto error_occured;
+    }
+
+    void *result = http_get_request(&http_get);
+
+    // pthread_create(&http_service.pool.threads[thread_id], &http_service.pool.thread_attr, , &http_get);
+    return ret;
+    /**
+     *  Service Initialisation
+     */
+
+error_occured:
+    if (http_get.session != NULL)
+        free(http_get.session);
+    if (fd > 0)
+        close(fd);
+    if (http_get.response.buffer != NULL)
+        free(http_get.response.buffer);
 }
 
 int call_distribution_service(t_http_get_cb response_callback, char *destination_path)
@@ -321,7 +384,7 @@ int call_distribution_service(t_http_get_cb response_callback, char *destination
     // LOG_INFO("ret is : %d",ret);
     // ret =asl_send(http_get.session, "moin", sizeof("moin"));
     // LOG_INFO("ret : %d", ret);
-void * result = http_get_request(&http_get);
+    void *result = http_get_request(&http_get);
 
     // pthread_create(&http_service.pool.threads[thread_id], &http_service.pool.thread_attr, , &http_get);
     return ret;
@@ -380,4 +443,14 @@ char *get_init_policy_url()
     if (ret < 0)
         return NULL;
     return policy_url;
+}
+
+char *get_heartbeat_url(char *version)
+{
+    int ret = -1;
+    static char heartbeat_url[500];
+    ret = snprintf(heartbeat_url, 500, "/api/node/%s/operation/version/%s", http_service.serial_number, version);
+    if (ret < 0)
+        return NULL;
+    return heartbeat_url;
 }

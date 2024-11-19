@@ -3,6 +3,7 @@ add_library(kritis3m_http_libs STATIC
         ${CMAKE_CURRENT_SOURCE_DIR}/src/cJSON.c
         ${CMAKE_CURRENT_SOURCE_DIR}/src/http_client.c
         ${CMAKE_CURRENT_SOURCE_DIR}/src/http_parser_url.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/linux_comp.c
         ${CMAKE_CURRENT_SOURCE_DIR}/src/http_parser.c
 )
 

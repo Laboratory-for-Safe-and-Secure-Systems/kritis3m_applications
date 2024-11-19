@@ -125,7 +125,7 @@ error_occured:
   return ret;
 }
 
-int init_kristis3m_service(char *config_file)
+int init_kritis3m_service(char *config_file)
 {
   // initializations
   int ret = 0;
@@ -165,7 +165,11 @@ int init_kristis3m_service(char *config_file)
     LOG_ERROR("can't init http_service");
   }
   init_configuration_manager(&svc.configuration_manager, &svc.node_configuration);
-  call_distribution_service(initial_policy_request_cb, svc.node_configuration.primary_path);
+  ret = call_distribution_service(initial_policy_request_cb, svc.node_configuration.primary_path);
+  if (ret < 0 ){
+    LOG_ERROR("error occured calling distribution service");
+    return 0;
+  }
   if (svc.configuration_manager.active_configuration == CFG_NONE)
   {
     LOG_INFO("no configuration selected. Starting with primary configuration");
@@ -205,17 +209,13 @@ void *start_kristis3m_service(void *arg)
   struct poll_set *pollfd = svc->pollfd;
   TimerPipe *heartbeat_timer = svc->hardbeat_timer;
   int hb_interval_sec = 10;
-
   int ret = 0;
   SystemConfiguration *selected_sys_cfg = NULL;
   ManagementReturncode retval = MGMT_OK;
+
   asl_endpoint_configuration *ep_cfg = &svc->management_endpoint_config;
   Kritis3mNodeConfiguration node_configuration = svc->node_configuration;
   ConfigurationManager application_configuration_manager = svc->configuration_manager;
-
-
-
-
 
   ret = poll_set_add_fd(pollfd, get_clock_signal_fd(heartbeat_timer), POLLIN | POLLERR);
   if (ret < 0)

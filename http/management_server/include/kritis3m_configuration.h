@@ -154,11 +154,11 @@ typedef enum
     max_identities
 } network_identity;
 
-typedef struct GenericIP{
-    int domain; //AF_INET or AF_INET6
-    char ip[INET6_ADDRSTRLEN];
-    uint16_t port;
-}GenericIP;
+typedef union {
+    struct sockaddr sockaddr;
+    struct sockaddr_in sockaddr_in;
+    struct sockaddr_in6 sockaddr_in6;
+}Kritis3mSockaddr;
 
 typedef struct
 {
@@ -167,7 +167,7 @@ typedef struct
 
     char *revocation_list_url;
     int revocation_list_url_size;
-    GenericIP server;
+    Kritis3mSockaddr server;
 
     char *server_url;
     int server_url_size;
@@ -199,8 +199,8 @@ typedef struct
     uint32_t id;
     Kritis3mApplicationtype type;
 
-    GenericIP server_ip_port;
-    GenericIP client_ip_port;
+    Kritis3mSockaddr server_ip_port;
+    Kritis3mSockaddr client_ip_port;
 
     bool state;
     int32_t ep1_id;
@@ -211,7 +211,7 @@ typedef struct
 typedef struct
 {
     int32_t id;
-    GenericIP trusted_client;
+    Kritis3mSockaddr trusted_client;
     struct sockaddr_storage addr;
 
     int number_trusted_applications;

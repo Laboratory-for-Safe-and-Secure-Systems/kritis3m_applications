@@ -182,7 +182,6 @@ static int network_init(network_tester* tester)
                 asl_configuration asl_config = asl_default_config();
                 asl_config.logging_enabled = true;
                 asl_config.log_level = LOG_LVL_GET();
-                asl_config.custom_log_callback = asl_log_callback;
 
                 ret = asl_init(&asl_config);
                 if (ret != ASL_SUCCESS)
