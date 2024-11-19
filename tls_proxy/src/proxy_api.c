@@ -1,6 +1,5 @@
 #include <stdlib.h>
 #include <stdint.h>
-#include <unistd.h>
 #include <string.h>
 
 #include "proxy_management.h"
@@ -9,10 +8,13 @@
 
 #include "logging.h"
 
+
 LOG_MODULE_CREATE(proxy_api);
+
 
 /* File global variables */
 static proxy_backend the_backend;
+
 
 /* Create the default config for the TLS proxy backend */
 proxy_backend_config tls_proxy_backend_default_config(void)
@@ -24,12 +26,12 @@ proxy_backend_config tls_proxy_backend_default_config(void)
         return default_config;
 }
 
+
 /* Create the default config for a TLS proxy */
 proxy_config tls_proxy_default_config(void)
 {
         proxy_config default_config = {0};
 
-        default_config.application_id = -1;
         default_config.own_ip_address = NULL;
         default_config.listening_port = 0; /* 0 selects random available port */
         default_config.target_ip_address = NULL;
@@ -40,11 +42,12 @@ proxy_config tls_proxy_default_config(void)
         return default_config;
 }
 
+
 /* Start a new thread and run the main TLS proxy backend with given config.
  *
  * Returns 0 on success, -1 on failure (error message is printed to console).
  */
-int tls_proxy_backend_run(proxy_backend_config const *config)
+int tls_proxy_backend_run(proxy_backend_config const* config)
 {
         if (the_backend.running)
         {
@@ -67,7 +70,7 @@ int tls_proxy_backend_run(proxy_backend_config const *config)
         if (ret == 0)
         {
                 /* Obtain the status of proxy with id 1 to check if the backend thread
-                 * is running properly. */
+                * is running properly. */
                 proxy_status status;
                 ret = tls_proxy_get_status(1, &status);
                 if (ret < 0)
@@ -85,7 +88,8 @@ int tls_proxy_backend_run(proxy_backend_config const *config)
         return ret;
 }
 
-int tls_proxy_start_helper(proxy_management_message const *request)
+
+int tls_proxy_start_helper(proxy_management_message const* request)
 {
         proxy_management_message response = {0};
 
@@ -117,12 +121,13 @@ int tls_proxy_start_helper(proxy_management_message const *request)
         return response.payload.response_code;
 }
 
+
 /* Start a new reverse proxy with given config.
  *
  * Returns the id of the new proxy instance on success (positive integer) or -1
  * on failure (error message is printed to console).
  */
-int tls_reverse_proxy_start(proxy_config const *config)
+int tls_reverse_proxy_start(proxy_config const* config)
 {
         if ((the_backend.management_socket_pair[0] < 0) || (the_backend.management_socket_pair[0] < 0))
         {
@@ -138,12 +143,13 @@ int tls_reverse_proxy_start(proxy_config const *config)
         return tls_proxy_start_helper(&request);
 }
 
+
 /* Start a new forward proxy with given config.
  *
  * Returns the id of the new proxy instance on success (positive integer) or -1
  * on failure (error message is printed to console).
  */
-int tls_forward_proxy_start(proxy_config const *config)
+int tls_forward_proxy_start(proxy_config const* config)
 {
         if ((the_backend.management_socket_pair[0] < 0) || (the_backend.management_socket_pair[0] < 0))
         {
@@ -160,11 +166,12 @@ int tls_forward_proxy_start(proxy_config const *config)
         return tls_proxy_start_helper(&request);
 }
 
+
 /* Querry status information from the proxy with given id.
  *
  * Returns 0 on success, -1 on failure (error message is printed to console).
  */
-int tls_proxy_get_status(int id, proxy_status *status)
+int tls_proxy_get_status(int id, proxy_status* status)
 {
         if ((the_backend.management_socket_pair[0] < 0) || (the_backend.management_socket_pair[0] < 0))
         {
@@ -174,11 +181,12 @@ int tls_proxy_get_status(int id, proxy_status *status)
 
         /* Create the PROXY_STATUS_REQUEST message. Object is used for the response, too. */
         proxy_management_message message = {
-            .type = PROXY_STATUS_REQUEST,
-            .payload.status_req = {
-                .proxy_id = id,
-                .status_obj_ptr = status,
-            }};
+                .type = PROXY_STATUS_REQUEST,
+                .payload.status_req = {
+                        .proxy_id = id,
+                        .status_obj_ptr = status,
+                }
+        };
 
         /* Send request */
         int ret = send_management_message(the_backend.management_socket_pair[0], &message);
@@ -207,49 +215,6 @@ int tls_proxy_get_status(int id, proxy_status *status)
         return 0;
 }
 
-int tls_proxy_get_status_appl_id(int appl_id, proxy_status *status);
-
-int tls_proxy_stop_appl_id(int application_id)
-{
-        if ((the_backend.management_socket_pair[0] < 0) || (the_backend.management_socket_pair[0] < 0))
-        {
-                LOG_ERROR("Proxy backend not running");
-                return -1;
-        }
-
-        /* Create a PROXY_STOP_REQUEST message */
-        proxy_management_message request = {
-            .type = PROXY_STOP_APPL_ID_REQUEST,
-            .payload.application_id = application_id,
-        };
-        proxy_management_message response = {0};
-
-        /* Send request */
-        int ret = send_management_message(the_backend.management_socket_pair[0], &request);
-        if (ret < 0)
-        {
-                return -1;
-        }
-
-        /* Wait for response */
-        ret = read_management_message(the_backend.management_socket_pair[0], &response);
-        if (ret < 0)
-        {
-                return -1;
-        }
-        else if (response.type != RESPONSE)
-        {
-                LOG_ERROR("Received invalid response");
-                return -1;
-        }
-        else if (response.payload.response_code < 0)
-        {
-                LOG_ERROR("Error stopping TLS proxy (error %d)", response.payload.response_code);
-                return -1;
-        }
-
-        return 0;
-}
 
 /* Stop the running proxy with given id (returned by tls_forward_proxy_start or
  * tls_forward_proxy_start).
@@ -266,8 +231,8 @@ int tls_proxy_stop(int id)
 
         /* Create a PROXY_STOP_REQUEST message */
         proxy_management_message request = {
-            .type = PROXY_STOP_REQUEST,
-            .payload.proxy_id = id,
+                .type = PROXY_STOP_REQUEST,
+                .payload.proxy_id = id,
         };
         proxy_management_message response = {0};
 
@@ -298,6 +263,7 @@ int tls_proxy_stop(int id)
         return 0;
 }
 
+
 /* Terminate the application backend.
  *
  * Returns 0 on success, -1 on failure (error message is printed to console).
@@ -312,8 +278,8 @@ int tls_proxy_backend_terminate(void)
 
         /* Create a BACKEND_STOP_REQUEST message */
         proxy_management_message request = {
-            .type = BACKEND_STOP_REQUEST,
-            .payload.dummy_unused = 0,
+                .type = BACKEND_STOP_REQUEST,
+                .payload.dummy_unused = 0,
         };
         proxy_management_message response = {0};
 
@@ -346,3 +312,4 @@ int tls_proxy_backend_terminate(void)
 
         return 0;
 }
+

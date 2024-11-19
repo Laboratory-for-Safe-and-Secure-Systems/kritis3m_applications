@@ -1,10 +1,19 @@
 #include <errno.h>
 #include <pthread.h>
-#include <sys/socket.h>
 #include <unistd.h>
 #include <stdint.h>
 #include <string.h>
+
+#if defined(_WIN32)
+
+#include <winsock2.h>
+
+#else
+
+#include <sys/socket.h>
 #include <netinet/tcp.h>
+
+#endif
 
 #include "tcp_client_stdin_bridge.h"
 
@@ -12,69 +21,75 @@
 #include "poll_set.h"
 #include "networking.h"
 
+
 LOG_MODULE_CREATE(tcp_client_stdin_bridge);
 
-#define ERROR_OUT(...)                  \
-        {                               \
-                LOG_ERROR(__VA_ARGS__); \
-                goto cleanup;           \
-        }
+
+#define ERROR_OUT(...) { LOG_ERROR(__VA_ARGS__); goto cleanup; }
+
 
 #if !defined(__ZEPHYR__)
 
 #define RECV_BUFFER_SIZE 1024
 
+
 enum tcp_client_stdin_bridge_management_message_type
 {
-        MANAGEMENT_MSG_STATUS_REQUEST,
-        MANAGEMENT_MSG_SHUTDOWN,
-        MANAGEMENT_RESPONSE
+	MANAGEMENT_MSG_STATUS_REQUEST,
+	MANAGEMENT_MSG_SHUTDOWN,
+	MANAGEMENT_RESPONSE
 };
 
 typedef struct tcp_client_stdin_bridge_management_message
 {
-        enum tcp_client_stdin_bridge_management_message_type type;
+	enum tcp_client_stdin_bridge_management_message_type type;
 
         union
         {
-                tcp_client_stdin_bridge_status *status_ptr; /* STATUS_REQUEST */
+                tcp_client_stdin_bridge_status* status_ptr; /* STATUS_REQUEST */
                 int dummy_unused;                           /* SHUTDOWN */
-                int response_code;                          /* RESPONSE */
-        } payload;
-} tcp_client_stdin_bridge_management_message;
+		int response_code;                          /* RESPONSE */
+        }
+        payload;
+}
+tcp_client_stdin_bridge_management_message;
+
 
 typedef struct tcp_client_stdin_bridge
 {
-        int32_t application_id;
         bool running;
         int tcp_socket;
+        struct addrinfo* target_addr;
         pthread_t thread;
         pthread_attr_t thread_attr;
         poll_set poll_set;
         int management_socket_pair[2];
         size_t num_of_bytes_in_recv_buffer;
         uint8_t recv_buffer[RECV_BUFFER_SIZE];
-} tcp_client_stdin_bridge;
+}
+tcp_client_stdin_bridge;
+
 
 /* File global variables */
 static tcp_client_stdin_bridge client_stdin_bridge = {
-    .application_id = -1,
-    .running = false,
-    .tcp_socket = -1,
-    .management_socket_pair = {-1, -1},
-    .num_of_bytes_in_recv_buffer = 0,
+        .running = false,
+        .tcp_socket = -1,
+        .management_socket_pair = {-1, -1},
+        .num_of_bytes_in_recv_buffer = 0,
 };
 
-/* Internal method declarations */
-static void *tcp_client_stdin_bridge_main_thread(void *ptr);
-static int send_management_message(int socket, tcp_client_stdin_bridge_management_message const *msg);
-static int read_management_message(int socket, tcp_client_stdin_bridge_management_message *msg);
-static int handle_management_message(tcp_client_stdin_bridge *bridge, int socket);
-static void bridge_cleanup(tcp_client_stdin_bridge *bridge);
 
-static void *tcp_client_stdin_bridge_main_thread(void *ptr)
+/* Internal method declarations */
+static void* tcp_client_stdin_bridge_main_thread(void* ptr);
+static int send_management_message(int socket, tcp_client_stdin_bridge_management_message const* msg);
+static int read_management_message(int socket, tcp_client_stdin_bridge_management_message* msg);
+static int handle_management_message(tcp_client_stdin_bridge* bridge, int socket);
+static void bridge_cleanup(tcp_client_stdin_bridge* bridge);
+
+
+static void* tcp_client_stdin_bridge_main_thread(void* ptr)
 {
-        tcp_client_stdin_bridge *bridge = (tcp_client_stdin_bridge *)ptr;
+        tcp_client_stdin_bridge* bridge = (tcp_client_stdin_bridge*) ptr;
         bool shutdown = false;
 
         bridge->running = true;
@@ -88,8 +103,7 @@ static void *tcp_client_stdin_bridge_main_thread(void *ptr)
                 /* Block and wait for incoming events (new connections, received data, ...) */
                 int ret = poll(bridge->poll_set.fds, bridge->poll_set.num_fds, -1);
 
-                if (ret == -1)
-                {
+                if (ret == -1) {
                         LOG_ERROR("poll error: %d", errno);
                         continue;
                 }
@@ -100,7 +114,7 @@ static void *tcp_client_stdin_bridge_main_thread(void *ptr)
                         int fd = bridge->poll_set.fds[i].fd;
                         short event = bridge->poll_set.fds[i].revents;
 
-                        if (event == 0)
+                        if(event == 0)
                                 continue;
 
                         /* Check management socket */
@@ -131,8 +145,8 @@ static void *tcp_client_stdin_bridge_main_thread(void *ptr)
 
                                                 /* Print data */
                                                 ret = write(STDIN_FILENO,
-                                                            bridge->recv_buffer,
-                                                            bridge->num_of_bytes_in_recv_buffer);
+                                                           bridge->recv_buffer,
+                                                           bridge->num_of_bytes_in_recv_buffer);
                                         }
                                         else if (ret == 0)
                                         {
@@ -188,6 +202,10 @@ static void *tcp_client_stdin_bridge_main_thread(void *ptr)
                                                         ret = 0;
                                                 }
                                         }
+                                        else if (ret < 0)
+                                        {
+                                                LOG_ERROR("Error reading from stdin: %d (%s)", errno, strerror(errno));
+                                        }
                                 }
                         }
                         else
@@ -203,7 +221,8 @@ static void *tcp_client_stdin_bridge_main_thread(void *ptr)
         return NULL;
 }
 
-static int send_management_message(int socket, tcp_client_stdin_bridge_management_message const *msg)
+
+static int send_management_message(int socket, tcp_client_stdin_bridge_management_message const* msg)
 {
         int ret = 0;
         static const int max_retries = 5;
@@ -211,7 +230,7 @@ static int send_management_message(int socket, tcp_client_stdin_bridge_managemen
 
         while ((ret <= 0) && (retries < max_retries))
         {
-                ret = send(socket, msg, sizeof(tcp_client_stdin_bridge_management_message), 0);
+                ret = send(socket, (char*) msg, sizeof(tcp_client_stdin_bridge_management_message), 0);
                 if (ret < 0)
                 {
                         if (errno != EAGAIN)
@@ -240,9 +259,10 @@ static int send_management_message(int socket, tcp_client_stdin_bridge_managemen
         return 0;
 }
 
-static int read_management_message(int socket, tcp_client_stdin_bridge_management_message *msg)
+
+static int read_management_message(int socket, tcp_client_stdin_bridge_management_message* msg)
 {
-        int ret = recv(socket, msg, sizeof(tcp_client_stdin_bridge_management_message), 0);
+        int ret = recv(socket, (char*) msg, sizeof(tcp_client_stdin_bridge_management_message), 0);
         if (ret < 0)
         {
                 LOG_ERROR("Error receiving message: %d (%s)", errno, strerror(errno));
@@ -258,79 +278,89 @@ static int read_management_message(int socket, tcp_client_stdin_bridge_managemen
         return 0;
 }
 
+
 /* Handle incoming management messages.
  *
  * Return 0 in case the message has been processed successfully, -1 otherwise. In case the connection thread has
  * to be stopped and the connection has to be cleaned up, +1 in returned.
  */
-static int handle_management_message(tcp_client_stdin_bridge *bridge, int socket)
+static int handle_management_message(tcp_client_stdin_bridge* bridge, int socket)
 {
         /* Read message from the management socket. */
-        tcp_client_stdin_bridge_management_message msg = {0};
-        int ret = read_management_message(socket, &msg);
-        if (ret < 0)
-        {
-                LOG_ERROR("Error reading management message: %d", ret);
-                return -1;
-        }
+	tcp_client_stdin_bridge_management_message msg = {0};
+	int ret = read_management_message(socket, &msg);
+	if (ret < 0)
+	{
+		LOG_ERROR("Error reading management message: %d", ret);
+		return -1;
+	}
 
         switch (msg.type)
         {
-        case MANAGEMENT_MSG_STATUS_REQUEST:
-        {
-                /* Fill status object */
-                tcp_client_stdin_bridge_status *status = msg.payload.status_ptr;
-                status->is_running = bridge->running;
+		case MANAGEMENT_MSG_STATUS_REQUEST:
+                {
+			/* Fill status object */
+			tcp_client_stdin_bridge_status* status = msg.payload.status_ptr;
+			status->is_running = bridge->running;
 
-                /* Send response */
-                msg.type = MANAGEMENT_RESPONSE;
-                msg.payload.response_code = 0;
-                ret = send_management_message(socket, &msg);
-                break;
-        }
-        case MANAGEMENT_MSG_SHUTDOWN:
-        {
-                /* Return 1 to indicate we have to stop the connection thread and cleanup */
-                ret = 1;
+                        /* Send response */
+			msg.type = MANAGEMENT_RESPONSE;
+			msg.payload.response_code = 0;
+                        ret = send_management_message(socket, &msg);
+                        break;
+                }
+		case MANAGEMENT_MSG_SHUTDOWN:
+                {
+                        /* Return 1 to indicate we have to stop the connection thread and cleanup */
+                        ret = 1;
 
-                /* Send response */
-                msg.type = MANAGEMENT_RESPONSE;
-                msg.payload.response_code = 0;
+                        /* Send response */
+			msg.type = MANAGEMENT_RESPONSE;
+			msg.payload.response_code = 0;
 
-                /* Do not update ret here to make sure the thread terminates */
-                send_management_message(socket, &msg);
+                        /* Do not update ret here to make sure the thread terminates */
+                        send_management_message(socket, &msg);
 
-                LOG_DEBUG("Received shutdown message, stopping server");
-                break;
-        }
-        default:
-                LOG_ERROR("Received invalid management message: msg->type=%d", msg.type);
-                ret = -1;
-                break;
-        }
+			LOG_DEBUG("Received shutdown message, stopping server");
+                        break;
+                }
+                default:
+                        LOG_ERROR("Received invalid management message: msg->type=%d", msg.type);
+                        ret = -1;
+                        break;
+	}
 
-        return ret;
+	return ret;
 }
 
-static void bridge_cleanup(tcp_client_stdin_bridge *bridge)
+
+static void bridge_cleanup(tcp_client_stdin_bridge* bridge)
 {
         /* Close the TCP socket */
         if (bridge->tcp_socket != -1)
         {
-                close(bridge->tcp_socket);
+                closesocket(bridge->tcp_socket);
                 bridge->tcp_socket = -1;
         }
 
         /* Close the management socket pair */
         if (bridge->management_socket_pair[0] != -1)
         {
-                close(bridge->management_socket_pair[0]);
+                int sock = bridge->management_socket_pair[0];
                 bridge->management_socket_pair[0] = -1;
+                closesocket(sock);
         }
         if (bridge->management_socket_pair[1] != -1)
         {
-                close(bridge->management_socket_pair[1]);
+                int sock = bridge->management_socket_pair[1];
                 bridge->management_socket_pair[1] = -1;
+                closesocket(sock);
+        }
+
+        if (bridge->target_addr != NULL)
+        {
+                freeaddrinfo(bridge->target_addr);
+                bridge->target_addr = NULL;
         }
 
         bridge->running = false;
@@ -338,11 +368,12 @@ static void bridge_cleanup(tcp_client_stdin_bridge *bridge)
 
 #endif // !defined(__ZEPHYR__)
 
+
 /* Create the default config for the TCP client stdin bridge */
 tcp_client_stdin_bridge_config tcp_client_stdin_bridge_default_config(void)
 {
         tcp_client_stdin_bridge_config default_config = {0};
-        default_config.application_id = -1;
+
         default_config.target_ip_address = NULL;
         default_config.target_port = 0;
         default_config.log_level = LOG_LVL_WARN;
@@ -350,11 +381,12 @@ tcp_client_stdin_bridge_config tcp_client_stdin_bridge_default_config(void)
         return default_config;
 }
 
+
 /* Start a new thread and run the TCP client stdin bridge application.
  *
  * Returns 0 on success, -1 on failure (error message is printed to console).
  */
-int tcp_client_stdin_bridge_run(tcp_client_stdin_bridge_config const *config)
+int tcp_client_stdin_bridge_run(tcp_client_stdin_bridge_config const* config)
 {
         /* Set the log level */
         LOG_LVL_SET(config->log_level);
@@ -366,42 +398,50 @@ int tcp_client_stdin_bridge_run(tcp_client_stdin_bridge_config const *config)
         /* Init */
         poll_set_init(&client_stdin_bridge.poll_set);
         client_stdin_bridge.num_of_bytes_in_recv_buffer = 0;
+        client_stdin_bridge.target_addr = NULL;
 
         /* Create the socket pair for external management */
-        int ret = socketpair(AF_UNIX, SOCK_STREAM, 0, client_stdin_bridge.management_socket_pair);
+        int ret = create_socketpair(client_stdin_bridge.management_socket_pair);
         if (ret < 0)
                 ERROR_OUT("Error creating socket pair for management: %d (%s)", errno, strerror(errno));
 
         LOG_DEBUG("Created management socket pair (%d, %d)", client_stdin_bridge.management_socket_pair[0],
-                  client_stdin_bridge.management_socket_pair[1]);
-
-        /* Create the TCP socket for the outgoing connection */
-        client_stdin_bridge.tcp_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-        if (client_stdin_bridge.tcp_socket == -1)
-                ERROR_OUT("Error creating TCP socket");
+                                                             client_stdin_bridge.management_socket_pair[1]);
 
         LOG_INFO("Connecting to %s:%d", config->target_ip_address, config->target_port);
 
-        /* Configure TCP server */
-        struct sockaddr_in target_addr = {
-            .sin_family = AF_INET,
-            .sin_port = htons(config->target_port)};
-        net_addr_pton(target_addr.sin_family, config->target_ip_address, &target_addr.sin_addr);
+         /* Do a DNS lookup to make sure we have an IP address. If we already have an IP, this
+         * results in a noop. */
+        if (address_lookup_client(config->target_ip_address, config->target_port, &client_stdin_bridge.target_addr) < 0)
+                ERROR_OUT("Error looking up target IP address");
+
+        /* Create the TCP socket for the outgoing connection */
+        client_stdin_bridge.tcp_socket = socket(client_stdin_bridge.target_addr->ai_family, SOCK_STREAM, IPPROTO_TCP);
+        if (client_stdin_bridge.tcp_socket == -1)
+                ERROR_OUT("Error creating TCP socket");
 
         /* Set the new socket to non-blocking */
         setblocking(client_stdin_bridge.tcp_socket, false);
 
         /* Set TCP_NODELAY option to disable Nagle algorithm */
-        if (setsockopt(client_stdin_bridge.tcp_socket, IPPROTO_TCP, TCP_NODELAY, &(int){1}, sizeof(int)) < 0)
+        if (setsockopt(client_stdin_bridge.tcp_socket, IPPROTO_TCP, TCP_NODELAY, (char*)&(int){1}, sizeof(int)) < 0)
                 ERROR_OUT("setsockopt(TCP_NODELAY) failed: error %d", errno);
 
+#if !defined(_WIN32)
         /* Set retry count to send a total of 3 SYN packets => Timeout ~7s */
-        if (setsockopt(client_stdin_bridge.tcp_socket, IPPROTO_TCP, TCP_SYNCNT, &(int){2}, sizeof(int)) < 0)
+        if (setsockopt(client_stdin_bridge.tcp_socket, IPPROTO_TCP, TCP_SYNCNT, (char*)&(int){2}, sizeof(int)) < 0)
                 ERROR_OUT("setsockopt(TCP_SYNCNT) failed: error %d", errno);
+#endif
 
         /* Connect to the peer */
-        ret = connect(client_stdin_bridge.tcp_socket, (struct sockaddr *)&target_addr, sizeof(target_addr));
-        if ((ret != 0) && (errno != EINPROGRESS))
+        ret = connect(client_stdin_bridge.tcp_socket, (struct sockaddr*) client_stdin_bridge.target_addr->ai_addr,
+                      client_stdin_bridge.target_addr->ai_addrlen);
+        if ((ret != 0) &&
+        #if defined(_WIN32)
+                (WSAGetLastError() != WSAEWOULDBLOCK))
+        #else
+                (errno != EINPROGRESS))
+        #endif
                 ERROR_OUT("Unable to connect to target peer, errno: %d", errno);
 
         /* Add new server to the poll_set */
@@ -413,7 +453,6 @@ int tcp_client_stdin_bridge_run(tcp_client_stdin_bridge_config const *config)
         ret = poll_set_add_fd(&client_stdin_bridge.poll_set, STDIN_FILENO, POLLIN);
         if (ret != 0)
                 ERROR_OUT("Error adding stdin to poll_set");
-        client_stdin_bridge.application_id = config->application_id;
 
         /* Init main backend */
         pthread_attr_init(&client_stdin_bridge.thread_attr);
@@ -434,11 +473,12 @@ cleanup:
 #endif
 }
 
+
 /* Querry status information from the TCP STDIN bridge.
  *
  * Returns 0 on success, -1 on failure (error message is printed to console).
  */
-int tcp_client_stdin_bridge_get_status(tcp_client_stdin_bridge_status *status)
+int tcp_client_stdin_bridge_get_status(tcp_client_stdin_bridge_status* status)
 {
 #if defined(__ZEPHYR__)
         LOG_ERROR("TCP client stdin bridge not supported on Zephyr");
@@ -480,9 +520,10 @@ int tcp_client_stdin_bridge_get_status(tcp_client_stdin_bridge_status *status)
                 return -1;
         }
 
-        return 0;
+	return 0;
 #endif
 }
+
 
 /* Terminate the tcp_client_stdin_bridge application.
  *
@@ -502,11 +543,11 @@ int tcp_client_stdin_bridge_terminate(void)
         }
 
         /* Send shutdown message to the management socket */
-        tcp_client_stdin_bridge_management_message msg = {0};
+	tcp_client_stdin_bridge_management_message msg = {0};
         msg.type = MANAGEMENT_MSG_SHUTDOWN;
         msg.payload.dummy_unused = 0;
 
-        /* Send request */
+	/* Send request */
         int ret = send_management_message(client_stdin_bridge.management_socket_pair[0], &msg);
         if (ret < 0)
         {

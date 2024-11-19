@@ -1,15 +1,21 @@
 
 #include <errno.h>
-#include <sys/socket.h>
 #include <stdint.h>
 
 #if defined(__ZEPHYR__)
 
+#include <sys/socket.h>
 #include <zephyr/posix/fcntl.h>
 #include <zephyr/net/net_l2.h>
 
+#elif defined(_WIN32)
+
+#include <winsock2.h>
+#include <sys/types.h>
+
 #else
 
+#include <sys/socket.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
@@ -24,9 +30,12 @@
 #endif
 
 
-
 #include "networking.h"
 #include "logging.h"
+
+
+#define ERROR_OUT(...) { LOG_ERROR(__VA_ARGS__); goto cleanup; }
+
 
 LOG_MODULE_CREATE(networking);
 
@@ -89,7 +98,7 @@ static void iface_up_handler(struct net_mgmt_event_callback *cb, uint32_t mgmt_e
 
 
 /* Initialize the network interfaces */
-int initialize_network_interfaces()
+int initialize_network_interfaces(int32_t log_level)
 {
 	/* Add an event handler to track ethernet link changes */
 	static struct net_mgmt_event_callback iface_up_cb;
@@ -200,16 +209,40 @@ int remove_ipv4_address(void* iface, struct in_addr ipv4_addr)
 	return 0;
 }
 
+#elif defined(_WIN32)
+
+#include <stdio.h>
+
+/* Initialize the network interfaces */
+int initialize_network_interfaces(int32_t log_level)
+{
+	WSADATA wsaData;
+
+	LOG_LVL_SET(log_level);
+
+	if(WSAStartup(0x202, &wsaData) == 0)
+	{
+		return 0;
+	}
+	else
+	{
+		LOG_ERROR("Network initialization failed.\n");
+		return -1;
+	}
+}
+
 #else //defined (__ZEPHYR__)
 
 /* Initialize the network interfaces */
-int initialize_network_interfaces()
+int initialize_network_interfaces(int32_t log_level)
 {
-    ifaces.management = "eth0";
-    ifaces.lan = "vlan400";
-    ifaces.wan = "vlan300";
+	ifaces.management = "eth0";
+	ifaces.lan = "vlan400";
+	ifaces.wan = "vlan300";
 
-    return 0;
+	LOG_LVL_SET(log_level);
+
+	return 0;
 }
 
 
@@ -324,6 +357,17 @@ struct network_interfaces const* network_interfaces(void)
 /* Helper method to set a socket to (non) blocking */
 int setblocking(int fd, bool val)
 {
+#ifdef _WIN32
+	unsigned long arg = 1;
+	int ret = ioctlsocket(fd, FIONBIO, &arg);
+	if (ret != NO_ERROR)
+	{
+		LOG_ERROR("ioctlsocket(FIONBIO): %d", ret);
+		return ret;
+	}
+
+	return 0;
+#else
 	int fl, res;
 
 	fl = fcntl(fd, F_GETFL, 0);
@@ -350,30 +394,190 @@ int setblocking(int fd, bool val)
 	}
 
 	return 0;
+#endif
 }
 
-/* Temporary helper method to send data synchronously */
-int blocking_send(int fd, char* data, size_t length)
+#include <stdio.h>
+
+/* Generic method to create a socketpair for inter-thread communication */
+int create_socketpair(int socket_pair[2])
 {
-	setblocking(fd, true); //ToDo: remove this blocking stuff and implement proper async send
+#if defined(_WIN32)
+	/* Implementation taken from:
+	 * https://github.com/ncm/selectable-socketpair/blob/master/socketpair.c */
+	union {
+		struct sockaddr_in inaddr;
+		struct sockaddr addr;
+	} a;
+	SOCKET listener;
+	int e;
+	socklen_t addrlen = sizeof(a.inaddr);
+	DWORD flags = 0;
+	int reuse = 1;
 
-	int out_len;
-	for (char const* p = data; length > 0; length -= out_len)
-	{
-		out_len = send(fd, p, length, 0);
+	if (socket_pair == 0) {
+		WSASetLastError(WSAEINVAL);
+		return SOCKET_ERROR;
+	}
+	socket_pair[0] = socket_pair[1] = -1;
 
-		if (out_len < 0)
-		{
-			int error = errno;
-			LOG_ERROR("send error (fd=%d): %d", fd, error);
-			break;
-		}
-
-		p += out_len;
+	listener = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+	if (listener == -1) {
+		int error = WSAGetLastError();
+		printf("socket error: %d\n", error);
+		return SOCKET_ERROR;
 	}
 
-	setblocking(fd, false);
 
-	return -errno;
+	memset(&a, 0, sizeof(a));
+	a.inaddr.sin_family = AF_INET;
+	a.inaddr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+	a.inaddr.sin_port = 0;
+
+	for (;;) {
+		if (setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, (char*) &reuse, (socklen_t) sizeof(reuse)) == -1)
+			break;
+		if (bind(listener, &a.addr, sizeof(a.inaddr)) == SOCKET_ERROR)
+			break;
+
+		memset(&a, 0, sizeof(a));
+		if  (getsockname(listener, &a.addr, &addrlen) == SOCKET_ERROR)
+			break;
+
+		// win32 getsockname may only set the port number, p=0.0005.
+		// ( http://msdn.microsoft.com/library/ms738543.aspx ):
+		a.inaddr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+		a.inaddr.sin_family = AF_INET;
+
+		if (listen(listener, 1) == SOCKET_ERROR)
+			break;
+
+		socket_pair[0] = WSASocketW(AF_INET, SOCK_STREAM, 0, NULL, 0, flags);
+		if (socket_pair[0] == -1)
+			break;
+
+		if (connect(socket_pair[0], &a.addr, sizeof(a.inaddr)) == SOCKET_ERROR)
+			break;
+
+		socket_pair[1] = accept(listener, NULL, NULL);
+		if (socket_pair[1] == -1)
+			break;
+
+		closesocket(listener);
+		return 0;
+	}
+
+	e = WSAGetLastError();
+	closesocket(listener);
+	closesocket(socket_pair[0]);
+	closesocket(socket_pair[1]);
+	WSASetLastError(e);
+	socket_pair[0] = socket_pair[1] = -1;
+	return SOCKET_ERROR;
+
+#else
+	int ret = socketpair(AF_UNIX, SOCK_STREAM, 0, socket_pair);
+	if (ret < 0)
+		socket_pair[0] = socket_pair[1] = -1;
+
+	return ret;
+#endif
 }
 
+
+static int address_lookup_internal(char const* dest, uint16_t port, struct addrinfo** addr,
+				   int flags)
+{
+	struct addrinfo hints = {
+		.ai_family = AF_UNSPEC,
+		.ai_socktype = SOCK_STREAM,
+		.ai_protocol = IPPROTO_TCP,
+		.ai_flags = flags
+	};
+
+	char port_str[6];
+	snprintf(port_str, sizeof(port_str), "%d", port);
+
+	int ret = getaddrinfo(dest, port_str, &hints, addr);
+	if (ret != 0)
+	{
+		if (dest)
+			LOG_ERROR("getaddrinfo failed for %s:%d: %s", dest, port, gai_strerror(ret));
+		else
+			LOG_ERROR("getaddrinfo failed for port %d: %s", port, gai_strerror(ret));
+		return -1;
+	}
+
+	return 0;
+}
+
+/* Lookup the provided outgoing destination and fill the linked-list accordingly. */
+int address_lookup_client(char const* dest, uint16_t port, struct addrinfo** addr)
+{
+	return address_lookup_internal(dest, port, addr, AI_NUMERICSERV | AI_ADDRCONFIG);
+}
+
+
+/* Lookup the provided incoming destination and fill the linked-list accordingly. */
+int address_lookup_server(char const* dest, uint16_t port, struct addrinfo** addr)
+{
+	return address_lookup_internal(dest, port, addr, AI_PASSIVE | AI_NUMERICSERV | AI_ADDRCONFIG);
+}
+
+
+/* Create a new listening socket for given type and address.
+ *
+ * Return value is the socket file descriptor or -1 in case of an error.
+ */
+int create_listening_socket(int type, struct sockaddr* addr, socklen_t addr_len)
+{
+	int sock = -1;
+	char ip_str[INET6_ADDRSTRLEN];
+
+	if (type == AF_INET)
+		net_addr_ntop(type, &((struct sockaddr_in*)addr)->sin_addr, ip_str, sizeof(ip_str));
+	else if (type == AF_INET6)
+		net_addr_ntop(type, &((struct sockaddr_in6*)addr)->sin6_addr, ip_str, sizeof(ip_str));
+
+	/* Prepare the socket */
+	sock = socket(type, SOCK_STREAM, IPPROTO_TCP);
+
+	if (sock == -1)
+		ERROR_OUT("Error creating incoming TCP socket");
+
+	if (type == AF_INET6)
+	{
+		if (setsockopt(sock, IPPROTO_IPV6, IPV6_V6ONLY, (char*)&(int){1}, sizeof(int)) < 0)
+			ERROR_OUT("setsockopt(IPV6_V6ONLY) failed: error %d\n", errno);
+	}
+
+	if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (char*)&(int){1}, sizeof(int)) < 0)
+		ERROR_OUT("setsockopt(SO_REUSEADDR) failed: error %d\n", errno);
+
+	if (bind(sock, addr, addr_len) < 0)
+		ERROR_OUT("Cannot bind socket %d to %s:%d: error %d\n", sock, ip_str,
+			  ntohs(((struct sockaddr_in*)addr)->sin_port), errno);
+
+	/* If a random port have been used, obtain the actually selected one */
+	if (ntohs(((struct sockaddr_in*)addr)->sin_port) == 0)
+	{
+		if (getsockname(sock, addr, &addr_len) < 0)
+                        ERROR_OUT("getsockname failed with errno: %d", errno);
+	}
+
+	if (listen(sock, 5) < 0)
+		ERROR_OUT("Error listening on socket %d: %d", sock, errno);
+
+	if (setblocking(sock, false) != 0)
+		ERROR_OUT("Error setting socket to non-blocking");
+
+	LOG_DEBUG("Listening on %s:%d", ip_str, ntohs(((struct sockaddr_in*)addr)->sin_port));
+
+	return sock;
+
+cleanup:
+	if (sock != -1)
+		closesocket(sock);
+
+	return -1;
+}
