@@ -14,6 +14,8 @@ typedef struct timing_metrics timing_metrics;
 
 typedef struct timing_metrics_results
 {
+        /* All timing values are in microseconds */
+
         size_t num_measurements;
         uint32_t min;
         uint32_t max;
