@@ -32,17 +32,46 @@ typedef struct
     pthread_cond_t cond;
 } ThreadPool;
 
+enum request_type
+{
+    REQ_UNDIFINED,
+    REQ_DISTRIBUTION
+} request_type;
+
+// makes no sense
+struct distribution_request
+{
+    int version_number;
+    char *updated_at;
+};
+
+typedef struct
+{
+    int sock;
+    asl_session *session;
+    bool is_open;
+    enum request_type request_type;
+    union req
+    {
+        struct distribution_request dist_req;
+        char *some_other_req;
+    } req;
+} request_object;
+
+struct conn
+{
+    struct addrinfo *mgmt_sockaddr;
+    asl_endpoint *mgmt_endpoint;
+    request_object mgmt_req;
+};
+
 typedef struct
 {
     char serial_number[SERIAL_NUMBER_SIZE];
     /**
      * used for the connection to the server
      */
-    struct management
-    {
-        struct addrinfo *mgmt_sockaddr;
-        asl_endpoint *mgmt_endpoint;
-    } mgmt;
+    struct conn con;
 
 #ifdef PKI_READY
     struct management_pki
@@ -55,18 +84,6 @@ typedef struct
     ThreadPool pool;
 } Http_service_module;
 
-// will be changed
-typedef struct
-{
-    char *url;
-    int thread_id;
-    int fd;
-    asl_session *session;
-    struct response response;
-    struct sockaddr_in server_addr;
-    t_http_get_cb get_cb;
-} http_get;
-
 static Http_service_module http_service = {0};
 
 /*-----------------------------  FORWARD DECLARATIONS -------------------------------------*/
@@ -77,6 +94,9 @@ void init_thread_pool(ThreadPool *pool);
 int get_free_thread_id();
 void signal_thread_finished(int thread_id);
 void cleanup_http_service(void);
+int startup_connection(struct conn *con);
+int create_inital_controller_url(char *url, int url_size);
+int create_periodic_controller_url(char *url, int url_size, int version_number);
 /*-----------------------------  END FORWARD DECLARATIONS -------------------------------------*/
 
 static void http_get_cb(struct http_response *rsp,
@@ -103,14 +123,14 @@ int init_http_service(Kritis3mManagemntConfiguration *config,
     // Perform address lookup for management endpoint
     if (address_lookup_client(config->server_endpoint_addr.address,
                               config->server_endpoint_addr.port,
-                              (struct addrinfo **)&http_service.mgmt.mgmt_sockaddr) != 0)
+                              (struct addrinfo **)&http_service.con.mgmt_sockaddr) != 0)
     {
         goto cleanup;
     }
 
     // Setup management endpoint
-    http_service.mgmt.mgmt_endpoint = asl_setup_client_endpoint(mgmt_endpoint_config);
-    if (!http_service.mgmt.mgmt_endpoint)
+    http_service.con.mgmt_endpoint = asl_setup_client_endpoint(mgmt_endpoint_config);
+    if (!http_service.con.mgmt_endpoint)
     {
         goto cleanup;
     }
@@ -131,7 +151,6 @@ int init_http_service(Kritis3mManagemntConfiguration *config,
         goto cleanup;
     }
 #endif
-
     // Initialize thread pool
     init_thread_pool(&http_service.pool);
 
@@ -148,9 +167,17 @@ cleanup:
 void set_http_service_defaults(Http_service_module *service)
 {
     memset(http_service.serial_number, 0, SERIAL_NUMBER_SIZE);
+    http_service.con.mgmt_endpoint = NULL;
+    http_service.con.mgmt_sockaddr = NULL;
 
-    http_service.mgmt.mgmt_endpoint = NULL;
-    http_service.mgmt.mgmt_sockaddr = NULL;
+    // set req defaults
+    http_service.con.mgmt_req.session = NULL;
+    http_service.con.mgmt_req.sock = -1;
+    http_service.con.mgmt_req.request_type = REQ_UNDIFINED;
+    memset(&http_service.con.mgmt_req.req, 0, sizeof(http_service.con.mgmt_req.req));
+    http_service.con.mgmt_req.is_open = false;
+
+    // clear union
 
 #ifdef PKI_READY
     service->mgmt_pki.mgmt_sockaddr = NULL;
@@ -165,12 +192,21 @@ void set_http_service_defaults(Http_service_module *service)
  */
 void cleanup_http_service(void)
 {
-    // Clean up management connection
-    if (http_service.mgmt.mgmt_endpoint)
-        asl_free_endpoint(http_service.mgmt.mgmt_endpoint);
 
-    if (http_service.mgmt.mgmt_sockaddr)
-        freeaddrinfo(http_service.mgmt.mgmt_sockaddr);
+    if (http_service.con.mgmt_req.session != NULL)
+    {
+        asl_close_session(http_service.con.mgmt_req.session);
+        asl_free_session(http_service.con.mgmt_req.session);
+    }
+    if (http_service.con.mgmt_req.sock > 0)
+        closesocket(http_service.con.mgmt_req.sock);
+
+    // Clean up management connection
+    if (http_service.con.mgmt_endpoint)
+        asl_free_endpoint(http_service.con.mgmt_endpoint);
+
+    if (http_service.con.mgmt_sockaddr)
+        freeaddrinfo(http_service.con.mgmt_sockaddr);
 
 #ifdef PKI_READY
     if (http_service.mgmt_pki.mgmt_sockaddr)
@@ -208,11 +244,8 @@ static void http_get_cb(struct http_response *rsp,
     struct response *http_request_status = (struct response *)user_data;
     if (http_request_status == NULL)
         return;
-    if (final_data == HTTP_DATA_MORE)
-    {
-        LOG_INFO("Partial data received (%zd bytes)", rsp->data_len);
-    }
-    else if (final_data == HTTP_DATA_FINAL)
+
+    if (final_data == HTTP_DATA_FINAL)
     {
         switch (rsp->http_status_code)
         {
@@ -228,197 +261,139 @@ static void http_get_cb(struct http_response *rsp,
             goto error_occured;
             break;
         case HTTP_SERVICE_UNAVAILABLE:
-            LOG_INFO("Hardbeat service is not supported from the server");
             http_request_status->ret = MGMT_BAD_REQUEST;
             goto error_occured;
             break;
         case HTTP_TOO_MANY_REQUESTS:
-            LOG_INFO("Retry later");
+            LOG_DEBUG("Retry later");
             http_request_status->ret = MGMT_BUSY;
             goto error_occured;
             break;
         default:
             LOG_ERROR("responded http code is not handled, http response code: %d", rsp->http_status_code);
-
             break;
         }
+
+        http_request_status->http_status_code = HTTP_OK;
     }
     else
     {
-        LOG_ERROR("bla");
+        LOG_DEBUG("Partial data received (%zd bytes)", rsp->data_len);
     }
+
     return;
 error_occured:
+    http_request_status->http_status_code = rsp->http_status_code;
     http_request_status->bytes_received = 0;
     http_request_status->buffer_frag_start = NULL;
     return;
 }
 
-void *http_get_request(void *http_get_data)
+int startup_connection(struct conn *con)
 {
-    http_get *http_req_data = (http_get *)http_get_data;
-    t_http_get_cb cb = http_req_data->get_cb;
-
-    char ip_str[INET_ADDRSTRLEN]; // INET_ADDRSTRLEN is 16 for IPv4 addresses
-    char port[6];
-    struct http_request req = {0};
-    int fd = http_req_data->fd;
-    int thread_id = http_req_data->thread_id;
-    char *url = http_req_data->url;
-    asl_session *session = http_req_data->session;
-    struct response *response = &http_req_data->response;
     int ret = 0;
 
-    if (http_req_data == NULL)
-        return NULL;
+    if ((con == NULL) || (con->mgmt_endpoint == NULL) || (con->mgmt_sockaddr == NULL))
+        return -1;
 
-    if (cb == NULL ||
-        session == NULL ||
-        url == NULL)
-    {
-        LOG_INFO("bad initialisation");
-        goto shutdown;
-    }
+    con->mgmt_req.sock = socket(con->mgmt_sockaddr->ai_family, SOCK_STREAM, IPPROTO_TCP);
+    if (con->mgmt_req.sock < 0)
+        goto error_occured;
 
-    // Convert the IP address from network byte order to string
-    if (inet_ntop(AF_INET, &(http_req_data->server_addr.sin_addr), ip_str, INET_ADDRSTRLEN) == NULL)
-    {
-        LOG_ERROR("inet_ntop failed");
-        goto shutdown;
-    }
-    int port_num = ntohs(http_req_data->server_addr.sin_port);
-    if (port_num > 0)
-        snprintf(port, 6, "%d", port_num);
-    else
-        goto shutdown;
+    ret = connect(con->mgmt_req.sock, (struct sockaddr *)con->mgmt_sockaddr->ai_addr, con->mgmt_sockaddr->ai_addrlen);
+    if (ret < 0)
+        goto error_occured;
 
-    req.url = http_req_data->url;
-    req.host = ip_str;
-    req.port = port;
+    con->mgmt_req.session = asl_create_session(con->mgmt_endpoint, con->mgmt_req.sock);
+
+error_occured:
+    LOG_ERROR("error occured in startup_connectioN");
+
+    ret = -1;
+    return ret;
+}
+
+int update_call_controller(t_http_get_cb response_callback, int version_number, char *updated_at) { return 0; }
+
+int initial_call_controller(t_http_get_cb response_callback)
+{
+    //---------------------------------initialization ---------------------------------//
+    char url[520];
+    char host[NI_MAXHOST];
+    char port[NI_MAXSERV];
+    int ret = 0;
+    int fd = -1;
+    struct http_request req = {0};
+    char response_buffer[DISTRIBUTION_BUFFER_SIZE];
+    struct response response = {
+        .buffer = response_buffer,
+        .buffer_frag_start = NULL,
+        .buffer_size = DISTRIBUTION_BUFFER_SIZE,
+        .http_status_code = -1,
+        .ret = -1,
+        .service_used = MGMT_POLICY_REQ};
+    //---------------------------------initialization ---------------------------------//
+
+    if ((response_callback == NULL))
+        goto error_occured;
+
+    ret = startup_connection(&http_service.con);
+    if (ret < 0)
+        goto error_occured;
+
+    // get host
+    ret = getnameinfo(http_service.con.mgmt_sockaddr->ai_addr,
+                      http_service.con.mgmt_sockaddr->ai_addrlen,
+                      host,
+                      sizeof(host),
+                      NULL,
+                      0,
+                      NI_NUMERICHOST);
+    if (ret < 0)
+        goto error_occured;
+    // get port from addr info
+    ret = getnameinfo(http_service.con.mgmt_sockaddr->ai_addr,
+                      http_service.con.mgmt_sockaddr->ai_addrlen,
+                      NULL,
+                      0,
+                      port,
+                      sizeof(port),
+                      NI_NUMERICSERV);
+    if (ret < 0)
+        goto error_occured;
+
+    ret = create_inital_controller_url(url, 520);
+    if (ret < 0)
+        goto error_occured;
+
+    req.url = url;
     req.method = HTTP_GET;
     req.protocol = "HTTP/1.1";
     req.response = http_get_cb;
-
-    if (http_req_data->response.buffer == NULL)
-        goto shutdown;
-    req.recv_buf = http_req_data->response.buffer;
-    req.recv_buf_len = http_req_data->response.buffer_size;
-
+    req.host = host;
+    req.port = port;
     duration timeout = ms_toduration(5 * 1000);
 
-    ret = https_client_req(fd, session, &req, timeout, response);
+    ret = https_client_req(http_service.con.mgmt_req.sock,
+                           http_service.con.mgmt_req.session,
+                           &req,
+                           timeout,
+                           &response);
     if (ret < 0)
     {
-        LOG_ERROR("error on client req. need to implment error handler");
-        goto shutdown;
+        LOG_ERROR("error occured calling distribution server %s", ret);
+        response.ret = MGMT_ERR;
     }
-    cb(*response);
-    // signal_thread_finished(thread_id);
-    if (session != NULL)
-        asl_free_session(session);
-    if (fd > 0)
-        close(fd);
-    // signal_thread_finished(thread_id);
-    // pthread_exit(NULL);
-    return 0;
-shutdown:
-    LOG_ERROR("shutting down http get");
-    response->ret = MGMT_ERR;
-    if (response->buffer != NULL)
-        free(response->buffer);
-    signal_thread_finished(thread_id);
-    if (session != NULL)
-        asl_free_session(session);
-    if (fd > 0)
-        close(fd);
-    pthread_exit(NULL);
-}
-
-int call_distribution_service(t_http_get_cb response_callback, char *destination_path)
-{
-    struct response response = {0};
-    http_get http_get = {0};
-    static char *url[520];
-    int ret = 0;
-    int fd = -1;
-
-    if ((destination_path == NULL) || (response_callback == NULL))
-        goto error_occured;
-
-    http_get.response.service_used = MGMT_POLICY_REQ;
-    http_get.response.buffer = (char *)malloc(DISTRIBUTION_BUFFER_SIZE);
-    http_get.response.buffer_size = DISTRIBUTION_BUFFER_SIZE;
-    http_get.response.buffer_frag_start = 0;
-    http_get.response.meta.policy_req.destination_path = destination_path;
-
-    http_get.server_addr = http_service.management.mgmt_sockaddr;
-    http_get.get_cb = response_callback;
-    http_get.url = get_init_policy_url();
-
-    int thread_id = get_free_thread_id(&http_service.pool);
-    if (thread_id < 0)
-        goto error_occured;
-    http_get.thread_id = thread_id;
-
-    fd = socket(AF_INET, SOCK_STREAM, 0);
-    http_get.fd = fd;
-    ret = connect(fd, (struct sockaddr *)&http_get.server_addr, sizeof(http_get.server_addr));
-    if (ret < 0)
+    else
     {
-        LOG_ERROR("can't conenct");
-        goto error_occured;
+        LOG_DEBUG("succesfull http request to management server");
+        response.ret = MGMT_OK;
     }
-    http_get.session = asl_create_session(http_service.client_enpoint, fd);
-    if (http_get.session == NULL)
-        goto error_occured;
-    ret = asl_handshake(http_get.session);
-    if (ret < 0)
-    {
-        LOG_ERROR("failed in the handshake");
-        goto error_occured;
-    }
-
-    // ret = asl_send(http_get.session, "moin", sizeof("moin"));
-    // LOG_INFO("ret is : %d",ret);
-    // ret = asl_send(http_get.session, "moin", sizeof("moin"));
-    // LOG_INFO("ret is : %d",ret);
-    // ret =asl_send(http_get.session, "moin", sizeof("moin"));
-    // LOG_INFO("ret : %d", ret);
-    void *result = http_get_request(&http_get);
-
-    // pthread_create(&http_service.pool.threads[thread_id], &http_service.pool.thread_attr, , &http_get);
+    ret = response_callback(response);
     return ret;
-    /**
-     *  Service Initialisation
-     */
-
 error_occured:
-    if (http_get.session != NULL)
-        free(http_get.session);
-    if (fd > 0)
-        close(fd);
-    if (http_get.response.buffer != NULL)
-        free(http_get.response.buffer);
-}
-
-char *get_init_policy_url()
-{
-    int ret = -1;
-    static char policy_url[500];
-    ret = snprintf(policy_url, 500, "/api/node/%s/initial/register", http_service.serial_number);
-    if (ret < 0)
-        return NULL;
-    return policy_url;
-}
-
-char *get_heartbeat_url(char *version)
-{
-    int ret = -1;
-    static char heartbeat_url[500];
-    ret = snprintf(heartbeat_url, 500, "/api/node/%s/operation/version/%s", http_service.serial_number, version);
-    if (ret < 0)
-        return NULL;
-    return heartbeat_url;
+    ret = -1;
+    return ret;
 }
 
 //----------------------------------------------   THREAD POOL -----------------------------------------//
@@ -495,3 +470,22 @@ void destroy_thread_pool(ThreadPool *pool)
 }
 
 //----------------------------------------------   END THREAD POOL -----------------------------------------//
+
+//----------------------------------------------  CREATE URL ------------------------------------------------//
+
+int create_inital_controller_url(char *url, int url_size)
+{
+    if (url == NULL)
+        return -1;
+    return snprintf(url, url_size, "/api/node/%s/initial/register/", http_service.serial_number);
+}
+
+int create_periodic_controller_url(char *url, int url_size, int version_number)
+{
+    int ret = -1;
+    if (url == NULL)
+        return -1;
+
+    ret = snprintf(url, url_size, "/api/node/%s/operation/version/%d/heartbeat", http_service.serial_number, version_number);
+    return ret;
+}
