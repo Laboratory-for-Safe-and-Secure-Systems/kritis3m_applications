@@ -2,6 +2,7 @@
 #define UTILS_H__
 
 #include <netinet/in.h>
+#include "kritis3m_configuration.h"
 
 // Function to create a file path by combining folder path and file name
 int create_file_path(char *dest_buffer, size_t dest_buf_len,
@@ -24,6 +25,9 @@ int create_directory(const char *path);
 void ensure_trailing_slash(char *path, size_t size);
 
 
+
+int parse_addr_toKritis3maddr(char* ip_port, Kritis3mSockaddr *dst);
+int parse_endpoint_addr(const char *endpoint_addr, char *dst_ip, int dst_ip_len, uint16_t *port);
 
 uint64_t parse_time_string(const char *time_str); 
 #endif

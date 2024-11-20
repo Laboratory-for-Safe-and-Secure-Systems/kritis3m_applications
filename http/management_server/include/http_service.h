@@ -6,7 +6,7 @@
 
 struct response
 {
-   enum used_service service_used;
+    enum used_service service_used;
     ManagementReturncode ret;
     uint8_t *buffer;
     uint8_t *buffer_frag_start; // start of body
@@ -29,6 +29,12 @@ struct response
 typedef int (*t_http_get_cb)(struct response response);
 
 int call_distribution_service(t_http_get_cb response_callback, char *destination_path);
-int init_http_service(Kritis3mManagemntConfiguration *management_config, asl_endpoint_configuration* endpoint_config);
+int init_http_service(Kritis3mManagemntConfiguration *config,
+                      asl_endpoint_configuration *mgmt_endpoint_config
+#ifdef PKI_READY
+                      ,
+                      asl_endpoint_configuration *pki_endpoint_config
+#endif
+);
 
 #endif

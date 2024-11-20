@@ -147,8 +147,6 @@ ManagementReturncode get_Systemconfig(ConfigurationManager *applconfig, Kritis3m
     if ((applconfig == NULL) || (node_config == NULL))
         goto error_occured;
 
-
-
     switch (applconfig->active_configuration)
     {
     case CFG_PRIMARY:
@@ -270,13 +268,15 @@ int get_identity_folder_path(char *out_path, size_t size, const char *base_path,
 
 void free_ManagementConfiguration(Kritis3mManagemntConfiguration *config)
 {
-    config->server_addr_size = 0;
-    if (config->server_addr != NULL)
-        free(config->server_addr);
+    memset(config->serial_number, 0, SERIAL_NUMBER_SIZE);
+    memset(config->server_endpoint_addr.address, 0, ENDPOINT_LEN);
+    memset(&config->identity.certificates, 0, sizeof(certificates));
+
+    config->identity.filepath_size = 0;
+    if (config->identity.filepath != NULL)
+        free(config->identity.filepath);
     if (config->identity.revocation_list_url != NULL)
         free(config->identity.revocation_list_url);
-    if (config->identity.server_addr != NULL)
-        free(config->identity.server_addr);
     if (config->identity.server_url != NULL)
         free(config->identity.server_url);
 }
@@ -284,7 +284,6 @@ void free_ManagementConfiguration(Kritis3mManagemntConfiguration *config)
 void free_CryptoIdentity(crypto_identity *identity)
 {
     identity->filepath_size = 0;
-    identity->server_addr_size = 0;
     identity->server_url_size = 0;
     identity->revocation_list_url_size = 0;
     identity->certificates.additional_key_buffer_size = 0;
@@ -295,9 +294,6 @@ void free_CryptoIdentity(crypto_identity *identity)
     {
         if (identity->filepath != NULL)
             free(identity->filepath);
-
-        if (identity->server_addr != NULL)
-            free(identity->server_addr);
 
         if (identity->server_url != NULL)
             free(identity->server_url);
@@ -310,8 +306,10 @@ void free_CryptoIdentity(crypto_identity *identity)
 
         if (identity->certificates.key_buffer != NULL)
             free(identity->certificates.key_buffer);
+
         if (identity->certificates.chain_buffer != NULL)
             free(identity->certificates.chain_buffer);
+
         if (identity->certificates.root_buffer != NULL)
             free(identity->certificates.root_buffer);
     }
@@ -354,8 +352,7 @@ void cleanup_Systemconfiguration(SystemConfiguration *systemconfiguration)
     Whitelist *whitelist = &systemconfiguration->application_config.whitelist;
     for (int i = 0; i < whitelist->number_trusted_clients; i++)
     {
-        memset(&whitelist->TrustedClients[i].addr, 0, sizeof(whitelist->TrustedClients[i].addr));
-        memset(&whitelist->TrustedClients[i].client_ip_port, 0, IPv4_PORT_LEN);
+        memset(&whitelist->TrustedClients[i].trusted_client, 0, sizeof(Kritis3mSockaddr));
         whitelist->TrustedClients[i].id = 0;
         whitelist->TrustedClients[i].number_trusted_applications = 0;
         for (int j = 0; j < whitelist->TrustedClients[i].number_trusted_applications; j++)
@@ -385,10 +382,11 @@ void cleanup_Systemconfiguration(SystemConfiguration *systemconfiguration)
         appl->log_level = -1;
         appl->state = 0;
         appl->type = UNDEFINED;
-        memset(appl->client_ip, 0, INET_ADDRSTRLEN);
-        appl->client_port = 0;
-        memset(appl->server_ip, 0, INET_ADDRSTRLEN);
-        appl->server_port= 0;
+        memset(appl->client_endpoint_addr.address, 0, ENDPOINT_LEN);
+        appl->client_endpoint_addr.port = 0;
+
+        memset(appl->server_endpoint_addr.address, 0, ENDPOINT_LEN);
+        appl->server_endpoint_addr.port = 0;
     }
 
     for (int i = 0; i < MAX_NUMBER_CRYPTOPROFILE; i++)

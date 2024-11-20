@@ -18,83 +18,14 @@ int parse_crypo_identity(cJSON *json_obj, crypto_identity *crypto_identity, char
 int parse_application(cJSON *json_obj, Kritis3mApplications *application);
 int set_crypto_filepath(Kritis3mApplications *application, char *crypto_path);
 
-int parseGenericIP(cJSON *json, Kritis3mSockaddr *dst)
-{
-    // Validate input
-    if (!cJSON_IsObject(json))
-    {
-        goto error_occured;
-    }
-
-    // Extract IP address
-    cJSON *ip_json = cJSON_GetObjectItemCaseSensitive(json, "ip");
-    if (!cJSON_IsString(ip_json) || ip_json->valuestring == NULL)
-    {
-        goto error_occured;
-    }
-
-    cJSON *js_family = cJSON_GetObjectItemCaseSensitive(json, "family");
-    if ((js_family == NULL) || cJSON_IsString(js_family))
-    {
-        goto error_occured;
-    }
-
-    // Extract port
-    cJSON *port_json = cJSON_GetObjectItemCaseSensitive(json, "port");
-    if (!cJSON_IsNumber(port_json))
-    {
-        goto error_occured;
-    }
-    uint16_t port = (uint16_t)port_json->valueint;
-
-    // parse ipv4
-    if (js_family->valueint == AF_INET)
-    {
-        struct sockaddr_in *addr = &dst->sockaddr_in;
-        memset(addr, 0, sizeof(struct sockaddr_in));
-        addr->sin_family = AF_INET;
-        addr->sin_port = htons(port);
-        
-        if (inet_pton(AF_INET, ip_json->valuestring, &(addr->sin_addr)) != 1)
-        {
-            goto error_occured;
-        }
-    }
-    // parse ipv6
-    else if (js_family->valueint == AF_INET6)
-    {
-        struct sockaddr_in6 *addr = &dst->sockaddr_in6;
-        memset(addr, 0, sizeof(struct sockaddr_in6));
-        addr->sin6_family = AF_INET6;
-        addr->sin6_port = htons(port);
-        
-        if (inet_pton(AF_INET6, ip_json->valuestring, &(addr->sin6_addr)) != 1)
-        {
-            goto error_occured;
-        }
-    }
-    // can't parse
-    else
-    {
-        goto error_occured;
-    }
-
-    return 0;
-
-error_occured:
-    LOG_ERROR("can't parse json ip format to KRITIS3MSocket");
-    return -1;
-}
-
 int parse_json_to_ManagementConfig(cJSON *json_management_service, Kritis3mManagemntConfiguration *config, char *identity_path)
 {
     int ret = 0;
-    config->server_addr = duplicate_string(cJSON_GetObjectItem(json_management_service, "server_addr")->valuestring);
-    if (config->server_addr == NULL)
-    {
+
+    ret = parse_endpoint_addr(cJSON_GetObjectItem(json_management_service, "server_addr")->valuestring,
+                              config->server_endpoint_addr.address, ENDPOINT_LEN, &config->server_endpoint_addr.port);
+    if (ret < 0)
         goto error_occured;
-    }
-    config->server_addr_size = strlen(config->server_addr) + 1; //'\0'
 
     char *json_parsed = strncpy(config->serial_number, cJSON_GetObjectItem(json_management_service, "serial_number")->valuestring, SERIAL_NUMBER_SIZE);
     if (json_parsed == NULL)
@@ -132,11 +63,11 @@ int parse_json_to_ManagementConfig(cJSON *json_management_service, Kritis3mManag
         goto error_occured;
     }
     config->identity.identity = nw_identitiy;
-    config->identity.server_addr = duplicate_string(cJSON_GetObjectItem(json_identity, "server_addr")->valuestring);
-    if (config->identity.server_addr == NULL)
-    {
+
+    ret = parse_endpoint_addr(cJSON_GetObjectItem(json_identity, "server_addr")->valuestring,
+                              config->server_endpoint_addr.address, ENDPOINT_LEN, &config->server_endpoint_addr.port);
+    if (ret < 0)
         goto error_occured;
-    }
 
     config->identity.filepath_size = strlen(identity_path) + 40;
     config->identity.filepath = malloc(config->identity.filepath_size);
@@ -144,8 +75,6 @@ int parse_json_to_ManagementConfig(cJSON *json_management_service, Kritis3mManag
     get_identity_folder_path(config->identity.filepath, config->identity.filepath_size,
                              identity_path,
                              config->identity.identity);
-
-    config->identity.server_addr_size = strlen(config->identity.server_addr) + 1; //'\0'
 
     config->identity.revocation_list_url = duplicate_string(cJSON_GetObjectItem(json_identity, "revocation_list_url")->valuestring);
     if (config->identity.revocation_list_url == NULL)
@@ -398,15 +327,13 @@ ManagementReturncode parse_whitelist(cJSON *json_obj, Whitelist *whitelist)
             goto error_occured;
         whitelist->TrustedClients[i].id = trusted_client_id->valueint;
 
-        cJSON *client_ip = cJSON_GetObjectItem(trusted_client_json, "client_ip_port");
+        cJSON *client_ip = cJSON_GetObjectItem(trusted_client_json, "client_endpoint_addr");
         if ((client_ip == NULL) || (strlen(client_ip->valuestring) < 1))
             goto error_occured;
-        strncpy(whitelist->TrustedClients[i].client_ip_port, client_ip->valuestring, IPv4_PORT_LEN);
 
-        ret = parse_ip_port_to_sockaddr_in(whitelist->TrustedClients[i].client_ip_port, &whitelist->TrustedClients[i].addr);
-        if (ret < 0)
+        int retval = parse_addr_toKritis3maddr(client_ip->valuestring, &whitelist->TrustedClients[i].trusted_client);
+        if (retval < 0)
         {
-            LOG_ERROR("can't parse ip addr");
             goto error_occured;
         }
 
@@ -442,39 +369,26 @@ ManagementReturncode parse_application(cJSON *json_obj, Kritis3mApplications *ap
         goto error_occured;
     application->type = item->valueint;
 
-    item = cJSON_GetObjectItem(json_obj, "server_ip_port");
+    item = cJSON_GetObjectItem(json_obj, "server_endpoint_addr");
     if (item == NULL)
         goto error_occured;
-    ret = parse_IPv4_fromIpPort(item->valuestring, application->server_ip);
+    ret = parse_endpoint_addr(item->valuestring, application->server_endpoint_addr.address, ENDPOINT_LEN, &application->server_endpoint_addr.port);
     if (ret < 0)
     {
         LOG_ERROR("cant parse ip addr from ip:port");
         goto error_occured;
     }
-    int port = parse_port_fromIpPort(item->valuestring);
-    if (port < 0)
-    {
-        LOG_ERROR("no correct port in addr");
-        goto error_occured;
-    }
-    application->server_port = port;
 
-    item = cJSON_GetObjectItem(json_obj, "client_ip_port");
+    item = cJSON_GetObjectItem(json_obj, "client_endpoint_addr");
     if (item == NULL)
         goto error_occured;
-    ret = parse_IPv4_fromIpPort(item->valuestring, application->client_ip);
+
+    ret = parse_endpoint_addr(item->valuestring, application->client_endpoint_addr.address, ENDPOINT_LEN, &application->client_endpoint_addr.port);
     if (ret < 0)
     {
         LOG_ERROR("cant parse ip addr from ip:port");
         goto error_occured;
     }
-    port = parse_port_fromIpPort(item->valuestring);
-    if (port < 0)
-    {
-        LOG_ERROR("no correct port in addr");
-        goto error_occured;
-    }
-    application->client_port = port;
 
     item = cJSON_GetObjectItem(json_obj, "ep1_id");
     if (item == NULL)
@@ -515,11 +429,19 @@ ManagementReturncode parse_crypo_identity(cJSON *identity_json, crypto_identity 
     if (ret < 0)
         goto error_occured;
 
-    item = cJSON_GetObjectItem(identity_json, "server_addr");
+    item = cJSON_GetObjectItem(identity_json, "server_endpoint_addr");
     if ((item == NULL) || (strlen(item->valuestring) < 1))
         goto error_occured;
-    identity->server_addr = duplicate_string(item->valuestring);
-    identity->server_addr_size = strlen(identity->server_addr) + 1;
+
+    ret = parse_endpoint_addr(item->valuestring,
+                              identity->server_endpoint_addr.address,
+                              ENDPOINT_LEN,
+                              &identity->server_endpoint_addr.port);
+    if (ret < 0)
+    {
+        LOG_ERROR("cant parse ip addr from ip:port");
+        goto error_occured;
+    }
 
     item = cJSON_GetObjectItem(identity_json, "server_url");
     if (item == NULL)
@@ -532,7 +454,7 @@ ManagementReturncode parse_crypo_identity(cJSON *identity_json, crypto_identity 
     else
     {
         identity->server_url = duplicate_string(item->valuestring);
-        identity->server_url_size = strlen(identity->server_addr) + 1;
+        identity->server_url_size = strlen(identity->server_url) + 1;
     }
     return ret;
 error_occured:
@@ -598,50 +520,50 @@ error_occured:
     return ret;
 }
 
-int Kritis3mNodeConfiguration_tojson(Kritis3mNodeConfiguration *config, char **buffer)
-{
-    int ret = 0;
-    if (config == NULL || buffer == NULL)
-        return -1;
-    cJSON *root = cJSON_CreateObject(); // Create root JSON object
+// int Kritis3mNodeConfiguration_tojson(Kritis3mNodeConfiguration *config, char **buffer)
+// {
+//     int ret = 0;
+//     if (config == NULL || buffer == NULL)
+//         return -1;
+//     cJSON *root = cJSON_CreateObject(); // Create root JSON object
 
-    // Management service object
-    cJSON *management_service = cJSON_CreateObject();
-    cJSON_AddStringToObject(management_service, "serial_number", config->management_identity.serial_number);
-    cJSON_AddStringToObject(management_service, "server_addr", config->management_identity.server_addr);
+//     // Management service object
+//     cJSON *management_service = cJSON_CreateObject();
+//     cJSON_AddStringToObject(management_service, "serial_number", config->management_identity.serial_number);
+//     cJSON_AddStringToObject(management_service, "server_addr", config->management_identity.server_addr);
 
-    // Management PKI object
-    cJSON *management_pki = cJSON_CreateObject();
-    switch (config->management_identity.identity.identity)
-    {
-    case MANAGEMENT_SERVICE:
-        cJSON_AddStringToObject(management_pki, "identity", MANAGEMENT_SERVICE_STR);
-        break;
-    case MANAGEMENT:
-        cJSON_AddStringToObject(management_pki, "identity", MANAGEMENT_STR);
-        break;
-    case REMOTE:
-        cJSON_AddStringToObject(management_pki, "identity", REMOTE_STR);
-        break;
-    case PRODUCTION:
-        cJSON_AddStringToObject(management_pki, "identity", PRODUCTION_STR);
-        break;
-    }
-    cJSON_AddItemToObject(management_service, "management_pki", management_pki);
+//     // Management PKI object
+//     cJSON *management_pki = cJSON_CreateObject();
+//     switch (config->management_identity.identity.identity)
+//     {
+//     case MANAGEMENT_SERVICE:
+//         cJSON_AddStringToObject(management_pki, "identity", MANAGEMENT_SERVICE_STR);
+//         break;
+//     case MANAGEMENT:
+//         cJSON_AddStringToObject(management_pki, "identity", MANAGEMENT_STR);
+//         break;
+//     case REMOTE:
+//         cJSON_AddStringToObject(management_pki, "identity", REMOTE_STR);
+//         break;
+//     case PRODUCTION:
+//         cJSON_AddStringToObject(management_pki, "identity", PRODUCTION_STR);
+//         break;
+//     }
+//     cJSON_AddItemToObject(management_service, "management_pki", management_pki);
 
-    // Add management service to root
-    cJSON_AddItemToObject(root, "management_service", management_service);
+//     // Add management service to root
+//     cJSON_AddItemToObject(root, "management_service", management_service);
 
-    // Add other paths and configuration
-    cJSON_AddStringToObject(root, "machine_crypto_path", config->machine_crypto_path);
-    cJSON_AddStringToObject(root, "pki_cert_path", config->pki_cert_path);
+//     // Add other paths and configuration
+//     cJSON_AddStringToObject(root, "machine_crypto_path", config->machine_crypto_path);
+//     cJSON_AddStringToObject(root, "pki_cert_path", config->pki_cert_path);
 
-    // Add selected configuration
-    cJSON_AddNumberToObject(root, "selected_configuration", config->selected_configuration);
-    // Convert to string
-    char *json_string = cJSON_Print(root);
-    // Clean up
-    cJSON_Delete(root);
-    *buffer = json_string;
-    return ret;
-}
+//     // Add selected configuration
+//     cJSON_AddNumberToObject(root, "selected_configuration", config->selected_configuration);
+//     // Convert to string
+//     char *json_string = cJSON_Print(root);
+//     // Clean up
+//     cJSON_Delete(root);
+//     *buffer = json_string;
+//     return ret;
+// }

@@ -12,20 +12,19 @@
 
 #define MAX_FILEPATH_SIZE 400
 // lengths
-#define IPv4_LEN 16
 #define ID_LEN 256
 #define NAME_LEN 256
 #define DESCRIPTION_LEN 256
-#define IPv4_PORT_LEN 40
+
 #define MAX_TRUSTED_APPLICATIONS 10
 #define MAX_NAME_SIZE 256
 #define MAX_NUMBER_CRYPTOPROFILE 20
 #define MAX_NUMBER_APPLICATIONS 7
 #define MAX_NUMBER_TRUSTED_CLIENTS 7
-#define HARDBEAT_DEFAULT_S 24 * 60 * 60
-#define HARDBEAT_MIN_S 20
-#define HARDBEAT_MAX_S 60 * 60 * 24
+
 #define SERIAL_NUMBER_SIZE 254
+
+#define ENDPOINT_LEN 254
 
 #define PRIMARY_FILENAME "primary.json"
 #define SECONDARY_FILENAME "secondary.json"
@@ -112,8 +111,6 @@ typedef struct certificates
     size_t root_buffer_size;
 } certificates;
 
-
-
 /**
  * @note when extending Kritis3mApplicationtype: DTLS_R_PROXY = MIN && TLS_R_PROXY = MAX
  * @example extension:
@@ -154,11 +151,18 @@ typedef enum
     max_identities
 } network_identity;
 
-typedef union {
+typedef union
+{
     struct sockaddr sockaddr;
     struct sockaddr_in sockaddr_in;
     struct sockaddr_in6 sockaddr_in6;
-}Kritis3mSockaddr;
+} Kritis3mSockaddr;
+
+typedef struct
+{
+    char address[ENDPOINT_LEN]; // Stores IP or IPv4/URL
+    uint16_t port;     // Stores parsed port
+} EndpointAddr;
 
 typedef struct
 {
@@ -167,7 +171,8 @@ typedef struct
 
     char *revocation_list_url;
     int revocation_list_url_size;
-    Kritis3mSockaddr server;
+
+    EndpointAddr server_endpoint_addr;
 
     char *server_url;
     int server_url_size;
@@ -192,15 +197,14 @@ struct CryptoProfile
     int32_t crypto_identity_id;
 };
 
-
 typedef struct
 {
     uint32_t config_id;
     uint32_t id;
     Kritis3mApplicationtype type;
 
-    Kritis3mSockaddr server_ip_port;
-    Kritis3mSockaddr client_ip_port;
+    EndpointAddr server_endpoint_addr;
+    EndpointAddr client_endpoint_addr;
 
     bool state;
     int32_t ep1_id;
@@ -212,7 +216,6 @@ typedef struct
 {
     int32_t id;
     Kritis3mSockaddr trusted_client;
-    struct sockaddr_storage addr;
 
     int number_trusted_applications;
     int trusted_applications_id[MAX_TRUSTED_APPLICATIONS];
@@ -268,8 +271,8 @@ typedef struct
 typedef struct
 {
     char serial_number[SERIAL_NUMBER_SIZE];
-    char *server_addr;
-    int server_addr_size;
+    EndpointAddr server_endpoint_addr;
+
     crypto_identity identity;
 } Kritis3mManagemntConfiguration;
 
