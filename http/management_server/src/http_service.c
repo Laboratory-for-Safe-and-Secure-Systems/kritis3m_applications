@@ -49,7 +49,6 @@ typedef struct
 {
     int sock;
     asl_session *session;
-    bool is_open;
     enum request_type request_type;
     union req
     {
@@ -94,6 +93,7 @@ void init_thread_pool(ThreadPool *pool);
 int get_free_thread_id();
 void signal_thread_finished(int thread_id);
 void cleanup_http_service(void);
+void cleanup_request_object(request_object *con);
 int startup_connection(struct conn *con);
 int create_inital_controller_url(char *url, int url_size);
 int create_periodic_controller_url(char *url, int url_size, int version_number);
@@ -131,9 +131,8 @@ int init_http_service(Kritis3mManagemntConfiguration *config,
     // Setup management endpoint
     http_service.con.mgmt_endpoint = asl_setup_client_endpoint(mgmt_endpoint_config);
     if (!http_service.con.mgmt_endpoint)
-    {
         goto cleanup;
-    }
+
 
 // Perform address lookup for PKI endpoint
 #ifdef PKI_READY
@@ -175,7 +174,6 @@ void set_http_service_defaults(Http_service_module *service)
     http_service.con.mgmt_req.sock = -1;
     http_service.con.mgmt_req.request_type = REQ_UNDIFINED;
     memset(&http_service.con.mgmt_req.req, 0, sizeof(http_service.con.mgmt_req.req));
-    http_service.con.mgmt_req.is_open = false;
 
     // clear union
 
@@ -305,6 +303,12 @@ int startup_connection(struct conn *con)
         goto error_occured;
 
     con->mgmt_req.session = asl_create_session(con->mgmt_endpoint, con->mgmt_req.sock);
+    if (con->mgmt_req.session == NULL)
+        goto error_occured;
+    ret = asl_handshake(con->mgmt_req.session);
+    if (ret < 0)
+        goto error_occured;
+    return ret;
 
 error_occured:
     LOG_ERROR("error occured in startup_connectioN");
@@ -335,10 +339,6 @@ int initial_call_controller(t_http_get_cb response_callback)
     //---------------------------------initialization ---------------------------------//
 
     if ((response_callback == NULL))
-        goto error_occured;
-
-    ret = startup_connection(&http_service.con);
-    if (ret < 0)
         goto error_occured;
 
     // get host
@@ -372,7 +372,13 @@ int initial_call_controller(t_http_get_cb response_callback)
     req.response = http_get_cb;
     req.host = host;
     req.port = port;
+    req.recv_buf = response_buffer;
+    req.recv_buf_len = sizeof(response_buffer);
     duration timeout = ms_toduration(5 * 1000);
+
+    ret = startup_connection(&http_service.con);
+    if (ret < 0)
+        goto error_occured;
 
     ret = https_client_req(http_service.con.mgmt_req.sock,
                            http_service.con.mgmt_req.session,
@@ -381,7 +387,7 @@ int initial_call_controller(t_http_get_cb response_callback)
                            &response);
     if (ret < 0)
     {
-        LOG_ERROR("error occured calling distribution server %s", ret);
+        LOG_ERROR("error occured calling distribution server %d", ret);
         response.ret = MGMT_ERR;
     }
     else
@@ -390,10 +396,29 @@ int initial_call_controller(t_http_get_cb response_callback)
         response.ret = MGMT_OK;
     }
     ret = response_callback(response);
+    cleanup_request_object(&http_service.con.mgmt_req);
     return ret;
 error_occured:
     ret = -1;
+    cleanup_request_object(&http_service.con.mgmt_req);
     return ret;
+}
+
+void cleanup_request_object(request_object *req)
+{
+    if (req == NULL)
+        return;
+    if (req->session != NULL)
+    {
+        asl_close_session(req->session);
+        asl_free_session(req->session);
+    }
+
+    if (req->sock > 0)
+    {
+        closesocket(req->sock);
+        req->sock = -1;
+    }
 }
 
 //----------------------------------------------   THREAD POOL -----------------------------------------//
@@ -477,7 +502,7 @@ int create_inital_controller_url(char *url, int url_size)
 {
     if (url == NULL)
         return -1;
-    return snprintf(url, url_size, "/api/node/%s/initial/register/", http_service.serial_number);
+    return snprintf(url, url_size, "/api/node/%s/initial/register", http_service.serial_number);
 }
 
 int create_periodic_controller_url(char *url, int url_size, int version_number)
