@@ -37,7 +37,7 @@ enum MSG_RESPONSE_CODE
 void init_application_manager(void);
 int start_application_manager(ApplicationConfiguration *configuration);
 bool is_running();
-bool confirm_client(int application_id, struct sockaddr_in *connecting_client);
+bool confirm_client(int application_id, struct sockaddr *connecting_client);
 
 int stop_application_manager();
 

@@ -56,7 +56,7 @@ typedef struct application_config
 
 typedef struct client_connection_request
 {
-    struct sockaddr_in client;
+    struct sockaddr *client;
     int application_id;
 } client_connection_request;
 
@@ -72,9 +72,8 @@ typedef struct application_message
         application_config appl_config;
         application_status status_request;
         client_connection_request client_con_request;
-        int application_id;
-        struct sockaddr_in client;
         enum MSG_RESPONSE_CODE return_code;
+        int application_id;
     } payload;
 } application_message;
 
@@ -112,27 +111,70 @@ int create_echo_config(Kritis3mApplications *appl, echo_server_config *config);
 // int create_network_tester_config(Kritis3mApplications *appl, network_tester_config *config);
 int create_tcp_stdin_bridge_config(Kritis3mApplications *appl, tcp_client_stdin_bridge_config *config);
 
-int client_matches_trusted_client(TrustedClients *trusted_client, int application_id, struct sockaddr_in *connecting_client)
+int client_matches_trusted_client(TrustedClients *trusted_client,
+                                  struct sockaddr *connecting_client)
 {
-    int ret = -1;
-    // 1. check if connecting client matches trusted client
-    if ((trusted_client == NULL) ||
-        (connecting_client == NULL))
-        return ret;
+    // Check if the application is trusted
+    int app_trusted = 0;
 
-    // ip addr is valid if:
-    //  trusted_client  | connecting client | match?
-    //  - 0.0.0.0:port  | ANY_IP:port       | true
-    //  - ip:0          | ip:ANY_PORT       | true
-    //  - 0.0.0.0:0     | ANY_IP:ANY_PORT   | true
+    if (!app_trusted)
+    {
+        return -1; // Application not trusted
+    }
 
-    bool family_valid = trusted_client->addr.sin_family == connecting_client->sin_family;
-    bool ip_addr_valid = (trusted_client->addr.sin_addr.s_addr == htonl(INADDR_ANY)) || (trusted_client->addr.sin_addr.s_addr == connecting_client->sin_addr.s_addr);
-    bool port_valid = (trusted_client->addr.sin_port == htons(0)) || (trusted_client->addr.sin_port == connecting_client->sin_port);
+    // Check IP address and port
+    Kritis3mSockaddr *trusted_addr = &trusted_client->trusted_client;
+    struct sockaddr *trusted_sockaddr = &trusted_addr->sockaddr;
 
-    if (family_valid && ip_addr_valid && port_valid) // comparing ipv4 with ipv4
-        ret = 0;
-    return ret;
+    // If trusted IP is INADDR_ANY or IN6ADDR_ANY_INIT, all IPs are allowed
+    if (trusted_sockaddr->sa_family == AF_INET)
+    {
+        struct sockaddr_in *trusted_in = &trusted_addr->sockaddr_in;
+        struct sockaddr_in *conn_in = (struct sockaddr_in *)connecting_client;
+
+        if (trusted_in->sin_addr.s_addr == INADDR_ANY)
+        {
+            // If port is 0, all ports are allowed
+            if (trusted_in->sin_port == 0 || trusted_in->sin_port == conn_in->sin_port)
+            {
+                return 0;
+            }
+        }
+        else
+        {
+            // Check both IP and port
+            if (trusted_in->sin_addr.s_addr == conn_in->sin_addr.s_addr &&
+                (trusted_in->sin_port == 0 || trusted_in->sin_port == conn_in->sin_port))
+            {
+                return 0;
+            }
+        }
+    }
+    else if (trusted_sockaddr->sa_family == AF_INET6)
+    {
+        struct sockaddr_in6 *trusted_in6 = &trusted_addr->sockaddr_in6;
+        struct sockaddr_in6 *conn_in6 = (struct sockaddr_in6 *)connecting_client;
+
+        // Check for IN6ADDR_ANY_INIT
+        if (memcmp(&trusted_in6->sin6_addr, &in6addr_any, sizeof(struct in6_addr)) == 0)
+        {
+            // If port is 0, all ports are allowed
+            if (trusted_in6->sin6_port == 0 || trusted_in6->sin6_port == conn_in6->sin6_port)
+            {
+                return 0;
+            }
+        }
+        else
+        {
+            // Check both IP and port
+            if (memcmp(&trusted_in6->sin6_addr, &conn_in6->sin6_addr, sizeof(struct in6_addr)) == 0 &&
+                (trusted_in6->sin6_port == 0 || trusted_in6->sin6_port == conn_in6->sin6_port))
+            {
+                return 0;
+            }
+        }
+    }
+    return -1;
 }
 
 bool is_running()
@@ -145,7 +187,7 @@ bool is_running()
     }
     return true;
 }
-bool confirm_client(int application_id, struct sockaddr_in *connecting_client)
+bool confirm_client(int application_id, struct sockaddr *connecting_client)
 {
     application_message request = {0};
     application_message response = {0};
@@ -160,8 +202,10 @@ bool confirm_client(int application_id, struct sockaddr_in *connecting_client)
         LOG_ERROR("application manager not initialized");
         return false;
     }
+
     request.msg_type = APPLICATION_CONNECTION_REQUEST;
-    request.payload.client = *connecting_client;
+    request.payload.client_con_request.application_id = application_id;
+    request.payload.client_con_request.client = connecting_client;
 
     enum MSG_RESPONSE_CODE return_code = management_request_helper(manager.management_pair[THREAD_EXT], &request);
     switch (return_code)
@@ -194,34 +238,30 @@ error_occured:
     return ret;
 }
 
-bool is_client_supported(int application_id, struct sockaddr_in *connecting_client)
+bool is_client_supported(client_connection_request con_req)
 {
     ApplicationConfiguration *appl_config = manager.configuration;
     bool ret = false;
 
-    if ((!manager.initialized) || (appl_config == NULL))
-        return -1;
+    if ((!manager.initialized) || (appl_config == NULL) || (con_req.client == NULL))
+        return false;
 
     for (int i = 0; i < appl_config->whitelist.number_trusted_clients; i++)
     {
         TrustedClients t_client = appl_config->whitelist.TrustedClients[i];
-        int client_matches = client_matches_trusted_client(&t_client, application_id, connecting_client);
-        if (client_matches == 0)
+        // is this connection forseen for application ?
+        int number_trusted_application = t_client.number_trusted_applications;
+        for (int j = 0; j < number_trusted_application; j++)
         {
-            // is this connection forseen for application ?
-            int number_trusted_application = t_client.number_trusted_applications;
-            for (int j = 0; j < number_trusted_application; j++)
+            if (t_client.trusted_applications_id[j] == con_req.application_id)
             {
-                if (t_client.trusted_applications_id[j] == application_id)
+                int client_matches = client_matches_trusted_client(&t_client, con_req.client);
+                if (client_matches == 0)
+                {
                     return true;
+                }
             }
         }
-    }
-    char ip_addr[INET_ADDRSTRLEN];
-    if (inet_ntop(AF_INET, &connecting_client->sin_addr, ip_addr, INET_ADDRSTRLEN) != NULL)
-    {
-        uint16_t port = ntohs(connecting_client->sin_port);
-        LOG_WARN("Forbidden Client with IP addr: %s and port: %d tries to establish a connection with application with appl id : % d ", ip_addr, port, application_id);
     }
     return ret;
 }
@@ -544,7 +584,7 @@ int handle_management_message(int fd, struct application_manager *appl_manager)
             retval = MSG_ERROR;
         else
             retval = MSG_OK;
-        
+
         respond_with(fd, retval);
         close(manager.management_pair[THREAD_INT]);
         pthread_cancel(manager.thread);
@@ -564,20 +604,8 @@ int handle_management_message(int fd, struct application_manager *appl_manager)
         int appl_id = con_req.application_id;
         if ((appl_id < 0))
             goto error_occured;
-        bool is_supported = false;
-        is_supported = is_client_supported(con_req.application_id, &con_req.client);
-        if (is_supported)
-        {
-            retval = MSG_OK;
-            inet_ntop(AF_INET, &con_req.client.sin_addr, ip, INET_ADDRSTRLEN);
-            LOG_INFO("client with ip addr %s and port %d is allowed", ip, ntohs(con_req.client.sin_port));
-        }
-        else
-        {
-            inet_ntop(AF_INET, &con_req.client.sin_addr, ip, INET_ADDRSTRLEN);
-            LOG_WARN("client with ip addr %s and port %d is forbidden ", ip, ntohs(con_req.client.sin_port));
-            retval = MSG_FORBIDDEN;
-        }
+        bool is_supported = is_client_supported(con_req);
+        retval = (is_supported == true) ? MSG_OK : MSG_FORBIDDEN;
         break;
     }
     case MSG_RESPONSE:
@@ -594,13 +622,18 @@ int handle_management_message(int fd, struct application_manager *appl_manager)
         break;
     }
     }
+    //-----------------------------------------  END OF THE HANDLER------------------------------------ //
+    // return retval
     ret = respond_with(fd, retval);
+
     return ret;
 error_occured:
     LOG_ERROR("Error occured handling internal management request");
-    retval = MSG_ERROR;
-    respond_with(fd, retval);
+    //-----------------------------------------  ERROR HANDLER      ------------------------------------ //
     ret = -1;
+    retval = MSG_ERROR;
+    // return retval
+    respond_with(fd, retval);
     return ret;
 }
 
@@ -725,12 +758,17 @@ int create_proxy_config(Kritis3mApplications *appl, proxy_config *config)
         return -1;
     int ret = 0;
 
-    config->application_id = appl->id;
+    // config->application_id = appl->id;
+
     config->log_level = appl->log_level;
-    config->own_ip_address = appl->server_ip;
-    config->listening_port = appl->server_port;
-    config->target_ip_address = appl->client_ip;
-    config->target_port = appl->client_port;
+
+    config->own_ip_address = appl->server_endpoint_addr.address;
+    config->listening_port = appl->server_endpoint_addr.port;
+
+    config->target_ip_address = appl->client_endpoint_addr.address;
+    config->target_port = appl->client_endpoint_addr.port;
+
+    config->application_id = appl->id;
 
     ret = get_endpoint_configuration(appl->ep1_id, &config->tls_config);
     if (ret < 0)
@@ -754,10 +792,12 @@ int create_echo_config(Kritis3mApplications *appl, echo_server_config *config)
         (appl->type != ECHO_SERVER))
         return -1;
 
-    config->application_id = appl->id;
+    // config->application_id = appl->id;
     config->log_level = appl->log_level;
-    config->own_ip_address = appl->server_ip;
-    config->listening_port = appl->server_port;
+
+    config->own_ip_address = appl->server_endpoint_addr.address;
+    config->listening_port = appl->server_endpoint_addr.port;
+
     config->use_tls = true;
 
     ret = get_endpoint_configuration(appl->ep1_id, &config->tls_config);
@@ -782,17 +822,18 @@ int create_tcp_stdin_bridge_config(Kritis3mApplications *appl, tcp_client_stdin_
         (appl->type != TCP_CLIENT_STDIN_BRIDGE))
         return -1;
 
-    config->application_id = appl->id;
+    // config->application_id = appl->id;
+
     config->log_level = appl->log_level;
-    config->target_ip_address = appl->client_ip;
-    config->target_port = appl->client_port;
+
+    config->target_ip_address = appl->client_endpoint_addr.address;
+    config->target_port = appl->client_endpoint_addr.port;
 
     LOG_INFO("tcp client stdin bridge");
 
     return ret;
 error_occured:
     ret = -1;
-    free(config->target_ip_address);
     return ret;
 }
 
@@ -871,7 +912,7 @@ int stop_application(Kritis3mApplications *appl)
         {
         case TLS_FORWARD_PROXY:
         {
-            ret = tls_proxy_stop_appl_id(appl_id);
+            ret = tls_proxy_stop_mgmt_id(appl_id);
             if (ret < 0)
             {
                 LOG_ERROR("stop request for tls forward proxy with appl_id %d failed. STOP Request failed", appl_id);
@@ -881,7 +922,7 @@ int stop_application(Kritis3mApplications *appl)
         }
         case TLS_REVERSE_PROXY:
         {
-            ret = tls_proxy_stop_appl_id(appl_id);
+            ret = tls_proxy_stop_mgmt_id(appl_id);
             if (ret < 0)
             {
                 LOG_ERROR("stop request for tls reverse proxy with appl_id %d failed. STOP Request failed", appl_id);

@@ -4,11 +4,15 @@
 #include <stdint.h>
 #include "asl.h"
 #include <stdbool.h>
+#include <net/if.h>
 #include <sys/socket.h>
 #include <time.h>
 #include <pthread.h>
 // #include "kritis3m_pki_client.h"
 #include <netinet/in.h>
+
+
+#define USE_MANAGEMENT
 
 #define MAX_FILEPATH_SIZE 400
 // lengths
@@ -19,11 +23,15 @@
 #define MAX_TRUSTED_APPLICATIONS 10
 #define MAX_NAME_SIZE 256
 #define MAX_NUMBER_CRYPTOPROFILE 20
+#define MAX_NUMBER_HW_CONFIG 15
 #define MAX_NUMBER_APPLICATIONS 7
 #define MAX_NUMBER_TRUSTED_CLIENTS 7
 
-#define SERIAL_NUMBER_SIZE 254
 
+
+
+
+#define SERIAL_NUMBER_SIZE 254
 #define ENDPOINT_LEN 254
 
 #define PRIMARY_FILENAME "primary.json"
@@ -68,7 +76,7 @@ typedef enum SelectedConfiguration
 typedef enum
 {
 
-    UNDEFINED = -1,
+    UNDEFINED = -1, 
     TLS_FORWARD_PROXY = 0,
     TLS_REVERSE_PROXY = 1,
     TLS_TLS_PROXY = 2,
@@ -227,6 +235,12 @@ typedef struct
     TrustedClients TrustedClients[MAX_NUMBER_TRUSTED_CLIENTS];
 } Whitelist;
 
+
+typedef struct {
+    char device[IF_NAMESIZE];
+    char ip_cidr[INET6_ADDRSTRLEN+4];
+}HardwareConfiguration;
+
 struct ApplicationConfiguration
 {
     pthread_mutex_t lock;
@@ -234,6 +248,9 @@ struct ApplicationConfiguration
 
     int number_crypto_profiles;
     CryptoProfile crypto_profile[MAX_NUMBER_CRYPTOPROFILE];
+
+    int number_hw_config;
+    HardwareConfiguration hw_config[MAX_NUMBER_HW_CONFIG];
 
     crypto_identity crypto_identity[MAX_NUMBER_CRYPTOPROFILE];
     int number_crypto_identity;

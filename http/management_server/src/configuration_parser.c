@@ -65,7 +65,7 @@ int parse_json_to_ManagementConfig(cJSON *json_management_service, Kritis3mManag
     config->identity.identity = nw_identitiy;
 
     ret = parse_endpoint_addr(cJSON_GetObjectItem(json_identity, "server_addr")->valuestring,
-                              config->server_endpoint_addr.address, ENDPOINT_LEN, &config->server_endpoint_addr.port);
+                              config->identity.server_endpoint_addr.address, ENDPOINT_LEN, &config->identity.server_endpoint_addr.port);
     if (ret < 0)
         goto error_occured;
 
@@ -234,6 +234,45 @@ ManagementReturncode parse_buffer_to_SystemConfiguration(char *json_buffer, int 
     if (retval < MGMT_OK)
         goto error_occured;
     /***********************************END  WHITELIST  **********************************/
+
+    /*********************************** HW_CONFIG      **********************************/
+
+    item = cJSON_GetObjectItem(configs, "hw_config");
+    if (item == NULL)
+        goto error_occured;
+
+
+    int number_hw_configs = cJSON_GetArraySize(item);
+    if ((number_hw_configs == 0))
+        goto error_occured;
+
+    if (number_hw_configs > MAX_NUMBER_HW_CONFIG)
+    {
+        LOG_WARN("can't take over all ip addr, since store is just designed for %d ip addresses", MAX_NUMBER_HW_CONFIG);
+        number_hw_configs = MAX_NUMBER_HW_CONFIG;
+    }
+    config->application_config.number_hw_config = number_hw_configs;
+
+    for (int i = 0; i < number_hw_configs; i++)
+    {
+        cJSON *hw_config_item = cJSON_GetArrayItem(item, i);
+        if (hw_config_item == NULL)
+            goto error_occured;
+
+        cJSON *json_dev = cJSON_GetObjectItem(hw_config_item, "device");
+        if (json_dev == NULL)
+            goto error_occured;
+
+        strncpy(config->application_config.hw_config[i].device, json_dev->valuestring, IF_NAMESIZE);
+
+        cJSON *json_ip_cidr = cJSON_GetObjectItem(hw_config_item, "cidr");
+        if (json_ip_cidr == NULL)
+            goto error_occured;
+        strncpy(config->application_config.hw_config[i].ip_cidr, json_ip_cidr->valuestring, INET6_ADDRSTRLEN+4);
+    }
+
+
+    /*********************************** End_HW_Config  **********************************/
 
     //*******************CRYPTO PROFILES *******************************************/
     cJSON *crypto_profiles = cJSON_GetObjectItem(root, "crypto_config");

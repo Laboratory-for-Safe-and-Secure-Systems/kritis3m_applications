@@ -1,6 +1,7 @@
 
 #include "utils.h"
 #include "logging.h"
+#include <ctype.h>
 
 #include <sys/types.h>
 #include <errno.h>
@@ -261,56 +262,91 @@ error_occured:
     return -1;
 }
 
-int parse_endpoint_addr(const char *endpoint_addr, char *dst_ip, int dst_ip_len, uint16_t *port)
-{
-    if (!endpoint_addr || !dst_ip || !port)
-    {
-        LOG_ERROR("can't parse ip addr");
-        return -1;
+int parse_endpoint_addr(const char *endpoint_addr, char *dst_ip, int dst_ip_len, uint16_t *port) {
+    if (!endpoint_addr || !dst_ip || dst_ip_len <= 0 || !port) {
+        return -1;  // Invalid parameters
     }
 
-    // Find the last colon to handle IPv6 addresses
-    char *last_colon = strrchr(endpoint_addr, ':');
-    if (!last_colon)
-    {
-        LOG_ERROR("can't parse ip addr. Didnt found <:> ");
-        return -1;
+    const char *port_str = NULL;
+    const char *addr_start = endpoint_addr;
+    const char *addr_end = NULL;
+    size_t addr_len;
+
+    // Initialize output parameters
+    *port = 0;
+    dst_ip[0] = '\0';
+
+    // Check if this is an IPv6 address (contains multiple colons)
+    int colon_count = 0;
+    const char *p = endpoint_addr;
+    while (*p) {
+        if (*p == ':') colon_count++;
+        p++;
     }
 
-    // Copy address part, handling IPv6 brackets
-    size_t addr_len = last_colon - endpoint_addr;
-    if (dst_ip_len < addr_len){
-        LOG_ERROR("dst_buffer to small. cant store endpoint");
-        return -1;
-    }  
-
-    if (endpoint_addr[0] == '[' && endpoint_addr[addr_len - 1] == ']')
-    {
-        // Remove brackets for IPv6
-        strncpy(dst_ip, endpoint_addr + 1, addr_len - 2);
-        dst_ip[addr_len - 2] = '\0';
+    if (colon_count > 1) {  // IPv6 address
+        // Check if address is wrapped in brackets
+        if (endpoint_addr[0] == '[') {
+            addr_start = endpoint_addr + 1;
+            const char *closing_bracket = strchr(addr_start, ']');
+            if (!closing_bracket) {
+                return -1;  // Malformed IPv6 address
+            }
+            addr_end = closing_bracket;
+            
+            // Check for port after the brackets
+            if (*(closing_bracket + 1) == ':') {
+                port_str = closing_bracket + 2;
+            } else if (*(closing_bracket + 1) != '\0') {
+                return -1;  // Invalid character after IPv6 address
+            }
+        } else {
+            // No brackets, must be just an IPv6 address without port
+            addr_end = endpoint_addr + strlen(endpoint_addr);
+        }
+    } else {  // IPv4 address or hostname
+        const char *colon = strchr(endpoint_addr, ':');
+        if (colon) {
+            addr_end = colon;
+            port_str = colon + 1;
+        } else {
+            // Check if the string is all digits (just a port)
+            int all_digits = 1;
+            for (p = endpoint_addr; *p; p++) {
+                if (!isdigit((unsigned char)*p)) {
+                    all_digits = 0;
+                    break;
+                }
+            }
+            
+            if (all_digits) {
+                port_str = endpoint_addr;
+                addr_start = NULL;
+            } else {
+                addr_end = endpoint_addr + strlen(endpoint_addr);
+            }
+        }
     }
-    else
-    {
-        // Regular address copy
-        strncpy(dst_ip, endpoint_addr, addr_len);
+
+    // Parse port if present
+    if (port_str) {
+        char *endptr;
+        long port_val = strtol(port_str, &endptr, 10);
+        if (*endptr != '\0' || port_val < 0 || port_val > 65535) {
+            return -1;  // Invalid port number
+        }
+        *port = (uint16_t)port_val;
+    }
+
+    // Copy address/hostname if present
+    if (addr_start) {
+        addr_len = addr_end - addr_start;
+        if (addr_len >= (size_t)dst_ip_len) {
+            return -1;  // Buffer too small
+        }
+        memcpy(dst_ip, addr_start, addr_len);
         dst_ip[addr_len] = '\0';
     }
 
-    // Parse port
-    char *port_str = last_colon + 1;
-    char *endptr;
-    long port_val = strtol(port_str, &endptr, 10);
-
-    // Validate port parsing
-    if (*endptr != '\0' ||
-        port_val < 0 ||
-        port_val > 65535)
-    {
-        LOG_ERROR("port invalid");
-        return -1;
-    }
-
-    *port = (uint16_t)port_val;
     return 0;
 }

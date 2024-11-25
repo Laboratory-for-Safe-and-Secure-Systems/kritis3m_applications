@@ -196,32 +196,6 @@ error_occured:
     if (ret > -1)
         ret = -1;
 }
-int write_Kritis3mNodeConfig_toflash(Kritis3mNodeConfiguration *config)
-
-{
-    char *buffer = NULL;
-    int ret = 0;
-    FILE *file = NULL;
-    if (config == NULL)
-        goto error_occured;
-    ret = Kritis3mNodeConfiguration_tojson(config, &buffer);
-    file = fopen(config->config_path, "w");
-    // Check if the file was opened successfully
-    if (file == NULL)
-        goto error_occured;
-    if (fwrite(buffer, sizeof(char), strlen(buffer), file) != strlen(buffer))
-        goto error_occured;
-    fclose(file);
-    LOG_INFO("File written successfully.\n");
-    free(buffer);
-    return ret;
-error_occured:
-    if (file != NULL)
-        fclose(file);
-    free(buffer);
-    ret = -1;
-    return ret;
-}
 
 int set_SelectedConfiguration(Kritis3mNodeConfiguration *config, int selected_configuration)
 {

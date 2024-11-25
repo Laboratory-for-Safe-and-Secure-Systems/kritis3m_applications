@@ -84,6 +84,7 @@ int create_endpoint_config(crypto_identity *crypto_id, CryptoProfile *crypto_pro
     ep_cfg->private_key.additional_key_size = crypto_id->certificates.additional_key_buffer_size;
     ep_cfg->private_key.size = crypto_id->certificates.key_buffer_size;
 
+
     return ret;
 
 error_occured:

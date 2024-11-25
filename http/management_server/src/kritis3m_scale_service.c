@@ -14,7 +14,6 @@ LOG_MODULE_CREATE(kritis3m_service);
 #include <pthread.h>
 #include "kritis3m_application_manager.h"
 
-
 #define SIMULTANIOUS_REQs 5
 #define ENROLL_BUFFER_SIZE 2000
 #define REENROLL_BUFFER_SIZE 2000
@@ -75,7 +74,8 @@ int create_folder_structure(Kritis3mNodeConfiguration *node_cfg);
 // callbacks used from the http threads
 int initial_policy_request_cb(struct response response);
 static int send_management_message(int socket, service_message *msg);
-static int read_management_message(int socket, service_message *msg);
+
+int prepare_all_interfaces(HardwareConfiguration hw_config[], int num_configs);
 
 /*********************************************************
  *              HTTP-SERVICE
@@ -139,6 +139,9 @@ int init_kritis3m_service(char *config_file)
       .UseSecureElement = false,
   };
 
+  asl_enable_logging(true);
+  asl_set_log_level(ASL_LOG_LEVEL_DBG);
+
   // get global node config
   set_kritis3m_serivce_defaults(&svc);
   svc.node_configuration.config_path = config_file;
@@ -165,8 +168,9 @@ int init_kritis3m_service(char *config_file)
     LOG_ERROR("can't init http_service");
   }
   init_configuration_manager(&svc.configuration_manager, &svc.node_configuration);
-  ret = call_distribution_service(initial_policy_request_cb, svc.node_configuration.primary_path);
-  if (ret < 0 ){
+  ret = initial_call_controller(initial_policy_request_cb);
+  if (ret < 0)
+  {
     LOG_ERROR("error occured calling distribution service");
     return 0;
   }
@@ -178,16 +182,22 @@ int init_kritis3m_service(char *config_file)
   ManagementReturncode retval = get_Systemconfig(&svc.configuration_manager, &svc.node_configuration);
   if (retval != MGMT_OK)
     goto error_occured;
-  
+
+  ret = prepare_all_interfaces(svc.configuration_manager.primary.application_config.hw_config,
+                               svc.configuration_manager.primary.application_config.number_hw_config);
+  if (ret < 0){
+    LOG_ERROR("can't prepare iface");
+    goto error_occured;
+  }
+
   svc.initialized = true;
 
   init_application_manager();
   start_application_manager(&svc.configuration_manager.primary.application_config);
-  while(1){
-usleep(10* 1000);
-
+  while (1)
+  {
+    usleep(10 * 1000);
   }
-
 
   ret = pthread_create(&svc.mainthread, &svc.thread_attr, start_kristis3m_service, &svc);
 
@@ -391,51 +401,117 @@ void init_configuration_manager(ConfigurationManager *manager, Kritis3mNodeConfi
 
 int initial_policy_request_cb(struct response response)
 {
-  // check if req was succesfull
+  // -------------------- INIT ---------------------------//
   int ret = 0;
   service_message resp = {0};
   service_message req = {0};
+  char *policy_filepath = svc.node_configuration.primary_path;
 
-  if (response.ret != MGMT_OK)
+  if ((response.ret != MGMT_OK) || (policy_filepath == NULL) || (response.buffer == NULL))
+  {
+    LOG_ERROR("RETURN CODE: %d", response.ret);
     goto error_occured;
-  if (response.buffer == NULL)
-    goto error_occured;
+  }
+
+  LOG_DEBUG("HTTP status code is %d", response.http_status_code);
+  LOG_DEBUG("Policy response is %d bytes long", response.bytes_received);
+
   LOG_INFO("Received %d bytes from mgmt server: ", response.bytes_received);
-  if (response.meta.policy_req.destination_path == NULL)
-    goto error_occured;
-  ret = write_file(response.meta.policy_req.destination_path, response.buffer_frag_start, response.bytes_received);
+  LOG_DEBUG("write response to %s", policy_filepath);
+  if (response.http_status_code = 200)
+  {
+    ret = write_file(policy_filepath, response.buffer_frag_start, response.bytes_received);
+  }
   if (ret < 0)
   {
     LOG_ERROR("can't write response into buffer");
+    goto error_occured;
   }
-  return ret;
-
-  // req.msg_type = HTTP_SERVICE;
-  // req.payload.event = MGMT_EV_MGM_RESP;
-
-  // ret = send_management_message(svc.management_socket[THREAD_EXT], &req);
-  // if (ret < 0)
-  // {
-  //   LOG_ERROR("cant send mgmt message");
-  //   goto error_occured;
-  // }
-  // ret = read_management_message(svc.management_socket[THREAD_EXT], &resp);
-  // if (ret < 0)
-  // {
-  //   LOG_ERROR("receive mgmt_message");
-  //   goto error_occured;
-  // }
-  // if ((resp.msg_type == RESPONSE) && (resp.payload.return_code == 0))
-  // {
-  //   LOG_ERROR("Resposne was succefull ");
-  // }
-
-  if (response.buffer != NULL)
-    free(response.buffer);
+  /**
+   * @todo signal main thread
+   */
   return ret;
 error_occured:
-
-  if (response.buffer != NULL)
-    free(response.buffer);
+  ret = -1;
   return ret;
+}
+
+//------------------------------------------ HARDWARE INFORMATION --------------------------------------- //
+#define MAX_CMD_LENGTH 512
+
+static int is_ipv6_address(const char* ip_cidr) {
+    return (strchr(ip_cidr, ':') != NULL);
+}
+
+static int parse_ip_cidr(const char* ip_cidr, char* ip_addr, char* cidr) {
+    const char* slash = strchr(ip_cidr, '/');
+    if (!slash) {
+        return -1;
+    }
+
+    size_t ip_len = slash - ip_cidr;
+    strncpy(ip_addr, ip_cidr, ip_len);
+    ip_addr[ip_len] = '\0';
+    
+    strncpy(cidr, slash + 1, 3);
+    cidr[3] = '\0';
+
+    return 0;
+}
+
+#ifdef _WIN32
+static int add_ip_address(const char* device, const char* ip_addr, const char* cidr, int is_ipv6) {
+    char cmd[MAX_CMD_LENGTH];
+    char* output = NULL;
+
+    snprintf(cmd, sizeof(cmd),
+            "netsh interface %s add address \"%s\" %s/%s",
+            is_ipv6 ? "ipv6" : "ipv4",
+            device, ip_addr, cidr);
+
+    int result = run_ip_shell_cmd(cmd, &output);
+    free(output);
+    return result;
+}
+
+#else
+static int add_ip_address(const char* device, const char* ip_addr, const char* cidr, int is_ipv6) {
+    char cmd[MAX_CMD_LENGTH];
+    char* output = NULL;
+
+    snprintf(cmd, sizeof(cmd),
+            "ip %s addr add %s/%s dev %s",
+            is_ipv6 ? "-6" : "-4",
+            ip_addr, cidr, device);
+
+    int result = run_ip_shell_cmd(cmd, &output);
+    free(output);
+    return result;
+}
+#endif
+
+int prepare_all_interfaces(HardwareConfiguration hw_config[], int num_configs) {
+    if (!hw_config || num_configs <= 0 || num_configs > MAX_NUMBER_HW_CONFIG) {
+        return -1;
+    }
+
+    char ip_addr[INET6_ADDRSTRLEN];
+    char cidr[4];
+    int failures = 0;
+
+    // Process each interface configuration
+    for (int i = 0; i < num_configs; i++) {
+        if (parse_ip_cidr(hw_config[i].ip_cidr, ip_addr, cidr) != 0) {
+            failures++;
+            continue;
+        }
+
+        int is_ipv6 = is_ipv6_address(hw_config[i].ip_cidr);
+        
+        if (add_ip_address(hw_config[i].device, ip_addr, cidr, is_ipv6) < 0) {
+            failures++;
+        }
+    }
+
+    return (failures > 0) ? -1 : 0;
 }
