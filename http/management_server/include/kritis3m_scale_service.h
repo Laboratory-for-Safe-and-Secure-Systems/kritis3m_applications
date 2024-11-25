@@ -11,6 +11,7 @@
  *              MANAGEMENT SERVICE STARTUP
  */
 
+
 typedef struct kritis3m_service kritis3m_service;
 struct kritis3m_service;
 
@@ -19,7 +20,6 @@ int init_kritis3m_service(char *config_file);
 /*********************************************************
  *              CONFIGURATION DISTRIBUTION
  */
-
 
 enum ManagementEvents
 {

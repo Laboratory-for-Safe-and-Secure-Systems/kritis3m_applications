@@ -33,7 +33,6 @@ enum MSG_RESPONSE_CODE
     MSG_BUSY = 2,
 };
 
-
 void init_application_manager(void);
 int start_application_manager(ApplicationConfiguration *configuration);
 bool is_running();

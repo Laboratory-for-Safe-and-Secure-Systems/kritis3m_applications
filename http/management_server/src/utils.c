@@ -116,7 +116,7 @@ error_occured:
     return ret;
 }
 
-char *duplicate_string(char const *source)
+char *string_duplicate(char const *source)
 {
     if (source == NULL)
         return NULL;

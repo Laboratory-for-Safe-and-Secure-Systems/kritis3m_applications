@@ -20,7 +20,7 @@ int parse_port_fromIpPort(const char *src_ip_port);
  * !free buffer after its usage */
 int read_file(const char *filename, uint8_t **buffer, int *buffer_size);
 int write_file(const char *filename, char *buffer, int buffer_size);
-char *duplicate_string(char const *source);
+char *string_duplicate(char const *source);
 int create_directory(const char *path);
 void ensure_trailing_slash(char *path, size_t size);
 

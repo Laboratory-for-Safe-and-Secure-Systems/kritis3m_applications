@@ -56,6 +56,8 @@ struct network_interfaces const* network_interfaces(void);
 /* Add an ip address to a network interface */
 int add_ipv4_address(void* iface, struct in_addr ipv4_addr);
 
+/* Add an ipv4 or ipv6 addr*/
+int add_ip_address(const char* device, const char* ip_addr, const char* cidr, int is_ipv6); 
 
 /* Remove an ip address from a network interface */
 int remove_ipv4_address(void* iface, struct in_addr ipv4_addr);

@@ -76,14 +76,14 @@ int parse_json_to_ManagementConfig(cJSON *json_management_service, Kritis3mManag
                              identity_path,
                              config->identity.identity);
 
-    config->identity.revocation_list_url = duplicate_string(cJSON_GetObjectItem(json_identity, "revocation_list_url")->valuestring);
+    config->identity.revocation_list_url = string_duplicate(cJSON_GetObjectItem(json_identity, "revocation_list_url")->valuestring);
     if (config->identity.revocation_list_url == NULL)
     {
         goto error_occured;
     }
     config->identity.revocation_list_url_size = strlen(config->identity.revocation_list_url) + 1; //'\0'
 
-    config->identity.server_url = duplicate_string(cJSON_GetObjectItem(json_identity, "server_url")->valuestring);
+    config->identity.server_url = string_duplicate(cJSON_GetObjectItem(json_identity, "server_url")->valuestring);
     if (config->identity.server_url == NULL)
     {
         goto error_occured;
@@ -103,7 +103,7 @@ int parse_buffer_to_Config(char *json_buffer, int json_buffer_size, Kritis3mNode
     int ret = 0;
     int string_len = -1;
     cJSON *root = cJSON_ParseWithLength(json_buffer, json_buffer_size);
-    config->machine_crypto_path = duplicate_string(cJSON_GetObjectItem(root, "machine_crypto_path")->valuestring);
+    config->machine_crypto_path = string_duplicate(cJSON_GetObjectItem(root, "machine_crypto_path")->valuestring);
     if (config->machine_crypto_path == NULL)
     {
         ret = -1;
@@ -111,14 +111,14 @@ int parse_buffer_to_Config(char *json_buffer, int json_buffer_size, Kritis3mNode
     }
     config->machine_crypto_path_size = strlen(config->machine_crypto_path) + 1; // including '\0'
 
-    config->crypto_path = duplicate_string(cJSON_GetObjectItem(root, "crypto_path")->valuestring);
+    config->crypto_path = string_duplicate(cJSON_GetObjectItem(root, "crypto_path")->valuestring);
     if (config->crypto_path == NULL)
     {
         ret = -1;
         goto error_occured;
     }
     config->crypto_path_size = strlen(config->crypto_path) + 1; // including '\0'
-    config->pki_cert_path = duplicate_string(cJSON_GetObjectItem(root, "pki_cert_path")->valuestring);
+    config->pki_cert_path = string_duplicate(cJSON_GetObjectItem(root, "pki_cert_path")->valuestring);
     if (config->pki_cert_path == NULL)
     {
         ret = -1;
@@ -132,7 +132,7 @@ int parse_buffer_to_Config(char *json_buffer, int json_buffer_size, Kritis3mNode
         goto error_occured;
     }
 
-    config->primary_path = duplicate_string(cJSON_GetObjectItem(root, "primary_path")->valuestring);
+    config->primary_path = string_duplicate(cJSON_GetObjectItem(root, "primary_path")->valuestring);
     if (config->primary_path == NULL)
     {
         ret = -1;
@@ -140,7 +140,7 @@ int parse_buffer_to_Config(char *json_buffer, int json_buffer_size, Kritis3mNode
     }
     config->primary_path_size = strlen(config->primary_path) + 1; // including '\0'
 
-    config->secondary_path = duplicate_string(cJSON_GetObjectItem(root, "secondary_path")->valuestring);
+    config->secondary_path = string_duplicate(cJSON_GetObjectItem(root, "secondary_path")->valuestring);
     if (config->secondary_path == NULL)
     {
         ret = -1;
@@ -492,7 +492,7 @@ ManagementReturncode parse_crypo_identity(cJSON *identity_json, crypto_identity 
     }
     else
     {
-        identity->server_url = duplicate_string(item->valuestring);
+        identity->server_url = string_duplicate(item->valuestring);
         identity->server_url_size = strlen(identity->server_url) + 1;
     }
     return ret;

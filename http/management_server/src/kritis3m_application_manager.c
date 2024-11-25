@@ -628,8 +628,8 @@ int handle_management_message(int fd, struct application_manager *appl_manager)
 
     return ret;
 error_occured:
-    LOG_ERROR("Error occured handling internal management request");
     //-----------------------------------------  ERROR HANDLER      ------------------------------------ //
+    LOG_ERROR("Error occured handling internal management request");
     ret = -1;
     retval = MSG_ERROR;
     // return retval

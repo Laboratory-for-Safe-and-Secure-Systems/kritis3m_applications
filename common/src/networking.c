@@ -511,6 +511,39 @@ static int address_lookup_internal(char const* dest, uint16_t port, struct addri
 	return 0;
 }
 
+
+#ifdef _WIN32
+int add_ip_address(const char* device, const char* ip_addr, const char* cidr, int is_ipv6) {
+    char cmd[512];
+    char* output = NULL;
+
+    snprintf(cmd, sizeof(cmd),
+            "netsh interface %s add address \"%s\" %s/%s",
+            is_ipv6 ? "ipv6" : "ipv4",
+            device, ip_addr, cidr);
+
+    int result = run_ip_shell_cmd(cmd, &output);
+    free(output);
+    return result;
+}
+
+#else
+int add_ip_address(const char* device, const char* ip_addr, const char* cidr, int is_ipv6) {
+    char cmd[512];
+    char* output = NULL;
+
+    snprintf(cmd, sizeof(cmd),
+            "ip %s addr add %s/%s dev %s",
+            is_ipv6 ? "-6" : "-4",
+            ip_addr, cidr, device);
+
+    int result = run_ip_shell_cmd(cmd, &output);
+    free(output);
+    return result;
+}
+#endif
+
+
 /* Lookup the provided outgoing destination and fill the linked-list accordingly. */
 int address_lookup_client(char const* dest, uint16_t port, struct addrinfo** addr)
 {
@@ -581,3 +614,4 @@ cleanup:
 
 	return -1;
 }
+

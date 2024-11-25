@@ -1,18 +1,23 @@
 
 
-#include "kritis3m_scale_service.h"
-#include "logging.h"
-LOG_MODULE_CREATE(kritis3m_service);
-#include "cJSON.h"
-#include "http_client.h"
-#include "sys/timerfd.h"
-#include "http_service.h"
-#include "crypto_parser.h"
-#include "networking.h"
-#include "utils.h"
+
 #include <errno.h>
 #include <pthread.h>
+
+#include "logging.h"
+#include "sys/timerfd.h"
+#include "http_service.h"
+#include "networking.h"
+#include "utils.h"
+
+#include "cJSON.h"
+#include "http_client.h"
+
+#include "crypto_parser.h"
+#include "kritis3m_scale_service.h"
 #include "kritis3m_application_manager.h"
+
+LOG_MODULE_CREATE(kritis3m_service);
 
 #define SIMULTANIOUS_REQs 5
 #define ENROLL_BUFFER_SIZE 2000
@@ -459,36 +464,6 @@ static int parse_ip_cidr(const char* ip_cidr, char* ip_addr, char* cidr) {
     return 0;
 }
 
-#ifdef _WIN32
-static int add_ip_address(const char* device, const char* ip_addr, const char* cidr, int is_ipv6) {
-    char cmd[MAX_CMD_LENGTH];
-    char* output = NULL;
-
-    snprintf(cmd, sizeof(cmd),
-            "netsh interface %s add address \"%s\" %s/%s",
-            is_ipv6 ? "ipv6" : "ipv4",
-            device, ip_addr, cidr);
-
-    int result = run_ip_shell_cmd(cmd, &output);
-    free(output);
-    return result;
-}
-
-#else
-static int add_ip_address(const char* device, const char* ip_addr, const char* cidr, int is_ipv6) {
-    char cmd[MAX_CMD_LENGTH];
-    char* output = NULL;
-
-    snprintf(cmd, sizeof(cmd),
-            "ip %s addr add %s/%s dev %s",
-            is_ipv6 ? "-6" : "-4",
-            ip_addr, cidr, device);
-
-    int result = run_ip_shell_cmd(cmd, &output);
-    free(output);
-    return result;
-}
-#endif
 
 int prepare_all_interfaces(HardwareConfiguration hw_config[], int num_configs) {
     if (!hw_config || num_configs <= 0 || num_configs > MAX_NUMBER_HW_CONFIG) {
