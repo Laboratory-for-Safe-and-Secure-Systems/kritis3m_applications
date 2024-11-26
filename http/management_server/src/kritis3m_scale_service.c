@@ -1,6 +1,5 @@
 
 
-
 #include <errno.h>
 #include <pthread.h>
 #include <unistd.h>
@@ -72,7 +71,6 @@ typedef struct service_message
 // forward declarations
 void *start_kristis3m_service(void *arg);
 int setup_socketpair(int management_socket[2], bool blocking);
-void *http_get_request(void *http_get_data);
 void init_configuration_manager(ConfigurationManager *manager, Kritis3mNodeConfiguration *node_config);
 int create_folder_structure(Kritis3mNodeConfiguration *node_cfg);
 
@@ -149,14 +147,15 @@ int init_kritis3m_service(char *config_file)
   svc.node_configuration.config_path = config_file;
   svc.node_configuration.config_path_size = strlen(config_file);
 
+  // reads and the configfile and parses content to node_configuration
   ret = get_Kritis3mNodeConfiguration(config_file, &svc.node_configuration);
   if (ret < 0)
   {
     LOG_ERROR("can't parse Config, error occured: %d ", errno);
     return ret;
   }
-  // create_folder_structure(&svc.node_configuration);
 
+  //2. setsup endpoint configuration, used to communicate with the controller
   ret = create_endpoint_config(&svc.node_configuration.management_identity.identity, &default_profile, &svc.management_endpoint_config);
   if (ret < 0)
   {
@@ -164,30 +163,49 @@ int init_kritis3m_service(char *config_file)
     goto error_occured;
   }
 
+  //3. initializeation of http service, which is responsible for handling the communication with the controller
   ret = init_http_service(&svc.node_configuration.management_identity, &svc.management_endpoint_config);
   if (ret < 0)
   {
     LOG_ERROR("can't init http_service");
   }
+
+  //4. initialization of configuration manager
+  /**
+   * @brief the configuration manager stores the application data.
+   * To ensure a secure update with rollback functionality, two applicationconfigs, primary and secondary are used
+   * - In this state only the primary object is used
+   */
   init_configuration_manager(&svc.configuration_manager, &svc.node_configuration);
+
+  //5. calls the distibution server
+  /**
+   * @brief at the moment, the server request is synchronous, so there is no need to offload it to the main thread
+   * in the future each request will be handled in an own thread, using the thread pool
+   */
   ret = initial_call_controller(initial_policy_request_cb);
   if (ret < 0)
   {
     LOG_ERROR("error occured calling distribution service");
     return 0;
   }
+  // set primary application config
   if (svc.configuration_manager.active_configuration == CFG_NONE)
   {
     LOG_INFO("no configuration selected. Starting with primary configuration");
     svc.configuration_manager.active_configuration = CFG_PRIMARY;
   }
+
+  //5. Read and Parse application config
   ManagementReturncode retval = get_Systemconfig(&svc.configuration_manager, &svc.node_configuration);
   if (retval != MGMT_OK)
     goto error_occured;
 
+  //6. prepare hardware 
   ret = prepare_all_interfaces(svc.configuration_manager.primary.application_config.hw_config,
                                svc.configuration_manager.primary.application_config.number_hw_config);
-  if (ret < 0){
+  if (ret < 0)
+  {
     LOG_ERROR("can't prepare iface");
     goto error_occured;
   }
@@ -214,19 +232,23 @@ error_occured:
 void *start_kristis3m_service(void *arg)
 {
 
+  enum appl_state{
+    APPLICATION_MANAGER_OFF,
+    APPLICATION_MANAGER_ENABLED,
+  };
+
   struct kritis3m_service *svc = (struct kritis3m_service *)arg;
   if (svc == NULL)
     goto terminate;
-
   struct poll_set *pollfd = svc->pollfd;
   int hb_interval_sec = 10;
   int ret = 0;
   SystemConfiguration *selected_sys_cfg = NULL;
   ManagementReturncode retval = MGMT_OK;
-
   asl_endpoint_configuration *ep_cfg = &svc->management_endpoint_config;
   Kritis3mNodeConfiguration node_configuration = svc->node_configuration;
   ConfigurationManager application_configuration_manager = svc->configuration_manager;
+  enum appl_state appl_state = APPLICATION_MANAGER_OFF;
 
   ret = poll_set_add_fd(pollfd, svc->management_socket[THREAD_INT], POLLIN | POLLERR);
   if (ret < 0)
@@ -237,11 +259,16 @@ void *start_kristis3m_service(void *arg)
 
   while (1)
   {
+
+
     ret = poll(pollfd->fds, pollfd->num_fds, -1);
 
     if (ret == -1)
     {
       LOG_ERROR("poll error: %d", errno);
+      continue;
+    }
+    if(ret == 0){
       continue;
     }
     for (int i = 0; i < pollfd->num_fds; i++)
@@ -251,16 +278,14 @@ void *start_kristis3m_service(void *arg)
 
       if (event == 0)
         continue;
+
       /* Check management socket */
-      if (fd == svc->management_socket[1])
+      if (fd == svc->management_socket[THREAD_INT])
       {
         if (event & POLLIN)
         {
           /* Handle the message */
-          // event = handle_management_message(svc->management_socket[1], fd, svc);
-          if (ret == 1)
-          {
-          }
+
         }
       }
 
@@ -279,7 +304,7 @@ terminate:
 }
 int setup_socketpair(int management_socket[2], bool blocking)
 {
-  int ret = create_socketpair( management_socket);
+  int ret = create_socketpair(management_socket);
   if (ret < 0)
   {
     LOG_ERROR("Error creating management socket pair: %d (%s)", errno, strerror(errno));
@@ -287,13 +312,13 @@ int setup_socketpair(int management_socket[2], bool blocking)
   }
   if (!blocking)
   {
-    ret = setblocking(management_socket[0], false);
+    ret = setblocking(management_socket[THREAD_EXT], false);
     if (ret < 0)
     {
       LOG_ERROR("Error unblocking socket: %d (%s)", errno, strerror(errno));
       return -1;
     }
-    ret = setblocking(management_socket[1], false);
+    ret = setblocking(management_socket[THREAD_INT], false);
     if (ret < 0)
     {
       LOG_ERROR("Error unblocking socket: %d (%s)", errno, strerror(errno));
@@ -425,49 +450,56 @@ error_occured:
 //------------------------------------------ HARDWARE INFORMATION --------------------------------------- //
 #define MAX_CMD_LENGTH 512
 
-static int is_ipv6_address(const char* ip_cidr) {
-    return (strchr(ip_cidr, ':') != NULL);
+static int is_ipv6_address(const char *ip_cidr)
+{
+  return (strchr(ip_cidr, ':') != NULL);
 }
 
-static int parse_ip_cidr(const char* ip_cidr, char* ip_addr, char* cidr) {
-    const char* slash = strchr(ip_cidr, '/');
-    if (!slash) {
-        return -1;
-    }
+static int parse_ip_cidr(const char *ip_cidr, char *ip_addr, char *cidr)
+{
+  const char *slash = strchr(ip_cidr, '/');
+  if (!slash)
+  {
+    return -1;
+  }
 
-    size_t ip_len = slash - ip_cidr;
-    strncpy(ip_addr, ip_cidr, ip_len);
-    ip_addr[ip_len] = '\0';
-    
-    strncpy(cidr, slash + 1, 3);
-    cidr[3] = '\0';
+  size_t ip_len = slash - ip_cidr;
+  strncpy(ip_addr, ip_cidr, ip_len);
+  ip_addr[ip_len] = '\0';
 
-    return 0;
+  strncpy(cidr, slash + 1, 3);
+  cidr[3] = '\0';
+
+  return 0;
 }
 
+int prepare_all_interfaces(HardwareConfiguration hw_config[], int num_configs)
+{
+  if (!hw_config || num_configs <= 0 || num_configs > MAX_NUMBER_HW_CONFIG)
+  {
+    return -1;
+  }
 
-int prepare_all_interfaces(HardwareConfiguration hw_config[], int num_configs) {
-    if (!hw_config || num_configs <= 0 || num_configs > MAX_NUMBER_HW_CONFIG) {
-        return -1;
+  char ip_addr[INET6_ADDRSTRLEN];
+  char cidr[4];
+  int failures = 0;
+
+  // Process each interface configuration
+  for (int i = 0; i < num_configs; i++)
+  {
+    if (parse_ip_cidr(hw_config[i].ip_cidr, ip_addr, cidr) != 0)
+    {
+      failures++;
+      continue;
     }
 
-    char ip_addr[INET6_ADDRSTRLEN];
-    char cidr[4];
-    int failures = 0;
+    int is_ipv6 = is_ipv6_address(hw_config[i].ip_cidr);
 
-    // Process each interface configuration
-    for (int i = 0; i < num_configs; i++) {
-        if (parse_ip_cidr(hw_config[i].ip_cidr, ip_addr, cidr) != 0) {
-            failures++;
-            continue;
-        }
-
-        int is_ipv6 = is_ipv6_address(hw_config[i].ip_cidr);
-        
-        if (add_ip_address(hw_config[i].device, ip_addr, cidr, is_ipv6) < 0) {
-            failures++;
-        }
+    if (add_ip_address(hw_config[i].device, ip_addr, cidr, is_ipv6) < 0)
+    {
+      failures++;
     }
+  }
 
-    return (failures > 0) ? -1 : 0;
+  return (failures > 0) ? -1 : 0;
 }
