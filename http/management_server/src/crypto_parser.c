@@ -67,7 +67,6 @@ int create_endpoint_config(crypto_identity *crypto_id, CryptoProfile *crypto_pro
 
     ep_cfg->hybrid_signature_mode = crypto_profile->HybridSignatureMode;
     ep_cfg->key_exchange_method = crypto_profile->ASLKeyExchangeMethod;
-    ep_cfg->keylog_file = "/home/philipp/kritis/linux_development/kritis3m_workspace/repositories/kritis3m_tls_linux/keylog.txt";
     ep_cfg->mutual_authentication = crypto_profile->MutualAuthentication;
     ep_cfg->no_encryption = crypto_profile->NoEncryption;
 

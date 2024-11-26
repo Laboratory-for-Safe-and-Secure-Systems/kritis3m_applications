@@ -57,8 +57,7 @@ static int https_send_data(asl_session *session, char *send_buf,
 	const char *data;
 	va_list va;
 	int ret, end_of_send = *send_buf_pos;
-	int end_of_data = 0;
-	int remaining_len = 0;
+	int end_of_data, remaining_len;
 	int sent = 0;
 
 	// Corrected va_start usage
@@ -208,11 +207,6 @@ static int http_send_data(int sock, char *send_buf,
 
 			if (remaining_len > to_be_copied)
 			{
-				if (remaining_len > (send_buf_max_len - end_of_send))
-				{
-					LOG_ERROR("Buffer overflow prevented");
-					goto err;
-				}
 				strncpy(send_buf + end_of_send,
 						data + end_of_data,
 						to_be_copied);
@@ -653,7 +647,7 @@ static int https_wait_data(int sock, asl_session *session,
 		}
 
 		ret = poll(fds, nfds, remaining_duration);
-		if (ret == 0)
+			if (ret == 0)
 		{
 			LOG_DEBUG("Timeout");
 			ret = -ETIMEDOUT;

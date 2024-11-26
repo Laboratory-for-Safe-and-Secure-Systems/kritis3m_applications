@@ -129,16 +129,15 @@ int init_kritis3m_service(char *config_file)
 {
   // initializations
   int ret = 0;
+
   CryptoProfile default_profile = {
       .ASLKeyExchangeMethod = ASL_KEX_DEFAULT,
       .HybridSignatureMode = ASL_HYBRID_SIGNATURE_MODE_DEFAULT,
-      .Keylog = "/home/philipp/kritis/linux_development/kritis3m_workspace/repositories/kritis3m_tls_linux/keylog.txt",
       .MutualAuthentication = true,
       .Name = "default",
       .NoEncryption = false,
       .UseSecureElement = false,
   };
-
   asl_enable_logging(true);
   asl_set_log_level(ASL_LOG_LEVEL_DBG);
 
@@ -155,7 +154,14 @@ int init_kritis3m_service(char *config_file)
     return ret;
   }
 
-  //2. setsup endpoint configuration, used to communicate with the controller
+  ret = create_folder_structure(&svc.node_configuration);
+  if (ret < 0)
+  {
+    LOG_ERROR("folder structure is incorrect");
+    goto error_occured;
+  }
+
+  // 2. setsup endpoint configuration, used to communicate with the controller
   ret = create_endpoint_config(&svc.node_configuration.management_identity.identity, &default_profile, &svc.management_endpoint_config);
   if (ret < 0)
   {
@@ -163,14 +169,14 @@ int init_kritis3m_service(char *config_file)
     goto error_occured;
   }
 
-  //3. initializeation of http service, which is responsible for handling the communication with the controller
+  // 3. initializeation of http service, which is responsible for handling the communication with the controller
   ret = init_http_service(&svc.node_configuration.management_identity, &svc.management_endpoint_config);
   if (ret < 0)
   {
     LOG_ERROR("can't init http_service");
   }
 
-  //4. initialization of configuration manager
+  // 4. initialization of configuration manager
   /**
    * @brief the configuration manager stores the application data.
    * To ensure a secure update with rollback functionality, two applicationconfigs, primary and secondary are used
@@ -178,7 +184,7 @@ int init_kritis3m_service(char *config_file)
    */
   init_configuration_manager(&svc.configuration_manager, &svc.node_configuration);
 
-  //5. calls the distibution server
+  // 5. calls the distibution server
   /**
    * @brief at the moment, the server request is synchronous, so there is no need to offload it to the main thread
    * in the future each request will be handled in an own thread, using the thread pool
@@ -196,12 +202,12 @@ int init_kritis3m_service(char *config_file)
     svc.configuration_manager.active_configuration = CFG_PRIMARY;
   }
 
-  //5. Read and Parse application config
+  // 5. Read and Parse application config
   ManagementReturncode retval = get_Systemconfig(&svc.configuration_manager, &svc.node_configuration);
   if (retval != MGMT_OK)
     goto error_occured;
 
-  //6. prepare hardware 
+  // 6. prepare hardware
   ret = prepare_all_interfaces(svc.configuration_manager.primary.application_config.hw_config,
                                svc.configuration_manager.primary.application_config.number_hw_config);
   if (ret < 0)
@@ -232,7 +238,8 @@ error_occured:
 void *start_kristis3m_service(void *arg)
 {
 
-  enum appl_state{
+  enum appl_state
+  {
     APPLICATION_MANAGER_OFF,
     APPLICATION_MANAGER_ENABLED,
   };
@@ -260,7 +267,6 @@ void *start_kristis3m_service(void *arg)
   while (1)
   {
 
-
     ret = poll(pollfd->fds, pollfd->num_fds, -1);
 
     if (ret == -1)
@@ -268,7 +274,8 @@ void *start_kristis3m_service(void *arg)
       LOG_ERROR("poll error: %d", errno);
       continue;
     }
-    if(ret == 0){
+    if (ret == 0)
+    {
       continue;
     }
     for (int i = 0; i < pollfd->num_fds; i++)
@@ -285,7 +292,6 @@ void *start_kristis3m_service(void *arg)
         if (event & POLLIN)
         {
           /* Handle the message */
-
         }
       }
 
@@ -383,21 +389,38 @@ int create_identity_folder(const char *base_path, network_identity identity)
 
   return 0;
 }
+
+//@todo clean up
 int create_folder_structure(Kritis3mNodeConfiguration *node_config)
 {
-  if (create_directory(node_config->config_path) == -1)
+  char helper_string[512];
+  /**---------------------- Create Base Folder Structure -------------------------- */
+  if (!directory_exists(node_config->config_path))
+  {
+    LOG_ERROR("config path does not exist. Pls check the config folder path, or create the folder");
     return -1;
-  if (create_directory(node_config->crypto_path) == -1)
+  }
+  if (!directory_exists(node_config->crypto_path))
+  {
+    LOG_ERROR("crypto path does not exist. Pls check the crypto folder path, or create the folder");
     return -1;
+  }
+
+  /**---------------------- Create Identity Path and machine path -------------------------- */
   if (create_directory(node_config->pki_cert_path) == -1)
     return -1;
   if (create_directory(node_config->machine_crypto_path) == -1)
     return -1;
+  if (create_directory(node_config->management_path) == -1)
+    return -1;
+  if (create_directory(node_config->management_service_path) == -1)
+    return -1;
+  if (create_directory(node_config->remote_path) == -1)
+    return -1;
+  if (create_directory(node_config->production_path) == -1)
+    return -1;
 
-  create_identity_folder(node_config->pki_cert_path, MANAGEMENT_SERVICE);
-  create_identity_folder(node_config->pki_cert_path, REMOTE);
-  create_identity_folder(node_config->pki_cert_path, MANAGEMENT);
-  create_identity_folder(node_config->pki_cert_path, PRODUCTION);
+  /**------------------------Create Subfolder for application config primary and secondary ----*/
   return 0;
 }
 

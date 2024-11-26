@@ -28,6 +28,7 @@ void ensure_trailing_slash(char *path, size_t size);
 
 int parse_addr_toKritis3maddr(char* ip_port, Kritis3mSockaddr *dst);
 int parse_endpoint_addr(const char *endpoint_addr, char *dst_ip, int dst_ip_len, uint16_t *port);
+int directory_exists(const char *path); 
 
 uint64_t parse_time_string(const char *time_str); 
 #endif

@@ -102,63 +102,108 @@ int parse_buffer_to_Config(char *json_buffer, int json_buffer_size, Kritis3mNode
 {
     int ret = 0;
     int string_len = -1;
-    cJSON *root = cJSON_ParseWithLength(json_buffer, json_buffer_size);
-    config->machine_crypto_path = string_duplicate(cJSON_GetObjectItem(root, "machine_crypto_path")->valuestring);
-    if (config->machine_crypto_path == NULL)
-    {
-        ret = -1;
-        goto error_occured;
-    }
-    config->machine_crypto_path_size = strlen(config->machine_crypto_path) + 1; // including '\0'
+    char helper_string[1024];
 
+    /** ---------------------------   Derive Folder Crypto Folder from crypto_path ------------------------- */
+    // base crypto path
+    cJSON *root = cJSON_ParseWithLength(json_buffer, json_buffer_size);
     config->crypto_path = string_duplicate(cJSON_GetObjectItem(root, "crypto_path")->valuestring);
     if (config->crypto_path == NULL)
     {
         ret = -1;
         goto error_occured;
     }
-    config->crypto_path_size = strlen(config->crypto_path) + 1; // including '\0'
-    config->pki_cert_path = string_duplicate(cJSON_GetObjectItem(root, "pki_cert_path")->valuestring);
-    if (config->pki_cert_path == NULL)
+    config->crypto_path_size = strlen(config->crypto_path) + 1;
+
+    config->config_path = string_duplicate(cJSON_GetObjectItem(root, "config_path")->valuestring);
+    if (config->config_path == NULL)
     {
         ret = -1;
         goto error_occured;
     }
-    config->pki_cert_path_size = strlen(config->pki_cert_path) + 1; // including '\0'
+    config->config_path_size = strlen(config->config_path) + 1;
+
+    // machine folder
+    snprintf(helper_string, sizeof(helper_string), "%s/%s", config->crypto_path, "machine");
+    config->machine_crypto_path = string_duplicate(helper_string);
+    if (config->machine_crypto_path == NULL)
+        goto error_occured;
+    config->machine_crypto_path_size = strlen(config->machine_crypto_path) + 1;
+
+    // identity folder
+    snprintf(helper_string, sizeof(helper_string), "%s/%s", config->crypto_path, "identity");
+    config->pki_cert_path = string_duplicate(helper_string);
+    if (config->pki_cert_path == NULL)
+        goto error_occured;
+    config->pki_cert_path_size = strlen(config->pki_cert_path) + 1;
+
+    //management_service
+    snprintf(helper_string, sizeof(helper_string), "%s/%s", config->pki_cert_path, "management_service");
+    config->management_service_path = string_duplicate(helper_string);
+    if (config->management_service_path == NULL)
+        goto error_occured;
+    config->management_service_path_size = strlen(config->management_service_path) + 1;
+
+    //management
+    snprintf(helper_string, sizeof(helper_string), "%s/%s", config->pki_cert_path, "management");
+    config->management_path = string_duplicate(helper_string);
+    if (config->management_path == NULL)
+        goto error_occured;
+    config->management_path_size = strlen(config->management_path) + 1;
+
+    //remote
+    snprintf(helper_string, sizeof(helper_string), "%s/%s", config->pki_cert_path, "remote");
+    config->remote_path = string_duplicate(helper_string);
+    if (config->remote_path == NULL)
+        goto error_occured;
+    config->remote_path_size = strlen(config->remote_path) + 1;
+
+
+    //production
+    snprintf(helper_string, sizeof(helper_string), "%s/%s", config->production_path, "production");
+    config->production_path = string_duplicate(helper_string);
+    if (config->production_path == NULL)
+        goto error_occured;
+    config->production_path_size = strlen(config->production_path) + 1;
+
+    /**-------------------------- Selected Configuration------------------------------------------ */
 
     if (cJSON_GetObjectItem(root, "selected_configuration") == NULL)
     {
-        ret = -1;
-        goto error_occured;
+        config->selected_configuration = CFG_NONE;
     }
-
-    config->primary_path = string_duplicate(cJSON_GetObjectItem(root, "primary_path")->valuestring);
-    if (config->primary_path == NULL)
-    {
-        ret = -1;
-        goto error_occured;
-    }
-    config->primary_path_size = strlen(config->primary_path) + 1; // including '\0'
-
-    config->secondary_path = string_duplicate(cJSON_GetObjectItem(root, "secondary_path")->valuestring);
-    if (config->secondary_path == NULL)
-    {
-        ret = -1;
-        goto error_occured;
-    }
-    config->primary_path_size = strlen(config->secondary_path) + 1; // including '\0'
-
-    if (cJSON_IsNumber(cJSON_GetObjectItem(root, "selected_configuration")))
+    else if (cJSON_IsNumber(cJSON_GetObjectItem(root, "selected_configuration")))
         config->selected_configuration = cJSON_GetObjectItem(root, "selected_configuration")->valueint;
     else
         goto error_occured;
-    // getting network identity
+
+    /** ------------------------------- Application Config--------------------------------------- */
+    // primary file path
+    snprintf(helper_string, sizeof(helper_string), "%s/%s", config->config_path, "primary.json");
+    config->primary_path = string_duplicate(helper_string);
+    if (config->primary_path == NULL)
+    {
+        goto error_occured;
+    }
+    config->primary_path_size = strlen(config->primary_path) + 1;
+
+    // secondary file path
+    snprintf(helper_string, sizeof(helper_string), "%s/%s", config->config_path, "secondary.json");
+    config->secondary_path = string_duplicate(helper_string);
+    if (config->secondary_path == NULL)
+    {
+        goto error_occured;
+    }
+    config->secondary_path_size = strlen(config->secondary_path) + 1;
+
+    /**------------------------------------Management Service ------------------------------------ */
     cJSON *json_management_config = cJSON_GetObjectItem(root, "management_service");
     if (json_management_config == NULL)
         goto error_occured;
     ret = parse_json_to_ManagementConfig(json_management_config, &config->management_identity, config->pki_cert_path);
     if (ret < 0)
         goto error_occured;
+
     cJSON_Delete(root);
     return ret;
 error_occured:
@@ -241,7 +286,6 @@ ManagementReturncode parse_buffer_to_SystemConfiguration(char *json_buffer, int 
     if (item == NULL)
         goto error_occured;
 
-
     int number_hw_configs = cJSON_GetArraySize(item);
     if ((number_hw_configs == 0))
         goto error_occured;
@@ -268,9 +312,8 @@ ManagementReturncode parse_buffer_to_SystemConfiguration(char *json_buffer, int 
         cJSON *json_ip_cidr = cJSON_GetObjectItem(hw_config_item, "cidr");
         if (json_ip_cidr == NULL)
             goto error_occured;
-        strncpy(config->application_config.hw_config[i].ip_cidr, json_ip_cidr->valuestring, INET6_ADDRSTRLEN+4);
+        strncpy(config->application_config.hw_config[i].ip_cidr, json_ip_cidr->valuestring, INET6_ADDRSTRLEN + 4);
     }
-
 
     /*********************************** End_HW_Config  **********************************/
 

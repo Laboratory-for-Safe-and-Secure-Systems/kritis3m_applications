@@ -299,14 +299,32 @@ void free_NodeConfig(Kritis3mNodeConfiguration *config)
         config->secondary_path_size = 0;
         config->pki_cert_path_size = 0;
         config->machine_crypto_path_size = 0;
+
+        config->remote_path_size = 0;
+        config->production_path_size = 0;
+        config->management_path_size = 0;
+        config->management_service_path_size = 0;
+
         if (config->primary_path != NULL)
             free(config->primary_path);
         if (config->secondary_path != NULL)
             free(config->secondary_path);
+
+        if (config->remote_path != NULL)
+            free(config->remote_path);
+        if (config->management_path != NULL)
+            free(config->management_path);
+        if (config->management_service_path != NULL)
+            free(config->management_service_path);
+        if (config->production_path!= NULL)
+            free(config->production_path);
+
         if (config->machine_crypto_path != NULL)
             free(config->machine_crypto_path);
+
         if (config->pki_cert_path != NULL)
             free(config->pki_cert_path);
+
         if (config->crypto_path != NULL)
             free(config->crypto_path);
     }

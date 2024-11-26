@@ -1,17 +1,18 @@
 
-#include "utils.h"
-#include "logging.h"
-#include <ctype.h>
 
+#include <ctype.h>
+#include <unistd.h>
 #include <sys/types.h>
 #include <errno.h>
 #include <arpa/inet.h>
 #include <stdio.h>
 #include <string.h>
 #include <inttypes.h>
-#include <stdlib.h>
-#include "asl.h"
 #include <netinet/in.h>
+
+#include "utils.h"
+#include "logging.h"
+#include "asl.h"
 
 LOG_MODULE_CREATE(utils_logmodule);
 
@@ -167,18 +168,21 @@ error_occured:
     return ret;
 }
 
+int directory_exists(const char *path) {
+    return (access(path, F_OK) != -1); // F_OK checks for existence
+}
 int create_directory(const char *path)
 {
     if (mkdir(path, 0755) == -1)
     {
         if (errno == EEXIST)
         {
-            printf("Directory '%s' already exists.\n", path);
+            LOG_DEBUG("Directory '%s' already exists.\n", path);
             return 0;
         }
         else
         {
-            perror("mkdir");
+            LOG_ERROR("mkdir");
             return -1;
         }
     }

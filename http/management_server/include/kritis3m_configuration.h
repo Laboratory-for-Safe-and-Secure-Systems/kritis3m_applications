@@ -309,6 +309,18 @@ typedef struct
     char *pki_cert_path;
     int pki_cert_path_size;
 
+    char *management_service_path;
+    int management_service_path_size;
+
+    char *management_path;
+    int management_path_size;
+
+    char *production_path;
+    int production_path_size;
+
+    char *remote_path;
+    int remote_path_size;
+
     char *crypto_path;
     int crypto_path_size;
 
