@@ -3,6 +3,7 @@
 
 #include <errno.h>
 #include <pthread.h>
+#include <unistd.h>
 
 #include "logging.h"
 #include "sys/timerfd.h"
@@ -46,7 +47,6 @@ struct kritis3m_service
   int management_socket[2];
   pthread_t mainthread;
   pthread_attr_t thread_attr;
-  TimerPipe *hardbeat_timer;
   poll_set pollfd[10];
   asl_endpoint_configuration management_endpoint_config;
   asl_endpoint *client_endpoint;
@@ -90,8 +90,6 @@ void set_kritis3m_serivce_defaults(struct kritis3m_service *svc)
 {
   if (svc == NULL)
     return;
-  svc->hardbeat_timer = get_timer_pipe();
-  init_posix_timer(svc->hardbeat_timer);
   memset(&svc->configuration_manager, 0, sizeof(ConfigurationManager));
   memset(&svc->management_endpoint_config, 0, sizeof(asl_endpoint_configuration));
   memset(&svc->node_configuration, 0, sizeof(Kritis3mNodeConfiguration));
@@ -99,7 +97,6 @@ void set_kritis3m_serivce_defaults(struct kritis3m_service *svc)
   svc->management_socket[THREAD_INT] = -1;
   pthread_attr_init(&svc->thread_attr);
   pthread_attr_setdetachstate(&svc->thread_attr, PTHREAD_CREATE_JOINABLE);
-  init_posix_timer(svc->hardbeat_timer);
   poll_set_init(svc->pollfd);
   setup_socketpair(svc->management_socket, true);
 }
@@ -222,7 +219,6 @@ void *start_kristis3m_service(void *arg)
     goto terminate;
 
   struct poll_set *pollfd = svc->pollfd;
-  TimerPipe *heartbeat_timer = svc->hardbeat_timer;
   int hb_interval_sec = 10;
   int ret = 0;
   SystemConfiguration *selected_sys_cfg = NULL;
@@ -232,12 +228,6 @@ void *start_kristis3m_service(void *arg)
   Kritis3mNodeConfiguration node_configuration = svc->node_configuration;
   ConfigurationManager application_configuration_manager = svc->configuration_manager;
 
-  ret = poll_set_add_fd(pollfd, get_clock_signal_fd(heartbeat_timer), POLLIN | POLLERR);
-  if (ret < 0)
-  {
-    LOG_ERROR("cant add fd to to pollset, shutting down management service");
-    goto terminate;
-  }
   ret = poll_set_add_fd(pollfd, svc->management_socket[THREAD_INT], POLLIN | POLLERR);
   if (ret < 0)
   {
@@ -245,7 +235,6 @@ void *start_kristis3m_service(void *arg)
     goto terminate;
   }
 
-  ret = timer_start(heartbeat_timer, hb_interval_sec);
   while (1)
   {
     ret = poll(pollfd->fds, pollfd->num_fds, -1);
@@ -274,12 +263,6 @@ void *start_kristis3m_service(void *arg)
           }
         }
       }
-      else if (fd == get_clock_signal_fd(heartbeat_timer))
-      {
-        int buffer;
-        read(fd, &buffer, sizeof(int));
-        LOG_INFO("Heartbeat timer expired");
-      }
 
       // services to embedd:
       //  timer
@@ -290,15 +273,13 @@ void *start_kristis3m_service(void *arg)
 
 terminate:
   free_NodeConfig(&svc->node_configuration);
-  timer_terminate(heartbeat_timer);
-  poll_set_remove_fd(pollfd, get_clock_signal_fd(heartbeat_timer));
   // terminate_application_manager
   // store config
   return NULL;
 }
 int setup_socketpair(int management_socket[2], bool blocking)
 {
-  int ret = socketpair(AF_UNIX, SOCK_DGRAM, 0, management_socket);
+  int ret = create_socketpair( management_socket);
   if (ret < 0)
   {
     LOG_ERROR("Error creating management socket pair: %d (%s)", errno, strerror(errno));

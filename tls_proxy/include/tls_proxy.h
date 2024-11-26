@@ -6,6 +6,8 @@
 
 #include "asl.h"
 
+#define USE_MANAGEMENT
+
 
 enum tls_proxy_direction
 {
@@ -23,6 +25,7 @@ proxy_backend_config;
 
 typedef struct proxy_config
 {
+	int application_id;
 	char* own_ip_address;
 	char* target_ip_address;
 	uint16_t listening_port;
@@ -95,6 +98,16 @@ int tls_proxy_stop(int id);
  * Returns 0 on success, -1 on failure (error message is printed to console).
  */
 int tls_proxy_backend_terminate(void);
+
+#ifdef USE_MANAGEMENT
+/* Stop the running proxy with given id (returned by tls_forward_proxy_start or
+ * tls_forward_proxy_start).
+ *
+ * Returns 0 on success, -1 on failure (error message is printed to console).
+ */
+int tls_proxy_stop_mgmt_id(int id);
+#endif
+
 
 
 #endif // TLS_PROXY_H

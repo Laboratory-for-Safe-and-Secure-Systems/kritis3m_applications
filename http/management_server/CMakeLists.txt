@@ -1,7 +1,6 @@
 add_library(kritis3m_service STATIC
         ${CMAKE_CURRENT_SOURCE_DIR}/src/kritis3m_scale_service.c
         ${CMAKE_CURRENT_SOURCE_DIR}/src/kritis3m_application_manager.c
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/hb_service.c
         ${CMAKE_CURRENT_SOURCE_DIR}/src/kritis3m_configuration.c
         ${CMAKE_CURRENT_SOURCE_DIR}/src/crypto_parser.c
         ${CMAKE_CURRENT_SOURCE_DIR}/src/utils.c

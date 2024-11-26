@@ -9,6 +9,7 @@
 
 // kritis3m applications:
 #include "kritis3m_application_manager.h"
+#include "networking.h"
 #include "utils.h"
 #include "asl.h"
 #include "tls_proxy.h"
@@ -327,7 +328,7 @@ int start_application_manager(ApplicationConfiguration *configuration)
     if (ret < 0)
         goto error_occured;
 
-    ret = socketpair(AF_UNIX, SOCK_STREAM, 0, manager.management_pair);
+    ret = create_socketpair(manager.management_pair);
     if (ret < 0)
         LOG_ERROR("Error creating socket pair for management: %d (%s)", errno, strerror(errno));
 

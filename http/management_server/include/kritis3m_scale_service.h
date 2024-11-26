@@ -3,7 +3,6 @@
 
 #include <netinet/in.h>
 #include "kritis3m_configuration.h"
-#include "hb_service.h"
 #include <stdio.h>
 #include <string.h>
 
