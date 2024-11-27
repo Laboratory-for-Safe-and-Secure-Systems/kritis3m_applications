@@ -232,7 +232,7 @@ int get_identity_folder_path(char *out_path, size_t size, const char *base_path,
 {
     if (identity < MANAGEMENT_SERVICE || identity >= max_identities)
     {
-        fprintf(stderr, "Invalid identity\n");
+        LOG_ERROR("Invalid identity\n");
         return -1;
     }
 
@@ -257,6 +257,8 @@ void free_ManagementConfiguration(Kritis3mManagemntConfiguration *config)
 
 void free_CryptoIdentity(crypto_identity *identity)
 {
+    if (identity== NULL)
+    return;
     identity->filepath_size = 0;
     identity->server_url_size = 0;
     identity->revocation_list_url_size = 0;
@@ -316,7 +318,7 @@ void free_NodeConfig(Kritis3mNodeConfiguration *config)
             free(config->management_path);
         if (config->management_service_path != NULL)
             free(config->management_service_path);
-        if (config->production_path!= NULL)
+        if (config->production_path != NULL)
             free(config->production_path);
 
         if (config->machine_crypto_path != NULL)
@@ -333,6 +335,8 @@ void free_NodeConfig(Kritis3mNodeConfiguration *config)
 
 void cleanup_Systemconfiguration(SystemConfiguration *systemconfiguration)
 {
+    if (systemconfiguration == NULL)
+        return;
 
     systemconfiguration->cfg_id = 0;
     systemconfiguration->node_id = 0;
@@ -341,6 +345,7 @@ void cleanup_Systemconfiguration(SystemConfiguration *systemconfiguration)
     systemconfiguration->node_network_index = 0;
     systemconfiguration->heartbeat_interval = 0;
     systemconfiguration->version = 0;
+    /**------------------------------ WHITELIST FREE---------------------------------------- */
     Whitelist *whitelist = &systemconfiguration->application_config.whitelist;
     for (int i = 0; i < whitelist->number_trusted_clients; i++)
     {
@@ -351,6 +356,7 @@ void cleanup_Systemconfiguration(SystemConfiguration *systemconfiguration)
             whitelist->TrustedClients[i].trusted_applications_id[j] = 0;
     }
 
+    /**------------------------------ CRYPTO FREE---------------------------------------- */
     for (int i = 0; i < MAX_NUMBER_CRYPTOPROFILE; i++)
     {
         CryptoProfile *profile = &systemconfiguration->application_config.crypto_profile[i];
@@ -364,6 +370,7 @@ void cleanup_Systemconfiguration(SystemConfiguration *systemconfiguration)
         memset(profile->Name, 0, MAX_NAME_SIZE);
     }
 
+    /**------------------------------ APPLICATIONS FREE---------------------------------------- */
     for (int i = 0; i < MAX_NUMBER_APPLICATIONS; i++)
     {
         Kritis3mApplications *appl = &systemconfiguration->application_config.applications[i];
@@ -381,10 +388,24 @@ void cleanup_Systemconfiguration(SystemConfiguration *systemconfiguration)
         appl->server_endpoint_addr.port = 0;
     }
 
+    /**------------------------------ Identity FREE---------------------------------------- */
     for (int i = 0; i < MAX_NUMBER_CRYPTOPROFILE; i++)
     {
         crypto_identity *cr_identity = &systemconfiguration->application_config.crypto_identity[i];
         cr_identity->identity = MANAGEMENT_SERVICE;
+        memset(cr_identity->server_endpoint_addr.address, 0, ENDPOINT_LEN);
+        cr_identity->server_endpoint_addr.port = 0;
         free_CryptoIdentity(cr_identity);
     }
+}
+
+void cleanup_configuration_manager(ConfigurationManager *configuration_manager)
+{
+    if (configuration_manager == NULL)
+        return;
+    cleanup_Systemconfiguration(&configuration_manager->primary);
+    cleanup_Systemconfiguration(&configuration_manager->secondary);
+    configuration_manager->active_configuration = CFG_NONE;
+    memset(configuration_manager->primary_file_path,0, MAX_FILEPATH_SIZE);
+    memset(configuration_manager->secondary_file_path,0, MAX_FILEPATH_SIZE);
 }

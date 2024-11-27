@@ -107,7 +107,10 @@ static int send_management_message(int socket, application_message *msg);
 int create_proxy_config(Kritis3mApplications *appl, proxy_config *config);
 int stop_application(Kritis3mApplications *appl);
 int stop_application_service(struct application_manager *application_manager);
+
+enum MSG_RESPONSE_CODE management_request_helper(int socket, application_message *msg);
 int respond_with(int socket, enum MSG_RESPONSE_CODE response_code);
+
 int create_echo_config(Kritis3mApplications *appl, echo_server_config *config);
 // int create_network_tester_config(Kritis3mApplications *appl, network_tester_config *config);
 int create_tcp_stdin_bridge_config(Kritis3mApplications *appl, tcp_client_stdin_bridge_config *config);
@@ -1026,6 +1029,6 @@ int stop_application_manager()
     {
         LOG_INFO("closed application_manager succesfully");
     }
-    close(socket); // closing socket anyway
+    closesocket(socket); // closing socket anyway
     return ret;
 }

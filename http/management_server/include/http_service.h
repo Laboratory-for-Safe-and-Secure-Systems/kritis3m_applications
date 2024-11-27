@@ -35,5 +35,6 @@ int init_http_service(Kritis3mManagemntConfiguration *config,
                       asl_endpoint_configuration *pki_endpoint_config
 #endif
 );
+void cleanup_http_service(void);
 
 #endif

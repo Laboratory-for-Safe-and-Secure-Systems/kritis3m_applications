@@ -11,7 +11,6 @@
 // #include "kritis3m_pki_client.h"
 #include <netinet/in.h>
 
-
 #define USE_MANAGEMENT
 
 #define MAX_FILEPATH_SIZE 400
@@ -26,10 +25,6 @@
 #define MAX_NUMBER_HW_CONFIG 15
 #define MAX_NUMBER_APPLICATIONS 7
 #define MAX_NUMBER_TRUSTED_CLIENTS 7
-
-
-
-
 
 #define SERIAL_NUMBER_SIZE 254
 #define ENDPOINT_LEN 254
@@ -59,11 +54,12 @@ typedef enum ManagementReturncode
     MGMT_PARSE_ERROR = -5,
     MGMT_EMPTY_OBJECT_ERROR = -4,
     MGMT_BAD_PARAMS = -3,
-    MGMT_CONNECT_ERROR = -3,
+    MGMT_CONNECT_ERROR = -2,
     MGMT_ERR = -1,
     MGMT_OK = 0,
     MGMT_FORBIDDEN = 1,
     MGMT_BUSY = 2,
+    MGMT_THREAD_STOP = 3
 } ManagementReturncode;
 
 typedef enum SelectedConfiguration
@@ -76,7 +72,7 @@ typedef enum SelectedConfiguration
 typedef enum
 {
 
-    UNDEFINED = -1, 
+    UNDEFINED = -1,
     TLS_FORWARD_PROXY = 0,
     TLS_REVERSE_PROXY = 1,
     TLS_TLS_PROXY = 2,
@@ -169,7 +165,7 @@ typedef union
 typedef struct
 {
     char address[ENDPOINT_LEN]; // Stores IP or IPv4/URL
-    uint16_t port;     // Stores parsed port
+    uint16_t port;              // Stores parsed port
 } EndpointAddr;
 
 typedef struct
@@ -235,11 +231,11 @@ typedef struct
     TrustedClients TrustedClients[MAX_NUMBER_TRUSTED_CLIENTS];
 } Whitelist;
 
-
-typedef struct {
+typedef struct
+{
     char device[IF_NAMESIZE];
-    char ip_cidr[INET6_ADDRSTRLEN+4];
-}HardwareConfiguration;
+    char ip_cidr[INET6_ADDRSTRLEN + 4];
+} HardwareConfiguration;
 
 struct ApplicationConfiguration
 {
@@ -380,7 +376,9 @@ int get_identity_folder_path(char *out_path, size_t size, const char *base_path,
 
 /*Cleanup Functions */
 
+void cleanup_configuration_manager(ConfigurationManager *configuation_manager);
 void cleanup_Systemconfiguration(SystemConfiguration *systemconfiguration);
+
 void free_ManagementConfiguration(Kritis3mManagemntConfiguration *config);
 void free_CryptoIdentity(crypto_identity *identity);
 void free_NodeConfig(Kritis3mNodeConfiguration *config);

@@ -16,7 +16,6 @@ int parse_whitelist(cJSON *json_obj, Whitelist *whitelist);
 int parse_crypo_config(cJSON *json_obj, CryptoProfile *CryptoProfile);
 int parse_crypo_identity(cJSON *json_obj, crypto_identity *crypto_identity, char *crypto_identity_path);
 int parse_application(cJSON *json_obj, Kritis3mApplications *application);
-int set_crypto_filepath(Kritis3mApplications *application, char *crypto_path);
 
 int parse_json_to_ManagementConfig(cJSON *json_management_service, Kritis3mManagemntConfiguration *config, char *identity_path)
 {
@@ -137,30 +136,29 @@ int parse_buffer_to_Config(char *json_buffer, int json_buffer_size, Kritis3mNode
         goto error_occured;
     config->pki_cert_path_size = strlen(config->pki_cert_path) + 1;
 
-    //management_service
+    // management_service
     snprintf(helper_string, sizeof(helper_string), "%s/%s", config->pki_cert_path, "management_service");
     config->management_service_path = string_duplicate(helper_string);
     if (config->management_service_path == NULL)
         goto error_occured;
     config->management_service_path_size = strlen(config->management_service_path) + 1;
 
-    //management
+    // management
     snprintf(helper_string, sizeof(helper_string), "%s/%s", config->pki_cert_path, "management");
     config->management_path = string_duplicate(helper_string);
     if (config->management_path == NULL)
         goto error_occured;
     config->management_path_size = strlen(config->management_path) + 1;
 
-    //remote
+    // remote
     snprintf(helper_string, sizeof(helper_string), "%s/%s", config->pki_cert_path, "remote");
     config->remote_path = string_duplicate(helper_string);
     if (config->remote_path == NULL)
         goto error_occured;
     config->remote_path_size = strlen(config->remote_path) + 1;
 
-
-    //production
-    snprintf(helper_string, sizeof(helper_string), "%s/%s", config->production_path, "production");
+    // production
+    snprintf(helper_string, sizeof(helper_string), "%s/%s", config->pki_cert_path, "production");
     config->production_path = string_duplicate(helper_string);
     if (config->production_path == NULL)
         goto error_occured;
@@ -490,6 +488,11 @@ error_occured:
     LOG_ERROR("cannot parse Kritis3m_application");
     return ret;
 }
+/**
+ * parses a crypto idenity
+ * @brief at the moment, identity paths are stored twice, once in the identity structure and one in the parent object. 
+ * @todo make paths more consistent
+ */
 ManagementReturncode parse_crypo_identity(cJSON *identity_json, crypto_identity *identity, char *crypto_identity_path)
 {
     ManagementReturncode ret = MGMT_OK;
@@ -601,51 +604,3 @@ error_occured:
     ret = MGMT_PARSE_ERROR;
     return ret;
 }
-
-// int Kritis3mNodeConfiguration_tojson(Kritis3mNodeConfiguration *config, char **buffer)
-// {
-//     int ret = 0;
-//     if (config == NULL || buffer == NULL)
-//         return -1;
-//     cJSON *root = cJSON_CreateObject(); // Create root JSON object
-
-//     // Management service object
-//     cJSON *management_service = cJSON_CreateObject();
-//     cJSON_AddStringToObject(management_service, "serial_number", config->management_identity.serial_number);
-//     cJSON_AddStringToObject(management_service, "server_addr", config->management_identity.server_addr);
-
-//     // Management PKI object
-//     cJSON *management_pki = cJSON_CreateObject();
-//     switch (config->management_identity.identity.identity)
-//     {
-//     case MANAGEMENT_SERVICE:
-//         cJSON_AddStringToObject(management_pki, "identity", MANAGEMENT_SERVICE_STR);
-//         break;
-//     case MANAGEMENT:
-//         cJSON_AddStringToObject(management_pki, "identity", MANAGEMENT_STR);
-//         break;
-//     case REMOTE:
-//         cJSON_AddStringToObject(management_pki, "identity", REMOTE_STR);
-//         break;
-//     case PRODUCTION:
-//         cJSON_AddStringToObject(management_pki, "identity", PRODUCTION_STR);
-//         break;
-//     }
-//     cJSON_AddItemToObject(management_service, "management_pki", management_pki);
-
-//     // Add management service to root
-//     cJSON_AddItemToObject(root, "management_service", management_service);
-
-//     // Add other paths and configuration
-//     cJSON_AddStringToObject(root, "machine_crypto_path", config->machine_crypto_path);
-//     cJSON_AddStringToObject(root, "pki_cert_path", config->pki_cert_path);
-
-//     // Add selected configuration
-//     cJSON_AddNumberToObject(root, "selected_configuration", config->selected_configuration);
-//     // Convert to string
-//     char *json_string = cJSON_Print(root);
-//     // Clean up
-//     cJSON_Delete(root);
-//     *buffer = json_string;
-//     return ret;
-// }

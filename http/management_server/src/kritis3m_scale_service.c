@@ -51,11 +51,13 @@ struct kritis3m_service
   asl_endpoint *client_endpoint;
 };
 
+// will be used for management service
 enum service_message_type
 {
-  HTTP_SERVICE,
-  MANAGEMENT_MESSAGE,
-  RESPONSE,
+  SVC_MSG_INITIAL_POLICY_REQ_RSP,
+  SVC_MSG_POLICY_REQ_RSP,
+  SVC_MSG_KRITIS3M_SERVICE_STOP,
+  SVC_MSG_RESPONSE
 };
 
 typedef struct service_message
@@ -63,8 +65,8 @@ typedef struct service_message
   enum service_message_type msg_type;
   union kritis3m_service_payload
   {
-    enum ManagementEvents event;
-    int return_code;
+    int placeholder;
+    ManagementReturncode return_code;
   } payload;
 } service_message;
 
@@ -74,9 +76,16 @@ int setup_socketpair(int management_socket[2], bool blocking);
 void init_configuration_manager(ConfigurationManager *manager, Kritis3mNodeConfiguration *node_config);
 int create_folder_structure(Kritis3mNodeConfiguration *node_cfg);
 
-// callbacks used from the http threads
+enum MSG_RESPONSE_CODE svc_request_helper(int socket, service_message *msg);
 int initial_policy_request_cb(struct response response);
-static int send_management_message(int socket, service_message *msg);
+
+ManagementReturncode handle_svc_message(int socket, service_message *msg);
+static int send_svc_message(int socket, service_message *msg);
+static int read_svc_message(int socket, service_message *msg);
+
+void cleanup_kritis3m_service();
+
+int respond_with(int socket, enum MSG_RESPONSE_CODE response_code);
 
 int prepare_all_interfaces(HardwareConfiguration hw_config[], int num_configs);
 
@@ -96,36 +105,12 @@ void set_kritis3m_serivce_defaults(struct kritis3m_service *svc)
   pthread_attr_init(&svc->thread_attr);
   pthread_attr_setdetachstate(&svc->thread_attr, PTHREAD_CREATE_JOINABLE);
   poll_set_init(svc->pollfd);
-  setup_socketpair(svc->management_socket, true);
+  create_socketpair(svc->management_socket);
 }
 
-int initialize_crypto(kritis3m_service *svc)
-{
-  int ret = 0;
-  char private_key_buffer[512];
-  memset(private_key_buffer, 0, 512);
 
-  // check if privae key available
-  const char *privateKey = "management_service_privateKey.pem";
-  const char *chain = "management_service_chain.pem";
-  const char *root = "management_service_root.pem";
-  ret = create_file_path(private_key_buffer, sizeof(private_key_buffer),
-                         svc->node_configuration.pki_cert_path, svc->node_configuration.pki_cert_path_size,
-                         privateKey, sizeof(privateKey));
-  if (ret < 0)
-    goto error_occured;
-  if (access(private_key_buffer, F_OK) != 0)
-  {
-    LOG_INFO("call crypto with machine key");
-  }
-  LOG_INFO("calling pki not implemented yet");
-error_occured:
-  ret = -1;
-  LOG_ERROR("error occured during crypto initialization");
-  return ret;
-}
 
-int init_kritis3m_service(char *config_file)
+int start_kritis3m_service(char *config_file)
 {
   // initializations
   int ret = 0;
@@ -145,6 +130,7 @@ int init_kritis3m_service(char *config_file)
   set_kritis3m_serivce_defaults(&svc);
   svc.node_configuration.config_path = config_file;
   svc.node_configuration.config_path_size = strlen(config_file);
+  init_application_manager();
 
   // reads and the configfile and parses content to node_configuration
   ret = get_Kritis3mNodeConfiguration(config_file, &svc.node_configuration);
@@ -215,23 +201,29 @@ int init_kritis3m_service(char *config_file)
     LOG_ERROR("can't prepare iface");
     goto error_occured;
   }
-
   svc.initialized = true;
 
-  init_application_manager();
-  start_application_manager(&svc.configuration_manager.primary.application_config);
-  while (1)
+  // 7. start management application
+  ret = pthread_create(&svc.mainthread, &svc.thread_attr, start_kristis3m_service, &svc);
+  if (ret < 0)
   {
-    usleep(10 * 1000);
+    LOG_ERROR("can't create kritis3m_service thread");
+    goto error_occured;
   }
 
-  ret = pthread_create(&svc.mainthread, &svc.thread_attr, start_kristis3m_service, &svc);
+  // 8. Start application manager
+  ret = start_application_manager(&svc.configuration_manager.primary.application_config);
+  if (ret < 0)
+  {
+    LOG_ERROR("can't start application manage");
+    goto error_occured;
+  }
 
   return 0;
 error_occured:
-  free_NodeConfig(&svc.node_configuration);
-  ret = -1;
-  // dont forget to free configuration and endpoint
+
+  LOG_ERROR("exit kritis3m_service");
+  cleanup_kritis3m_service();
   return ret;
 }
 
@@ -252,6 +244,7 @@ void *start_kristis3m_service(void *arg)
   int ret = 0;
   SystemConfiguration *selected_sys_cfg = NULL;
   ManagementReturncode retval = MGMT_OK;
+
   asl_endpoint_configuration *ep_cfg = &svc->management_endpoint_config;
   Kritis3mNodeConfiguration node_configuration = svc->node_configuration;
   ConfigurationManager application_configuration_manager = svc->configuration_manager;
@@ -291,19 +284,18 @@ void *start_kristis3m_service(void *arg)
       {
         if (event & POLLIN)
         {
-          /* Handle the message */
+          service_message req = {0};
+          ManagementReturncode return_code = handle_svc_message(svc->management_socket[THREAD_INT], &req);
+          if (return_code == MGMT_THREAD_STOP)
+            pthread_exit(NULL);
         }
       }
-
-      // services to embedd:
-      //  timer
-      //  application manger
-      //  starting http request responses
     }
   }
 
 terminate:
-  free_NodeConfig(&svc->node_configuration);
+  cleanup_kritis3m_service();
+  pthread_exit(NULL);
   // terminate_application_manager
   // store config
   return NULL;
@@ -335,42 +327,7 @@ int setup_socketpair(int management_socket[2], bool blocking)
   return 0;
 }
 
-static int send_management_message(int socket, service_message *msg)
-{
-  int ret = 0;
-  static const int max_retries = 5;
-  int retries = 0;
-
-  while ((ret <= 0) && (retries < max_retries))
-  {
-    ret = send(socket, msg, sizeof(service_message), 0);
-    if (ret < 0)
-    {
-      if (errno != EAGAIN)
-      {
-        LOG_ERROR("Error sending message: %d (%s)", errno, strerror(errno));
-        return -1;
-      }
-      usleep(10 * 1000);
-    }
-    else if (ret != sizeof(service_message))
-    {
-      LOG_ERROR("Sent invalid message");
-      return -1;
-    }
-
-    retries++;
-  }
-
-  if (retries >= max_retries)
-  {
-    LOG_ERROR("Failed to send message after %d retries", max_retries);
-    return -1;
-  }
-
-  return 0;
-}
-
+// deprecated
 int create_identity_folder(const char *base_path, network_identity identity)
 {
   char identity_path[256];
@@ -380,7 +337,6 @@ int create_identity_folder(const char *base_path, network_identity identity)
   {
     return -1;
   }
-
   // Create the directory for the specified identity
   if (create_directory(identity_path) == -1)
   {
@@ -525,4 +481,179 @@ int prepare_all_interfaces(HardwareConfiguration hw_config[], int num_configs)
   }
 
   return (failures > 0) ? -1 : 0;
+}
+
+int stop_kritis3m_service()
+{
+
+  int socket = -1;
+  int ret = 0;
+  service_message request = {0};
+
+  if ((!svc.initialized) || (svc.management_socket[THREAD_EXT] < 0))
+  {
+    LOG_ERROR("Kritis3m_service is not initialized");
+    ret = -1;
+    return ret;
+  }
+
+  socket = svc.management_socket[THREAD_EXT];
+  request.msg_type = SVC_MSG_INITIAL_POLICY_REQ_RSP;
+
+  enum MSG_RESPONSE_CODE retval = svc_request_helper(socket, &request);
+  if (retval != MSG_OK)
+  {
+    ret = -1;
+    LOG_ERROR("error occured in application service");
+  }
+  else
+  {
+    LOG_INFO("closed application_manager succesfully");
+  }
+  closesocket(socket); // closing socket anyway
+  return ret;
+}
+
+int svc_respond_with(int socket, enum MSG_RESPONSE_CODE response_code)
+{
+  service_message response = {0};
+  response.msg_type = SVC_MSG_RESPONSE;
+  response.payload.return_code = response_code;
+  return send_svc_message(socket, &response);
+}
+
+static int send_svc_message(int socket, service_message *msg)
+{
+  int ret = 0;
+  static const int max_retries = 5;
+  int retries = 0;
+
+  while ((ret <= 0) && (retries < max_retries))
+  {
+    ret = send(socket, msg, sizeof(service_message), 0);
+    if (ret < 0)
+    {
+      if (errno != EAGAIN)
+      {
+        LOG_ERROR("Error sending message: %d (%s)", errno, strerror(errno));
+        return -1;
+      }
+      usleep(1 * 1000);
+    }
+    else if (ret != sizeof(service_message))
+    {
+      LOG_ERROR("Sent invalid message");
+      return -1;
+    }
+
+    retries++;
+  }
+
+  if (retries >= max_retries)
+  {
+    LOG_ERROR("Failed to send message after %d retries", max_retries);
+    return -1;
+  }
+
+  return 0;
+}
+
+ManagementReturncode handle_svc_message(int socket, service_message *msg)
+{
+  int ret = 0;
+  ManagementReturncode return_code = MGMT_OK;
+  service_message rsp = {0};
+  ret = read_svc_message(socket, msg);
+  if (ret < 0)
+    goto error_occured;
+
+  switch (msg->msg_type)
+  {
+  case SVC_MSG_INITIAL_POLICY_REQ_RSP:
+  {
+    LOG_WARN("SVC_MSG_INITIAL_POLICY_REQ_RSP: handler not implemented yet");
+
+    break;
+  }
+  case SVC_MSG_POLICY_REQ_RSP:
+  {
+
+    stop_application_manager();
+    svc_respond_with(socket, MGMT_OK);
+    cleanup_kritis3m_service();
+    LOG_WARN("SVC_MSG_POLICY_REQ_RSP: handler not implemented yet");
+    return_code = MGMT_THREAD_STOP;
+    break;
+  }
+  case SVC_MSG_KRITIS3M_SERVICE_STOP:
+  {
+    LOG_WARN("SVC_MSG_INITIAL_POLICY_REQ_RSP: handler not implemented yet");
+    break;
+  }
+  case SVC_MSG_RESPONSE:
+  {
+    LOG_INFO("received response: %d", msg->payload.return_code);
+    break;
+  }
+  default:
+    LOG_WARN("message type %d, not covered", msg->msg_type);
+    return_code = MGMT_ERR;
+    break;
+  }
+  return return_code;
+
+error_occured:
+  return_code = MGMT_ERR;
+  LOG_ERROR("handle_svc_message error: %d", ret);
+  return ret;
+}
+
+static int read_svc_message(int socket, service_message *msg)
+{
+  int ret = recv(socket, msg, sizeof(service_message), 0);
+  if (ret < 0)
+  {
+    LOG_ERROR("Error receiving message: %d (%s)", errno, strerror(errno));
+    return -1;
+  }
+  else if (ret != sizeof(service_message))
+  {
+    LOG_ERROR("Received invalid response (ret=%d; expected=%lu)", ret, sizeof(service_message));
+    return -1;
+  }
+  return 0;
+}
+
+enum MSG_RESPONSE_CODE svc_request_helper(int socket, service_message *msg)
+{
+  int ret;
+  enum MSG_RESPONSE_CODE retval = MSG_OK;
+  service_message response = {0};
+
+  if (socket < 0)
+    goto error_occured;
+  ret = send_svc_message(socket, msg);
+  if (ret < 0)
+    goto error_occured;
+  ret = read_svc_message(socket, &response);
+  if (ret < 0)
+    goto error_occured;
+  if (response.msg_type == MSG_RESPONSE)
+    retval = response.payload.return_code;
+  else
+    goto error_occured;
+  return retval;
+
+error_occured:
+  retval = MSG_ERROR;
+  return retval;
+}
+
+void cleanup_kritis3m_service()
+{
+  svc.initialized = false;
+  closesocket(svc.management_socket[THREAD_EXT]);
+  closesocket(svc.management_socket[THREAD_INT]);
+  free_NodeConfig(&svc.node_configuration);
+  cleanup_configuration_manager(&svc.configuration_manager);
 }

@@ -14,37 +14,9 @@
 typedef struct kritis3m_service kritis3m_service;
 struct kritis3m_service;
 
-int init_kritis3m_service(char *config_file);
+int start_kritis3m_service(char *config_file);
+int stop_kritis3m_service();
 
-/*********************************************************
- *              CONFIGURATION DISTRIBUTION
- */
 
-enum ManagementEvents
-{
-    MGMT_EV_ERROR,
-    MGMT_EV_START,
-    MGMT_EV_INIT,
-    MGMT_EV_MGM_RESP,
-    MGMT_EV_CONFIG_AVAILABLE,
-    MGMT_EV_PKI_RESP,
-    MGMT_EV_HB_CLOCK_REQ,
-    MGMT_EV_HB_RESP,
-    MGMT_EV_CONFIG_COMPLETE,
-    elems_ManagementEvent, // running application manager, during update process
-};
-
-enum request_type
-
-{
-    POLICY_GET,
-    POLICY_POST,
-    ENROLL_GET,
-    HEARTBEAT_GET,
-};
-
-/**********************************************************
- *                      Hardbeat Service
- */
 
 #endif // KRITIS3M_SCALE_SERVICE_H

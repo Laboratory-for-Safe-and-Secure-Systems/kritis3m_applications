@@ -29,13 +29,9 @@ int create_file_path(char *dest_buffer, size_t dest_buf_len,
     }
 
     // If folder_path_len or file_name_len is 0, calculate the actual lengths
-    if (folder_path_len == 0)
+    if ((folder_path_len == 0) || (file_name_len == 0))
     {
-        folder_path_len = strlen(folder_path);
-    }
-    if (file_name_len == 0)
-    {
-        file_name_len = strlen(file_name);
+        return -1;
     }
 
     // Ensure there's enough space in the destination buffer
@@ -201,30 +197,6 @@ void ensure_trailing_slash(char *path, size_t size)
             path[len + 1] = '\0';
         }
     }
-}
-char *extract_path_from_url(char *full_url)
-{
-
-    char *protocol_end = strstr(full_url, "://");
-    if (protocol_end == NULL)
-    {
-        protocol_end = full_url; // No protocol found, start from beginning
-    }
-    else
-    {
-        protocol_end += 3; // Skip "://"
-    }
-
-    // Find the first slash after the protocol
-    char *path_start = strchr(protocol_end, '/');
-
-    if (path_start != NULL)
-    {
-        // Return the pointer to the beginning of the path
-        return path_start;
-    }
-
-    return NULL;
 }
 
 // !not working with url

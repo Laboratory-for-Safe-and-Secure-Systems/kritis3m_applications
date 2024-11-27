@@ -92,7 +92,6 @@ void destroy_thread_pool(ThreadPool *pool);
 void init_thread_pool(ThreadPool *pool);
 int get_free_thread_id();
 void signal_thread_finished(int thread_id);
-void cleanup_http_service(void);
 void cleanup_request_object(request_object *con);
 int startup_connection(struct conn *con);
 int create_inital_controller_url(char *url, int url_size);
