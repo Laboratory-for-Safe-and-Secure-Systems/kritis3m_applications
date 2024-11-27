@@ -643,6 +643,7 @@ error_occured:
 
 void *application_service_main_thread(void *arg)
 {
+    
     int ret = -1;
     bool shutodwn = true;
     int management_socket = -1;
@@ -654,6 +655,7 @@ void *application_service_main_thread(void *arg)
         LOG_ERROR("application manager can't be started correctly. Either management pair or appl_manager is NULL");
         goto error_occured;
     }
+    LOG_INFO("application manager started");
 
     poll_set_add_fd(&appl_manager->notifier, appl_manager->management_pair[THREAD_INT], POLLIN | POLLERR | POLLHUP);
 

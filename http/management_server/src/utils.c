@@ -7,6 +7,7 @@
 #include <arpa/inet.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 #include <inttypes.h>
 #include <netinet/in.h>
 
@@ -69,7 +70,10 @@ int read_file(const char *filename, uint8_t **buffer, int *buffer_size)
 {
     int ret = 0;
     if ((filename == NULL) || (buffer == NULL))
+    {
+        LOG_ERROR("read_file: filename or buffer is null");
         goto error_occured;
+    }
     *buffer = NULL;
     FILE *file = NULL;
 
@@ -77,14 +81,14 @@ int read_file(const char *filename, uint8_t **buffer, int *buffer_size)
     if (!file)
     {
         LOG_ERROR("Error opening file: %s\n", filename);
-        ret = -1;
         goto error_occured;
     }
     // https://cplusplus.com/reference/cstdio/fseek/
     //  go to  end
     fseek(file, 0, SEEK_END);
     // obtain position of file pointer
-    long file_size = ftell(file);
+    int file_size = ftell(file);
+    LOG_DEBUG("file is %d bytes long", file_size);
     // go back to position 0
     fseek(file, 0, SEEK_SET);
 
@@ -103,6 +107,7 @@ int read_file(const char *filename, uint8_t **buffer, int *buffer_size)
     return ret;
 
 error_occured:
+    LOG_ERROR("error read_file");
     if (ret > 0)
         ret = -1;
     if (file != NULL)
@@ -164,7 +169,8 @@ error_occured:
     return ret;
 }
 
-int directory_exists(const char *path) {
+int directory_exists(const char *path)
+{
     return (access(path, F_OK) != -1); // F_OK checks for existence
 }
 int create_directory(const char *path)
@@ -212,7 +218,7 @@ int parse_addr_toKritis3maddr(char *ip_port, Kritis3mSockaddr *dst)
     {
         goto error_occured;
     }
-    ret = parse_endpoint_addr(ip_port, ip,INET6_ADDRSTRLEN, &port);
+    ret = parse_endpoint_addr(ip_port, ip, INET6_ADDRSTRLEN, &port);
     if (ret < 0)
         goto error_occured;
 
@@ -238,9 +244,11 @@ error_occured:
     return -1;
 }
 
-int parse_endpoint_addr(const char *endpoint_addr, char *dst_ip, int dst_ip_len, uint16_t *port) {
-    if (!endpoint_addr || !dst_ip || dst_ip_len <= 0 || !port) {
-        return -1;  // Invalid parameters
+int parse_endpoint_addr(const char *endpoint_addr, char *dst_ip, int dst_ip_len, uint16_t *port)
+{
+    if (!endpoint_addr || !dst_ip || dst_ip_len <= 0 || !port)
+    {
+        return -1; // Invalid parameters
     }
 
     const char *port_str = NULL;
@@ -255,70 +263,94 @@ int parse_endpoint_addr(const char *endpoint_addr, char *dst_ip, int dst_ip_len,
     // Check if this is an IPv6 address (contains multiple colons)
     int colon_count = 0;
     const char *p = endpoint_addr;
-    while (*p) {
-        if (*p == ':') colon_count++;
+    while (*p)
+    {
+        if (*p == ':')
+            colon_count++;
         p++;
     }
 
-    if (colon_count > 1) {  // IPv6 address
+    if (colon_count > 1)
+    { // IPv6 address
         // Check if address is wrapped in brackets
-        if (endpoint_addr[0] == '[') {
+        if (endpoint_addr[0] == '[')
+        {
             addr_start = endpoint_addr + 1;
             const char *closing_bracket = strchr(addr_start, ']');
-            if (!closing_bracket) {
-                return -1;  // Malformed IPv6 address
+            if (!closing_bracket)
+            {
+                return -1; // Malformed IPv6 address
             }
             addr_end = closing_bracket;
-            
+
             // Check for port after the brackets
-            if (*(closing_bracket + 1) == ':') {
+            if (*(closing_bracket + 1) == ':')
+            {
                 port_str = closing_bracket + 2;
-            } else if (*(closing_bracket + 1) != '\0') {
-                return -1;  // Invalid character after IPv6 address
             }
-        } else {
+            else if (*(closing_bracket + 1) != '\0')
+            {
+                return -1; // Invalid character after IPv6 address
+            }
+        }
+        else
+        {
             // No brackets, must be just an IPv6 address without port
             addr_end = endpoint_addr + strlen(endpoint_addr);
         }
-    } else {  // IPv4 address or hostname
+    }
+    else
+    { // IPv4 address or hostname
         const char *colon = strchr(endpoint_addr, ':');
-        if (colon) {
+        if (colon)
+        {
             addr_end = colon;
             port_str = colon + 1;
-        } else {
+        }
+        else
+        {
             // Check if the string is all digits (just a port)
             int all_digits = 1;
-            for (p = endpoint_addr; *p; p++) {
-                if (!isdigit((unsigned char)*p)) {
+            for (p = endpoint_addr; *p; p++)
+            {
+                if (!isdigit((unsigned char)*p))
+                {
                     all_digits = 0;
                     break;
                 }
             }
-            
-            if (all_digits) {
+
+            if (all_digits)
+            {
                 port_str = endpoint_addr;
                 addr_start = NULL;
-            } else {
+            }
+            else
+            {
                 addr_end = endpoint_addr + strlen(endpoint_addr);
             }
         }
     }
 
     // Parse port if present
-    if (port_str) {
+    if (port_str)
+    {
         char *endptr;
         long port_val = strtol(port_str, &endptr, 10);
-        if (*endptr != '\0' || port_val < 0 || port_val > 65535) {
-            return -1;  // Invalid port number
+        if (*endptr != '\0' || port_val < 0 || port_val > 65535)
+        {
+            return -1; // Invalid port number
         }
         *port = (uint16_t)port_val;
     }
 
     // Copy address/hostname if present
-    if (addr_start) {
+    if (addr_start)
+    {
         addr_len = addr_end - addr_start;
-        if (addr_len >= (size_t)dst_ip_len) {
-            return -1;  // Buffer too small
+        if (addr_len >= (size_t)dst_ip_len)
+        {
+            return -1; // Buffer too small
         }
         memcpy(dst_ip, addr_start, addr_len);
         dst_ip[addr_len] = '\0';

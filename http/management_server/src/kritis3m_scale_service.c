@@ -108,8 +108,6 @@ void set_kritis3m_serivce_defaults(struct kritis3m_service *svc)
   create_socketpair(svc->management_socket);
 }
 
-
-
 int start_kritis3m_service(char *config_file)
 {
   // initializations
@@ -235,6 +233,8 @@ void *start_kristis3m_service(void *arg)
     APPLICATION_MANAGER_OFF,
     APPLICATION_MANAGER_ENABLED,
   };
+
+  LOG_INFO("kritis3m_service started");
 
   struct kritis3m_service *svc = (struct kritis3m_service *)arg;
   if (svc == NULL)

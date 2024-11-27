@@ -33,13 +33,17 @@ int get_Kritis3mNodeConfiguration(char *filename, Kritis3mNodeConfiguration *con
     ret = read_file(filename, &json_buffer, &file_size);
     if ((ret < 0) || (file_size <= 0))
     {
+        LOG_ERROR("can't read node configuration file");
         goto error_occured;
     }
     ret = parse_buffer_to_Config(json_buffer, file_size, config);
+    if (ret < 0)
+    {
+        LOG_ERROR("couldnt parse configuration file to KRITIS3MNodeConfiguration");
+        goto error_occured;
+    }
     if (json_buffer != NULL)
         free(json_buffer);
-    if (ret < 0)
-        goto error_occured;
     return ret;
 
 error_occured:

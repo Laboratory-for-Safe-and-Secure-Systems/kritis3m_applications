@@ -205,6 +205,7 @@ int parse_buffer_to_Config(char *json_buffer, int json_buffer_size, Kritis3mNode
     cJSON_Delete(root);
     return ret;
 error_occured:
+    LOG_ERROR("error occured in parse_buffer_to_config");
     cJSON_Delete(root);
     free_NodeConfig(config);
     return ret;
