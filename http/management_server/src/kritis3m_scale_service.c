@@ -72,7 +72,6 @@ typedef struct service_message
 
 // forward declarations
 void *start_kristis3m_service(void *arg);
-int setup_socketpair(int management_socket[2], bool blocking);
 void init_configuration_manager(ConfigurationManager *manager, Kritis3mNodeConfiguration *node_config);
 int create_folder_structure(Kritis3mNodeConfiguration *node_cfg);
 
@@ -100,12 +99,10 @@ void set_kritis3m_serivce_defaults(struct kritis3m_service *svc)
   memset(&svc->configuration_manager, 0, sizeof(ConfigurationManager));
   memset(&svc->management_endpoint_config, 0, sizeof(asl_endpoint_configuration));
   memset(&svc->node_configuration, 0, sizeof(Kritis3mNodeConfiguration));
-  svc->management_socket[THREAD_EXT] = -1;
-  svc->management_socket[THREAD_INT] = -1;
+  create_socketpair(svc->management_socket);
   pthread_attr_init(&svc->thread_attr);
   pthread_attr_setdetachstate(&svc->thread_attr, PTHREAD_CREATE_JOINABLE);
   poll_set_init(&svc->pollfd);
-  create_socketpair(svc->management_socket);
 }
 
 int start_kritis3m_service(char *config_file, int log_level)
@@ -292,6 +289,12 @@ void *start_kristis3m_service(void *arg)
             poll_set_remove_fd(&svc->pollfd, svc->management_socket[THREAD_INT]);
             goto terminate;
           }
+          else if (return_code < 0)
+          {
+            poll_set_remove_fd(&svc->pollfd, svc->management_socket[THREAD_INT]);
+            LOG_ERROR("error occured in handling service message");
+            goto terminate;
+          }
         }
       }
     }
@@ -304,32 +307,6 @@ terminate:
   cleanup_kritis3m_service();
   pthread_detach(pthread_self());
   return NULL;
-}
-int setup_socketpair(int management_socket[2], bool blocking)
-{
-  int ret = create_socketpair(management_socket);
-  if (ret < 0)
-  {
-    LOG_ERROR("Error creating management socket pair: %d (%s)", errno, strerror(errno));
-    return -1;
-  }
-  if (!blocking)
-  {
-    ret = setblocking(management_socket[THREAD_EXT], false);
-    if (ret < 0)
-    {
-      LOG_ERROR("Error unblocking socket: %d (%s)", errno, strerror(errno));
-      return -1;
-    }
-    ret = setblocking(management_socket[THREAD_INT], false);
-    if (ret < 0)
-    {
-      LOG_ERROR("Error unblocking socket: %d (%s)", errno, strerror(errno));
-      return -1;
-    }
-  }
-  LOG_INFO("created management socketpair");
-  return 0;
 }
 
 // deprecated
