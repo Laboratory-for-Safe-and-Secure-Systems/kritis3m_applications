@@ -32,14 +32,6 @@
 #define PRIMARY_FILENAME "primary.json"
 #define SECONDARY_FILENAME "secondary.json"
 
-#define PKI_MANAGEMENT_URL "path/to/management/pki/"
-#define PKI_REMOTE_URL "path/to/remote/pki/"
-#define PKI_PRODUCTION_URL "path/to/remote/pki/"
-
-#define PKI_MANAGEMENT_PATH "path/to/management/pki/"
-#define PKI_REMOTE_PATH "path/to/remote/pki/"
-#define PKI_PRODUCTION_PATH "path/to/remote/pki/"
-
 #define MANAGEMENT_SERVICE_STR "management_service"
 #define MANAGEMENT_STR "management"
 #define REMOTE_STR "remote"
@@ -83,22 +75,15 @@ typedef enum
 
 typedef struct SystemConfiguration SystemConfiguration;
 struct SystemConfiguration;
+
 typedef struct CryptoProfile CryptoProfile;
 struct CryptoProfile;
+
 typedef struct ConnectionWhitelist ConnectionWhitelist;
 struct ConnectionWhitelist;
+
 typedef struct ApplicationConfiguration ApplicationConfiguration;
 struct ApplicationConfiguration;
-/**
- * @brief supported protocols for the proxy applications
- */
-typedef enum Kritis3mProto
-{
-    DTLS = 0,
-    TLS = 1,
-    TCP = 2,
-    UDP = 3
-} Kritis3mProto;
 
 typedef struct certificates
 {
@@ -239,6 +224,7 @@ typedef struct
 
 struct ApplicationConfiguration
 {
+    int log_level;
     pthread_mutex_t lock;
     Whitelist whitelist;
 
@@ -369,8 +355,6 @@ int get_Kritis3mNodeConfiguration(char *filename, Kritis3mNodeConfiguration *con
 int get_Systemconfig(ConfigurationManager *applconfig, Kritis3mNodeConfiguration *node_config);
 SystemConfiguration *get_active_config(ConfigurationManager *manager);
 SystemConfiguration *get_inactive_config(ConfigurationManager *manager);
-int write_Kritis3mNodeConfig_toflash(Kritis3mNodeConfiguration *config);
-int write_SystemConfig_toflash(SystemConfiguration *sys_cfg, char *filepath, int filepath_size);
 Kritis3mApplications *find_application_by_application_id(Kritis3mApplications *appls, int number_appls, int appl_id);
 int get_identity_folder_path(char *out_path, size_t size, const char *base_path, network_identity identity);
 

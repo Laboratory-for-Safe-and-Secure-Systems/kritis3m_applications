@@ -1,13 +1,17 @@
+// thread
 #include <pthread.h>
+#include <semaphore.h>
+
+// net
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
 
+// std
 #include <errno.h>
 #include <string.h>
 #include <unistd.h>
 
-// kritis3m applications:
 #include "kritis3m_application_manager.h"
 #include "networking.h"
 #include "utils.h"
@@ -85,8 +89,11 @@ struct application_manager
     ApplicationConfiguration *configuration;
 
     pthread_t thread;
-    poll_set notifier;
     pthread_attr_t thread_attr;
+
+    sem_t thread_setup_sem;
+
+    poll_set notifier;
 };
 
 static struct application_manager manager = {
@@ -96,8 +103,6 @@ static struct application_manager manager = {
     .configuration = NULL,
     .notifier = {0},
 };
-
-bool uses_tls(int ep_id);
 
 void *application_service_main_thread(void *arg);
 enum MSG_RESPONSE_CODE management_request_helper(int socket, application_message *msg);
@@ -118,13 +123,6 @@ int create_tcp_stdin_bridge_config(Kritis3mApplications *appl, tcp_client_stdin_
 int client_matches_trusted_client(TrustedClients *trusted_client,
                                   struct sockaddr *connecting_client)
 {
-    // Check if the application is trusted
-    int app_trusted = 0;
-
-    if (!app_trusted)
-    {
-        return -1; // Application not trusted
-    }
 
     // Check IP address and port
     Kritis3mSockaddr *trusted_addr = &trusted_client->trusted_client;
@@ -249,7 +247,7 @@ bool is_client_supported(client_connection_request con_req)
 
     if ((!manager.initialized) || (appl_config == NULL) || (con_req.client == NULL))
         return false;
-
+    // check each entry in trusted clients
     for (int i = 0; i < appl_config->whitelist.number_trusted_clients; i++)
     {
         TrustedClients t_client = appl_config->whitelist.TrustedClients[i];
@@ -262,6 +260,7 @@ bool is_client_supported(client_connection_request con_req)
                 int client_matches = client_matches_trusted_client(&t_client, con_req.client);
                 if (client_matches == 0)
                 {
+                    LOG_INFO("client is trusted");
                     return true;
                 }
             }
@@ -273,21 +272,28 @@ bool is_client_supported(client_connection_request con_req)
 void init_application_manager(void)
 {
     int ret = 0;
-    if (!manager.initialized)
-    {
-        manager.initialized = true;
-        if (manager.configuration != NULL)
-            manager.configuration = NULL;
-        manager.management_pair[THREAD_EXT] = -1;
-        manager.management_pair[THREAD_INT] = -1;
-        poll_set_init(&manager.notifier);
-        pthread_attr_init(&manager.thread_attr);
-        pthread_attr_setdetachstate(&manager.thread_attr, PTHREAD_CREATE_JOINABLE);
-    }
-    else
-    {
-        LOG_INFO("Application manager is running. Please stop it before");
-    }
+    manager.initialized = false;
+    if (manager.configuration != NULL)
+        manager.configuration = NULL;
+    manager.management_pair[THREAD_EXT] = -1;
+    manager.management_pair[THREAD_INT] = -1;
+    poll_set_init(&manager.notifier);
+    pthread_attr_init(&manager.thread_attr);
+    pthread_attr_setdetachstate(&manager.thread_attr, PTHREAD_CREATE_JOINABLE);
+    sem_init(&manager.thread_setup_sem, 0, 0);
+}
+
+void cleanup_application_manager(void)
+{
+    int ret = 0;
+    manager.initialized = false;
+    if (manager.configuration != NULL)
+        manager.configuration = NULL;
+    manager.management_pair[THREAD_EXT] = -1;
+    manager.management_pair[THREAD_INT] = -1;
+    poll_set_init(&manager.notifier);
+    pthread_attr_destroy(&manager.thread_attr);
+    sem_destroy(&manager.thread_setup_sem);
 }
 
 enum MSG_RESPONSE_CODE management_request_helper(int socket, application_message *msg)
@@ -326,6 +332,11 @@ int start_application_manager(ApplicationConfiguration *configuration)
     if (configuration == NULL)
         goto error_occured;
 
+    //------------------------ set log level ------------------------------------------//
+    LOG_LVL_SET(configuration->log_level);
+    LOG_LVL_SET(LOG_LVL_DEBUG);
+
+    //------------------------ init environment --------------------------------------//
     proxy_backend_config backend_config = tls_proxy_backend_default_config();
     ret = tls_proxy_backend_run(&backend_config);
     if (ret < 0)
@@ -340,21 +351,19 @@ int start_application_manager(ApplicationConfiguration *configuration)
     if (ret != 0)
         LOG_ERROR("Error starting TCP echo server thread: %s", strerror(ret));
     // wait until service is initialized
-    usleep(1 * 1000);
-    // start request
-    {
-        application_message request = {0};
-        enum MSG_RESPONSE_CODE initialized = MSG_BUSY;
-        request.msg_type = APPLICATION_SERVICE_START_REQUEST,
-        request.payload.config = configuration;
-        enum MSG_RESPONSE_CODE initialzed = management_request_helper(manager.management_pair[THREAD_EXT], &request);
-    }
 
+    sem_wait(&manager.thread_setup_sem);
+
+    enum MSG_RESPONSE_CODE initialized = MSG_BUSY;
+    request.msg_type = APPLICATION_SERVICE_START_REQUEST,
+    request.payload.config = configuration;
+    enum MSG_RESPONSE_CODE initialzed = management_request_helper(manager.management_pair[THREAD_EXT], &request);
+    if (initialized < 0)
+        goto error_occured;
     return 0;
 
 error_occured:
-
-    LOG_ERROR("cant parse ip port");
+    LOG_ERROR("error initializing application manager");
     return ret;
 }
 
@@ -471,7 +480,7 @@ error_occured:
  * RESPONSES MISSING
  *  @TODO impl response
  */
-int handle_management_message(int fd, struct application_manager *appl_manager)
+ManagementReturncode handle_management_message(int fd, struct application_manager *appl_manager)
 {
     application_message msg = {0};
     int ret = -1;
@@ -480,6 +489,7 @@ int handle_management_message(int fd, struct application_manager *appl_manager)
     ret = read_management_message(fd, &msg);
     if (ret < 0)
     {
+        retval = MGMT_ERR;
         goto error_occured;
     }
     switch (msg.msg_type)
@@ -494,6 +504,7 @@ int handle_management_message(int fd, struct application_manager *appl_manager)
 
         if (appl == NULL)
             goto error_occured;
+        // try to start appl
         ret = start_application(appl);
         if (ret < 0)
             goto error_occured;
@@ -506,7 +517,10 @@ int handle_management_message(int fd, struct application_manager *appl_manager)
      */
     case APPLICATION_STATUS_REQUEST:
     {
+
         retval = MSG_ERROR;
+        LOG_INFO("application status request not implemented yet");
+
         break;
     }
     /** RETVAL
@@ -522,13 +536,11 @@ int handle_management_message(int fd, struct application_manager *appl_manager)
         if (appl == NULL)
         {
             LOG_ERROR("no application found with application_id %d. STOP Request failed", appl_id);
-            goto error_occured;
         }
         ret = stop_application(appl);
         if (ret < 0)
         {
             LOG_ERROR("Can't stop application with appl_id %d", appl_id);
-            goto error_occured;
         }
         retval = MSG_OK;
         break;
@@ -574,30 +586,26 @@ int handle_management_message(int fd, struct application_manager *appl_manager)
     }
     case APPLICATION_SERVICE_STOP_REQUEST:
     {
-
+        if (appl_manager == NULL)
+        {
+            LOG_ERROR("appl_manager is NULL");
+            return MGMT_ERR;
+        }
         ret = stop_application_service(appl_manager);
         if (ret < 0)
             LOG_ERROR("Can't stop application_service");
+
         appl_manager->initialized = false;
-
-        if (appl_manager != NULL)
-            poll_set_init(&appl_manager->notifier);
         appl_manager->configuration = NULL;
-
-        if (ret < 0)
-            retval = MSG_ERROR;
-        else
-            retval = MSG_OK;
-
         respond_with(fd, retval);
-        close(manager.management_pair[THREAD_INT]);
-        pthread_cancel(manager.thread);
-        return 0;
 
+        retval = MGMT_THREAD_STOP;
         break;
     }
     case APPLICATION_SERVICE_STATUS_REQUEST:
     {
+        LOG_WARN("applications service status request not implemented yet");
+        retval = MGMT_OK;
         break;
     }
 
@@ -610,13 +618,14 @@ int handle_management_message(int fd, struct application_manager *appl_manager)
             goto error_occured;
         bool is_supported = is_client_supported(con_req);
         retval = (is_supported == true) ? MSG_OK : MSG_FORBIDDEN;
+        retval = MGMT_OK;
         break;
     }
     case MSG_RESPONSE:
     {
         ret = msg.payload.return_code;
         LOG_INFO("response not implemented");
-        return 0;
+        retval = MGMT_OK;
         break;
     }
     default:
@@ -627,23 +636,22 @@ int handle_management_message(int fd, struct application_manager *appl_manager)
     }
     }
     //-----------------------------------------  END OF THE HANDLER------------------------------------ //
-    // return retval
     ret = respond_with(fd, retval);
 
-    return ret;
+    return retval;
 error_occured:
     //-----------------------------------------  ERROR HANDLER      ------------------------------------ //
     LOG_ERROR("Error occured handling internal management request");
     ret = -1;
-    retval = MSG_ERROR;
-    // return retval
+    if (retval > 0)
+        retval = MSG_ERROR;
     respond_with(fd, retval);
-    return ret;
+    return retval;
 }
 
 void *application_service_main_thread(void *arg)
 {
-    
+
     int ret = -1;
     bool shutodwn = true;
     int management_socket = -1;
@@ -653,11 +661,13 @@ void *application_service_main_thread(void *arg)
         (appl_manager->management_pair[THREAD_INT] < 0))
     {
         LOG_ERROR("application manager can't be started correctly. Either management pair or appl_manager is NULL");
-        goto error_occured;
+        goto cleanup_application_service;
     }
+    manager.initialized = true;
     LOG_INFO("application manager started");
 
     poll_set_add_fd(&appl_manager->notifier, appl_manager->management_pair[THREAD_INT], POLLIN | POLLERR | POLLHUP);
+    sem_post(&manager.thread_setup_sem);
 
     while (shutdown)
     {
@@ -681,27 +691,60 @@ void *application_service_main_thread(void *arg)
             if (fd == appl_manager->management_pair[THREAD_INT])
             {
                 if (event & POLLIN)
-                    ret = handle_management_message(fd, appl_manager);
+                {
+                    ManagementReturncode returncode = handle_management_message(fd, appl_manager);
+                    if (returncode == MGMT_THREAD_STOP)
+                    {
+                        goto cleanup_application_service;
+                    }
+                    else if (returncode < 0)
+                    {
+                        LOG_ERROR("error occured");
+                        if (appl_manager->management_pair[THREAD_EXT] > 0)
+                        {
+                            closesocket(appl_manager->management_pair[THREAD_EXT]);
+                            appl_manager->management_pair[THREAD_EXT] = -1;
+                        }
+
+                        if (appl_manager->management_pair[THREAD_INT] > 0)
+                        {
+                            closesocket(appl_manager->management_pair[THREAD_INT]);
+                            appl_manager->management_pair[THREAD_INT] = -1;
+                        }
+                        goto cleanup_application_service;
+                    }
+                }
                 else if ((event & POLLERR) || (event & POLLHUP))
-                    LOG_ERROR("Error occured, shut down management service");
+                {
+                    LOG_ERROR("error occured");
+
+                    poll_set_remove_fd(&appl_manager->notifier, appl_manager->management_pair[THREAD_INT]);
+                    if (appl_manager->management_pair[THREAD_EXT] > 0)
+                    {
+                        closesocket(appl_manager->management_pair[THREAD_EXT]);
+                        appl_manager->management_pair[THREAD_EXT] = -1;
+                    }
+
+                    if (appl_manager->management_pair[THREAD_INT] > 0)
+                    {
+                        closesocket(appl_manager->management_pair[THREAD_INT]);
+                        appl_manager->management_pair[THREAD_INT] = -1;
+                    }
+                    break;
+                }
                 else
                 {
-                    LOG_ERROR(" unsupported event %d ", event);
+                    LOG_ERROR("unsupported event %d ", event);
                     continue;
                 }
             }
         }
     }
-error_occured:
-    if (appl_manager->initialized)
-    {
-        stop_application_service(appl_manager);
-
-        close(appl_manager->management_pair[THREAD_EXT]);
-        close(appl_manager->management_pair[THREAD_INT]);
-        appl_manager->initialized = false;
-        poll_set_init(&appl_manager->notifier);
-    }
+cleanup_application_service:
+    LOG_INFO("exiting kritis3m_applicaiton");
+    tls_proxy_backend_terminate();
+    cleanup_application_manager();
+    pthread_detach(pthread_self());
     return NULL;
 }
 
@@ -765,7 +808,6 @@ int create_proxy_config(Kritis3mApplications *appl, proxy_config *config)
     int ret = 0;
 
     // config->application_id = appl->id;
-
     config->log_level = appl->log_level;
 
     config->own_ip_address = appl->server_endpoint_addr.address;
@@ -979,15 +1021,11 @@ int stop_application_service(struct application_manager *application_manager)
 
     int ret = 0;
     int number_applications = -1;
-    int appl_id = -1;
     Kritis3mApplications *appls = NULL;
     Kritis3mApplications *appl = NULL;
 
     if ((application_manager == NULL))
         return 0;
-
-    if (application_manager->configuration != NULL)
-        pthread_mutex_unlock(&application_manager->configuration->lock);
 
     appls = application_manager->configuration->applications;
     number_applications = application_manager->configuration->number_applications;
@@ -998,12 +1036,10 @@ int stop_application_service(struct application_manager *application_manager)
         ret = stop_application(appl);
         if (ret < 0)
         {
-            LOG_ERROR("can't stop appl with appl id %d", appl_id);
+            LOG_ERROR("can't stop appl with appl id %d", appl->id);
         }
     }
-
-    application_manager->initialized = true;
-
+    application_manager->initialized = false;
     return ret;
 }
 
@@ -1031,6 +1067,18 @@ int stop_application_manager()
     {
         LOG_INFO("closed application_manager succesfully");
     }
-    closesocket(socket); // closing socket anyway
+
+    if (manager.management_pair[THREAD_EXT] > 0)
+    {
+        closesocket(manager.management_pair[THREAD_EXT]);
+        manager.management_pair[THREAD_EXT] = -1;
+    }
+
+    if (manager.management_pair[THREAD_INT] > 0)
+    {
+        closesocket(manager.management_pair[THREAD_INT]);
+        manager.management_pair[THREAD_INT] = -1;
+    }
+    pthread_join(manager.thread, NULL);
     return ret;
 }

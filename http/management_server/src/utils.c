@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <inttypes.h>
 #include <netinet/in.h>
+#include <sys/stat.h>
 
 #include "utils.h"
 #include "logging.h"

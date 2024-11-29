@@ -265,9 +265,15 @@ ManagementReturncode parse_buffer_to_SystemConfiguration(char *json_buffer, int 
     config->heartbeat_interval = item->valueint;
 
     item = cJSON_GetObjectItem(configs, "version");
-    // if (item == NULL)
-    // goto error_occured;
-    // config->version = item->valueint;
+    if (item != NULL)
+    {
+        config->version = item->valueint;
+    }
+    item = cJSON_GetObjectItem(configs, "log_level");
+    if (item != NULL)
+    {
+        config->application_config.log_level= item->valueint;
+    }
     /********************************** END CONFIGURATION ****************************/
 
     /*********************************** WHITELIST  **********************************/
@@ -491,7 +497,7 @@ error_occured:
 }
 /**
  * parses a crypto idenity
- * @brief at the moment, identity paths are stored twice, once in the identity structure and one in the parent object. 
+ * @brief at the moment, identity paths are stored twice, once in the identity structure and one in the parent object.
  * @todo make paths more consistent
  */
 ManagementReturncode parse_crypo_identity(cJSON *identity_json, crypto_identity *identity, char *crypto_identity_path)

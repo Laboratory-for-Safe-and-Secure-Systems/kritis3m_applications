@@ -46,7 +46,7 @@ struct kritis3m_service
   int management_socket[2];
   pthread_t mainthread;
   pthread_attr_t thread_attr;
-  poll_set pollfd[10];
+  poll_set pollfd;
   asl_endpoint_configuration management_endpoint_config;
   asl_endpoint *client_endpoint;
 };
@@ -104,11 +104,11 @@ void set_kritis3m_serivce_defaults(struct kritis3m_service *svc)
   svc->management_socket[THREAD_INT] = -1;
   pthread_attr_init(&svc->thread_attr);
   pthread_attr_setdetachstate(&svc->thread_attr, PTHREAD_CREATE_JOINABLE);
-  poll_set_init(svc->pollfd);
+  poll_set_init(&svc->pollfd);
   create_socketpair(svc->management_socket);
 }
 
-int start_kritis3m_service(char *config_file)
+int start_kritis3m_service(char *config_file, int log_level)
 {
   // initializations
   int ret = 0;
@@ -121,8 +121,10 @@ int start_kritis3m_service(char *config_file)
       .NoEncryption = false,
       .UseSecureElement = false,
   };
+  /** -------------- set log level ----------------------------- */
   asl_enable_logging(true);
-  asl_set_log_level(ASL_LOG_LEVEL_DBG);
+  asl_set_log_level(log_level);
+  LOG_LVL_SET(log_level);
 
   // get global node config
   set_kritis3m_serivce_defaults(&svc);
@@ -177,7 +179,7 @@ int start_kritis3m_service(char *config_file)
   if (ret < 0)
   {
     LOG_ERROR("error occured calling distribution service");
-    return 0;
+    goto error_occured;
   }
   // set primary application config
   if (svc.configuration_manager.active_configuration == CFG_NONE)
@@ -216,11 +218,10 @@ int start_kritis3m_service(char *config_file)
     LOG_ERROR("can't start application manage");
     goto error_occured;
   }
-
   return 0;
 error_occured:
-
-  LOG_ERROR("exit kritis3m_service");
+  LOG_INFO("exit kritis3m_service");
+  stop_application_manager();
   cleanup_kritis3m_service();
   return ret;
 }
@@ -239,7 +240,7 @@ void *start_kristis3m_service(void *arg)
   struct kritis3m_service *svc = (struct kritis3m_service *)arg;
   if (svc == NULL)
     goto terminate;
-  struct poll_set *pollfd = svc->pollfd;
+  struct poll_set *pollfd = &svc->pollfd;
   int hb_interval_sec = 10;
   int ret = 0;
   SystemConfiguration *selected_sys_cfg = NULL;
@@ -287,17 +288,21 @@ void *start_kristis3m_service(void *arg)
           service_message req = {0};
           ManagementReturncode return_code = handle_svc_message(svc->management_socket[THREAD_INT], &req);
           if (return_code == MGMT_THREAD_STOP)
-            pthread_exit(NULL);
+          {
+            poll_set_remove_fd(&svc->pollfd, svc->management_socket[THREAD_INT]);
+            goto terminate;
+          }
         }
       }
     }
   }
 
 terminate:
+  LOG_DEBUG("Leaving kritis3m_service main thread");
+
+  stop_application_manager();
   cleanup_kritis3m_service();
-  pthread_exit(NULL);
-  // terminate_application_manager
-  // store config
+  pthread_detach(pthread_self());
   return NULL;
 }
 int setup_socketpair(int management_socket[2], bool blocking)
@@ -498,19 +503,36 @@ int stop_kritis3m_service()
   }
 
   socket = svc.management_socket[THREAD_EXT];
-  request.msg_type = SVC_MSG_INITIAL_POLICY_REQ_RSP;
+  request.msg_type = SVC_MSG_KRITIS3M_SERVICE_STOP;
 
   enum MSG_RESPONSE_CODE retval = svc_request_helper(socket, &request);
-  if (retval != MSG_OK)
+  if (retval == MGMT_THREAD_STOP)
+  {
+    LOG_DEBUG("Application service stop thread");
+  }
+  else if (retval == MSG_OK)
   {
     ret = -1;
-    LOG_ERROR("error occured in application service");
+    LOG_DEBUG("Kritis3m service stop request succesfull");
   }
   else
   {
     LOG_INFO("closed application_manager succesfully");
   }
-  closesocket(socket); // closing socket anyway
+
+  if (svc.management_socket[THREAD_INT] > 0)
+  {
+    closesocket(svc.management_socket[THREAD_INT]);
+    svc.management_socket[THREAD_INT] = -1;
+  }
+  if (svc.management_socket[THREAD_EXT] > 0)
+  {
+    closesocket(svc.management_socket[THREAD_EXT]);
+    svc.management_socket[THREAD_EXT] = -1;
+  }
+
+  pthread_join(svc.mainthread, NULL);
+
   return ret;
 }
 
@@ -572,27 +594,26 @@ ManagementReturncode handle_svc_message(int socket, service_message *msg)
   case SVC_MSG_INITIAL_POLICY_REQ_RSP:
   {
     LOG_WARN("SVC_MSG_INITIAL_POLICY_REQ_RSP: handler not implemented yet");
-
     break;
   }
   case SVC_MSG_POLICY_REQ_RSP:
   {
-
-    stop_application_manager();
-    svc_respond_with(socket, MGMT_OK);
-    cleanup_kritis3m_service();
     LOG_WARN("SVC_MSG_POLICY_REQ_RSP: handler not implemented yet");
-    return_code = MGMT_THREAD_STOP;
     break;
   }
   case SVC_MSG_KRITIS3M_SERVICE_STOP:
   {
-    LOG_WARN("SVC_MSG_INITIAL_POLICY_REQ_RSP: handler not implemented yet");
+    LOG_INFO("SVC STOP: ");
+
+    LOG_WARN("Kritis3m service: Received Stop Request");
+    svc_respond_with(socket, MGMT_OK);
+    return_code = MGMT_THREAD_STOP;
     break;
   }
   case SVC_MSG_RESPONSE:
   {
     LOG_INFO("received response: %d", msg->payload.return_code);
+    return_code = MGMT_OK;
     break;
   }
   default:
@@ -652,8 +673,6 @@ error_occured:
 void cleanup_kritis3m_service()
 {
   svc.initialized = false;
-  closesocket(svc.management_socket[THREAD_EXT]);
-  closesocket(svc.management_socket[THREAD_INT]);
   free_NodeConfig(&svc.node_configuration);
   cleanup_configuration_manager(&svc.configuration_manager);
 }

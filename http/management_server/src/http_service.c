@@ -150,7 +150,8 @@ int init_http_service(Kritis3mManagemntConfiguration *config,
     }
 #endif
     // Initialize thread pool
-    init_thread_pool(&http_service.pool);
+    //@warn thread pool is not supported yet, but will be in the future
+    // init_thread_pool(&http_service.pool);
 
     return 0;
 
@@ -373,7 +374,7 @@ int initial_call_controller(t_http_get_cb response_callback)
     req.port = port;
     req.recv_buf = response_buffer;
     req.recv_buf_len = sizeof(response_buffer);
-    duration timeout = ms_toduration(5 * 1000);
+    duration timeout = ms_toduration(1 * 1000);
 
     ret = startup_connection(&http_service.con);
     if (ret < 0)

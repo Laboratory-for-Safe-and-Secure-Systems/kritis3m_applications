@@ -201,14 +201,6 @@ error_occured:
         ret = -1;
 }
 
-int set_SelectedConfiguration(Kritis3mNodeConfiguration *config, int selected_configuration)
-{
-    LOG_INFO("not implemented");
-    return 0;
-error_occured:
-    int ret = -1;
-    LOG_ERROR("Can't set selected configuration");
-}
 
 Kritis3mApplications *find_application_by_application_id(Kritis3mApplications *appls, int number_appls, int appl_id)
 {
@@ -349,6 +341,7 @@ void cleanup_Systemconfiguration(SystemConfiguration *systemconfiguration)
     systemconfiguration->node_network_index = 0;
     systemconfiguration->heartbeat_interval = 0;
     systemconfiguration->version = 0;
+
     /**------------------------------ WHITELIST FREE---------------------------------------- */
     Whitelist *whitelist = &systemconfiguration->application_config.whitelist;
     for (int i = 0; i < whitelist->number_trusted_clients; i++)
@@ -364,7 +357,7 @@ void cleanup_Systemconfiguration(SystemConfiguration *systemconfiguration)
     for (int i = 0; i < MAX_NUMBER_CRYPTOPROFILE; i++)
     {
         CryptoProfile *profile = &systemconfiguration->application_config.crypto_profile[i];
-        profile->id = -1;
+        profile->id = 0;
         profile->ASLKeyExchangeMethod = ASL_KEX_DEFAULT,
         profile->HybridSignatureMode = ASL_HYBRID_SIGNATURE_MODE_DEFAULT;
         profile->crypto_identity_id = 0;
@@ -378,12 +371,12 @@ void cleanup_Systemconfiguration(SystemConfiguration *systemconfiguration)
     for (int i = 0; i < MAX_NUMBER_APPLICATIONS; i++)
     {
         Kritis3mApplications *appl = &systemconfiguration->application_config.applications[i];
-        appl->id = -1;
-        appl->ep1_id = -1;
-        appl->ep2_id = -1;
-        appl->config_id = -1;
-        appl->log_level = -1;
-        appl->state = 0;
+        appl->id = 0;
+        appl->ep1_id = 0;
+        appl->ep2_id = 0;
+        appl->config_id = 0;
+        appl->log_level = 0;
+        appl->state = false;
         appl->type = UNDEFINED;
         memset(appl->client_endpoint_addr.address, 0, ENDPOINT_LEN);
         appl->client_endpoint_addr.port = 0;
@@ -401,6 +394,10 @@ void cleanup_Systemconfiguration(SystemConfiguration *systemconfiguration)
         cr_identity->server_endpoint_addr.port = 0;
         free_CryptoIdentity(cr_identity);
     }
+    systemconfiguration->application_config.number_applications=0;
+    systemconfiguration->application_config.number_crypto_identity=0;
+    systemconfiguration->application_config.number_crypto_profiles=0;
+    systemconfiguration->application_config.number_hw_config=0;
 }
 
 void cleanup_configuration_manager(ConfigurationManager *configuration_manager)
