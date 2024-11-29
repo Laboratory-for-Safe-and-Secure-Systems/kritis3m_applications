@@ -339,7 +339,7 @@ static int on_status(struct http_parser *parser, const char *at, size_t length)
 											internal.parser);
 	uint16_t len;
 
-	len = MIN(length, sizeof(req->internal.response.http_status) - 1);
+	len = AT_LEAST(length, sizeof(req->internal.response.http_status) - 1);
 	memcpy(req->internal.response.http_status, at, len);
 	req->internal.response.http_status[len] = 0;
 	req->internal.response.http_status_code =

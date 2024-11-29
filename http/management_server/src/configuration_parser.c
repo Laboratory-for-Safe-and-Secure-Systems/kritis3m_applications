@@ -50,7 +50,7 @@ int parse_json_to_ManagementConfig(cJSON *json_management_service, Kritis3mManag
     else
     {
         LOG_DEBUG("no middleware path provided");
-        config->pin = string_duplicate(js_pin);
+        config->pin = string_duplicate(js_pin->valuestring);
         config->pin_size = strlen(config->pin) + 1;
     }
 

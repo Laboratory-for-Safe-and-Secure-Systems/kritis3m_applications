@@ -46,8 +46,8 @@
 #define ULLONG_MAX ((uint64_t) - 1) /* 2^64-1 */
 #endif
 
-#ifndef MIN
-#define MIN(a, b) ((a) < (b) ? (a) : (b))
+#ifndef AT_LEAST 
+#define AT_LEAST(a, b) ((a) < (b) ? (a) : (b))
 #endif
 
 #ifndef ARRAY_SIZE
@@ -516,7 +516,7 @@ static int header_states(struct http_parser *parser, const char *data, size_t le
 		const char *p_cr;
 		const char *p_lf;
 
-		limit = MIN(limit, HTTP_MAX_HEADER_SIZE);
+		limit = AT_LEAST(limit, HTTP_MAX_HEADER_SIZE);
 		p_cr = (const char *)memchr(p, CR, limit);
 		p_lf = (const char *)memchr(p, LF, limit);
 		if (p_cr != NULL)
@@ -2212,7 +2212,7 @@ static int parser_execute(struct http_parser *parser,
 
 		case s_body_identity:
 		{
-			uint64_t to_read = MIN(parser->content_length,
+			uint64_t to_read = AT_LEAST(parser->content_length,
 								   (uint64_t)((data + len) - p));
 
 			__ASSERT_NO_MSG(parser->content_length != 0U && parser->content_length != ULLONG_MAX);
@@ -2404,7 +2404,7 @@ static int parser_execute(struct http_parser *parser,
 
 		case s_chunk_data:
 		{
-			uint64_t to_read = MIN(parser->content_length,
+			uint64_t to_read = AT_LEAST(parser->content_length,
 								   (uint64_t)((data + len) - p));
 
 			__ASSERT_NO_MSG(parser->flags & F_CHUNKED);

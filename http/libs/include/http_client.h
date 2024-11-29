@@ -33,8 +33,9 @@
 #include <zephyr/kernel.h>
 #include <zephyr/net/net_ip.h>
 k_timeout_t
+#define AT_LEAST MIN
 #else
-#define MIN(a, b) (((a) < (b)) ? (a) : (b))
+#define AT_LEAST(a, b) (((a) < (b)) ? (a) : (b))
 #include "linux_comp.h"
 /********************************************
  * 				LINUX				*
