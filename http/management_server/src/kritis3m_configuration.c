@@ -56,7 +56,7 @@ error_occured:
  * what happens if file has no content:
  * -> new file will be created
  */
-ManagementReturncode get_systemconfig(char *filename, SystemConfiguration *systemconfig, char *cryptopath)
+ManagementReturncode get_systemconfig(char *filename, SystemConfiguration *systemconfig, char *cryptopath, char *secure_middleware_path, char *pin)
 {
     int ret = 0;
     ManagementReturncode retval = MGMT_OK;
@@ -67,12 +67,10 @@ ManagementReturncode get_systemconfig(char *filename, SystemConfiguration *syste
         goto error_occured;
 
     ret = read_file(filename, &json_buffer, &file_size);
-    // empty file or no file
     if ((ret < 0))
     {
-        retval = MGMT_EMPTY_OBJECT_ERROR;
-        // create file for the future
-        write_file(filename, "", sizeof(""));
+        retval = MGMT_ERR;
+        LOG_ERROR("can't read systemconfiguration file");
         goto error_occured;
     }
     else if (file_size <= 1)
@@ -81,7 +79,7 @@ ManagementReturncode get_systemconfig(char *filename, SystemConfiguration *syste
         goto error_occured;
     }
 
-    retval = parse_buffer_to_SystemConfiguration(json_buffer, file_size, systemconfig, cryptopath);
+    retval = parse_buffer_to_SystemConfiguration(json_buffer, file_size, systemconfig, cryptopath, secure_middleware_path, pin);
     if (retval == MGMT_PARSE_ERROR)
     {
         LOG_ERROR("error parsing system configuration");
@@ -92,13 +90,17 @@ ManagementReturncode get_systemconfig(char *filename, SystemConfiguration *syste
         LOG_ERROR("error occured during parsing configuration");
         goto error_occured;
     }
+    if (json_buffer != NULL)
+        free(json_buffer);
+
     return ret;
 
 error_occured:
     if (retval > MGMT_ERR)
         retval = MGMT_ERR;
     LOG_ERROR("Error occured in Read configuration, with error code %d", errno);
-    free(json_buffer);
+    if(json_buffer != NULL)
+        free(json_buffer);
     return retval;
 }
 
@@ -178,7 +180,11 @@ ManagementReturncode get_Systemconfig(ConfigurationManager *applconfig, Kritis3m
         break;
     }
     // reads and parses data from filepath to sys_config object
-    ret = get_systemconfig(filepath, sys_config, node_config->pki_cert_path);
+    ret = get_systemconfig(filepath,
+                           sys_config,
+                           node_config->pki_cert_path,
+                           node_config->management_identity.secure_middleware_path,
+                           node_config->management_identity.pin);
     return ret;
 
 error_occured:
@@ -200,7 +206,6 @@ error_occured:
     if (ret > -1)
         ret = -1;
 }
-
 
 Kritis3mApplications *find_application_by_application_id(Kritis3mApplications *appls, int number_appls, int appl_id)
 {
@@ -241,6 +246,8 @@ void free_ManagementConfiguration(Kritis3mManagemntConfiguration *config)
     memset(config->serial_number, 0, SERIAL_NUMBER_SIZE);
     memset(config->server_endpoint_addr.address, 0, ENDPOINT_LEN);
     memset(&config->identity.certificates, 0, sizeof(certificates));
+    config->secure_middleware_path_size = 0;
+    config->pin_size = 0;
 
     config->identity.filepath_size = 0;
     if (config->identity.filepath != NULL)
@@ -249,12 +256,16 @@ void free_ManagementConfiguration(Kritis3mManagemntConfiguration *config)
         free(config->identity.revocation_list_url);
     if (config->identity.server_url != NULL)
         free(config->identity.server_url);
+    if (config->secure_middleware_path != NULL)
+        free(config->secure_middleware_path);
+    if (config->pin != NULL)
+        free(config->pin);
 }
 
 void free_CryptoIdentity(crypto_identity *identity)
 {
-    if (identity== NULL)
-    return;
+    if (identity == NULL)
+        return;
     identity->filepath_size = 0;
     identity->server_url_size = 0;
     identity->revocation_list_url_size = 0;
@@ -394,10 +405,10 @@ void cleanup_Systemconfiguration(SystemConfiguration *systemconfiguration)
         cr_identity->server_endpoint_addr.port = 0;
         free_CryptoIdentity(cr_identity);
     }
-    systemconfiguration->application_config.number_applications=0;
-    systemconfiguration->application_config.number_crypto_identity=0;
-    systemconfiguration->application_config.number_crypto_profiles=0;
-    systemconfiguration->application_config.number_hw_config=0;
+    systemconfiguration->application_config.number_applications = 0;
+    systemconfiguration->application_config.number_crypto_identity = 0;
+    systemconfiguration->application_config.number_crypto_profiles = 0;
+    systemconfiguration->application_config.number_hw_config = 0;
 }
 
 void cleanup_configuration_manager(ConfigurationManager *configuration_manager)
@@ -407,6 +418,6 @@ void cleanup_configuration_manager(ConfigurationManager *configuration_manager)
     cleanup_Systemconfiguration(&configuration_manager->primary);
     cleanup_Systemconfiguration(&configuration_manager->secondary);
     configuration_manager->active_configuration = CFG_NONE;
-    memset(configuration_manager->primary_file_path,0, MAX_FILEPATH_SIZE);
-    memset(configuration_manager->secondary_file_path,0, MAX_FILEPATH_SIZE);
+    memset(configuration_manager->primary_file_path, 0, MAX_FILEPATH_SIZE);
+    memset(configuration_manager->secondary_file_path, 0, MAX_FILEPATH_SIZE);
 }

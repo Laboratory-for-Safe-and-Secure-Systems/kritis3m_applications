@@ -13,7 +13,7 @@
 LOG_MODULE_CREATE(kritis3m_config_paser);
 
 int parse_whitelist(cJSON *json_obj, Whitelist *whitelist);
-int parse_crypo_config(cJSON *json_obj, CryptoProfile *CryptoProfile);
+int parse_crypo_config(cJSON *json_obj, CryptoProfile *CryptoProfile, char *secure_middleware_path, char *pin);
 int parse_crypo_identity(cJSON *json_obj, crypto_identity *crypto_identity, char *crypto_identity_path);
 int parse_application(cJSON *json_obj, Kritis3mApplications *application);
 
@@ -25,6 +25,34 @@ int parse_json_to_ManagementConfig(cJSON *json_management_service, Kritis3mManag
                               config->server_endpoint_addr.address, ENDPOINT_LEN, &config->server_endpoint_addr.port);
     if (ret < 0)
         goto error_occured;
+    cJSON *js_middleware_path = cJSON_GetObjectItem(json_management_service, "secure_middleware_path");
+    if ((js_middleware_path == NULL) ||
+        (strcmp(js_middleware_path->valuestring, "") == 0))
+    {
+        LOG_DEBUG("no middleware path provided");
+        config->secure_middleware_path = NULL;
+        config->secure_middleware_path_size = 0;
+    }
+    else
+    {
+        LOG_DEBUG("no middleware path provided");
+        config->secure_middleware_path = string_duplicate(js_middleware_path->valuestring);
+        config->secure_middleware_path_size = strlen(config->secure_middleware_path) + 1;
+    }
+    cJSON *js_pin = cJSON_GetObjectItem(json_management_service, "pin");
+    if ((js_pin == NULL) ||
+        (strcmp(js_pin->valuestring, "") == 0))
+    {
+        LOG_DEBUG("no middleware path provided");
+        config->pin = NULL;
+        config->pin_size = 0;
+    }
+    else
+    {
+        LOG_DEBUG("no middleware path provided");
+        config->pin = string_duplicate(js_pin);
+        config->pin_size = strlen(config->pin) + 1;
+    }
 
     char *json_parsed = strncpy(config->serial_number, cJSON_GetObjectItem(json_management_service, "serial_number")->valuestring, SERIAL_NUMBER_SIZE);
     if (json_parsed == NULL)
@@ -211,7 +239,11 @@ error_occured:
     return ret;
 }
 
-ManagementReturncode parse_buffer_to_SystemConfiguration(char *json_buffer, int json_buffer_size, SystemConfiguration *config, char *crypto_path)
+ManagementReturncode parse_buffer_to_SystemConfiguration(char *json_buffer,
+                                                         int json_buffer_size,
+                                                         SystemConfiguration *config,
+                                                         char *crypto_path,
+                                                         char *secure_middleware_path, char *pin)
 {
     ManagementReturncode retval = MGMT_OK;
     cJSON *root = cJSON_ParseWithLength(json_buffer, json_buffer_size);
@@ -272,7 +304,7 @@ ManagementReturncode parse_buffer_to_SystemConfiguration(char *json_buffer, int 
     item = cJSON_GetObjectItem(configs, "log_level");
     if (item != NULL)
     {
-        config->application_config.log_level= item->valueint;
+        config->application_config.log_level = item->valueint;
     }
     /********************************** END CONFIGURATION ****************************/
 
@@ -339,7 +371,7 @@ ManagementReturncode parse_buffer_to_SystemConfiguration(char *json_buffer, int 
     for (int i = 0; i < number_crypto_profiles; i++)
     {
         cJSON *crypto = cJSON_GetArrayItem(crypto_profiles, i);
-        retval = parse_crypo_config(crypto, &config->application_config.crypto_profile[i]);
+        retval = parse_crypo_config(crypto, &config->application_config.crypto_profile[i], secure_middleware_path, pin);
         if (retval < MGMT_OK)
             goto error_occured;
     }
@@ -556,8 +588,13 @@ error_occured:
     return ret;
 }
 
-ManagementReturncode parse_crypo_config(cJSON *json_obj, CryptoProfile *profile)
+ManagementReturncode parse_crypo_config(cJSON *json_obj, CryptoProfile *profile, char *secure_middleware_path, char *pin)
 {
+    if (json_obj == NULL)
+        goto error_occured;
+    profile->pin = pin;
+    profile->secure_middleware_path = secure_middleware_path;
+
     ManagementReturncode ret = MGMT_OK;
     cJSON *item;
     item = cJSON_GetObjectItem(json_obj, "id");

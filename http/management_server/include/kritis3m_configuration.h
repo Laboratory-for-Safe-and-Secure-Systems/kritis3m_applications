@@ -29,14 +29,6 @@
 #define SERIAL_NUMBER_SIZE 254
 #define ENDPOINT_LEN 254
 
-#define PRIMARY_FILENAME "primary.json"
-#define SECONDARY_FILENAME "secondary.json"
-
-#define MANAGEMENT_SERVICE_STR "management_service"
-#define MANAGEMENT_STR "management"
-#define REMOTE_STR "remote"
-#define PRODUCTION_STR "production"
-
 #define THREAD_INT 0
 #define THREAD_EXT 1
 
@@ -161,6 +153,9 @@ typedef struct
     char *revocation_list_url;
     int revocation_list_url_size;
 
+    char *secure_middleware_path;
+    int secure_middleware_path_int;
+
     EndpointAddr server_endpoint_addr;
 
     char *server_url;
@@ -184,6 +179,8 @@ struct CryptoProfile
     enum asl_hybrid_signature_mode HybridSignatureMode;
     bool Keylog;
     int32_t crypto_identity_id;
+    char* secure_middleware_path;
+    char* pin;
 };
 
 typedef struct
@@ -271,6 +268,12 @@ typedef struct
 {
     char serial_number[SERIAL_NUMBER_SIZE];
     EndpointAddr server_endpoint_addr;
+
+    char* secure_middleware_path;
+    int secure_middleware_path_size;
+
+    char* pin;
+    int pin_size;
 
     crypto_identity identity;
 } Kritis3mManagemntConfiguration;

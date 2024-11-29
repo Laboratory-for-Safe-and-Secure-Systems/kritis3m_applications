@@ -64,6 +64,8 @@ int create_endpoint_config(crypto_identity *crypto_id, CryptoProfile *crypto_pro
             goto error_occured;
         crypto_id->certificates_available = true;
     }
+    ep_cfg->pkcs11.long_term_crypto_module.path= crypto_profile->secure_middleware_path;
+    ep_cfg->pkcs11.long_term_crypto_module.pin= crypto_profile->pin;
 
     ep_cfg->hybrid_signature_mode = crypto_profile->HybridSignatureMode;
     ep_cfg->key_exchange_method = crypto_profile->ASLKeyExchangeMethod;

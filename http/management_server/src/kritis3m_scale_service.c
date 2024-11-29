@@ -137,12 +137,10 @@ int start_kritis3m_service(char *config_file, int log_level)
     return ret;
   }
 
-  ret = create_folder_structure(&svc.node_configuration);
-  if (ret < 0)
-  {
-    LOG_ERROR("folder structure is incorrect");
-    goto error_occured;
-  }
+  // pass middleware and pin from cli to endpoint conf
+  svc.management_endpoint_config.pkcs11.long_term_crypto_module.path = svc.node_configuration.management_identity.secure_middleware_path;
+  svc.management_endpoint_config.pkcs11.long_term_crypto_module.pin = svc.node_configuration.management_identity.pin;
+
 
   // 2. setsup endpoint configuration, used to communicate with the controller
   ret = create_endpoint_config(&svc.node_configuration.management_identity.identity, &default_profile, &svc.management_endpoint_config);
@@ -507,8 +505,8 @@ int stop_kritis3m_service()
     closesocket(svc.management_socket[THREAD_EXT]);
     svc.management_socket[THREAD_EXT] = -1;
   }
-
   pthread_join(svc.mainthread, NULL);
+  LOG_DEBUG("mainthread closed");
 
   return ret;
 }

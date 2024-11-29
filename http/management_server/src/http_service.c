@@ -307,7 +307,10 @@ int startup_connection(struct conn *con)
         goto error_occured;
     ret = asl_handshake(con->mgmt_req.session);
     if (ret < 0)
+    {
+        LOG_ERROR("handshake with controller failed");
         goto error_occured;
+    }
     return ret;
 
 error_occured:
