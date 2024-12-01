@@ -421,3 +421,41 @@ void cleanup_configuration_manager(ConfigurationManager *configuration_manager)
     memset(configuration_manager->primary_file_path, 0, MAX_FILEPATH_SIZE);
     memset(configuration_manager->secondary_file_path, 0, MAX_FILEPATH_SIZE);
 }
+
+char* applicationManagerStatusToJson(
+    const ApplicationManagerStatus* status, 
+    char* json_buffer, 
+    size_t buffer_length
+) {
+    // Clear the buffer
+    memset(json_buffer, 0, buffer_length);
+
+    // Create a cJSON object
+    cJSON* json_obj = cJSON_CreateObject();
+    if (json_obj == NULL) {
+        return NULL;
+    }
+
+    // Add fields to JSON
+    cJSON_AddNumberToObject(json_obj, "status", status->Status);
+    cJSON_AddNumberToObject(json_obj, "running_applications", status->running_applications);
+
+    // Convert to string and copy to buffer
+    char* json_str = cJSON_Print(json_obj);
+    if (json_str == NULL) {
+        cJSON_Delete(json_obj);
+        return NULL;
+    }
+
+    // Copy to buffer (with safety check)
+    strncpy(json_buffer, json_str, buffer_length - 1);
+    json_buffer[buffer_length - 1] = '\0';  // Ensure null-termination
+
+    // Free the dynamically allocated JSON string from cJSON_Print
+    free(json_str);
+
+    // Clean up the cJSON object
+    cJSON_Delete(json_obj);
+
+    return json_buffer;
+}

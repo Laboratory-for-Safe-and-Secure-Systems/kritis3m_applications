@@ -12,6 +12,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "kritis3m_scale_service.h"
 #include "kritis3m_application_manager.h"
 #include "networking.h"
 #include "utils.h"
@@ -548,6 +549,8 @@ ManagementReturncode handle_management_message(int fd, struct application_manage
     case APPLICATION_SERVICE_START_REQUEST:
     {
         ApplicationConfiguration *config = msg.payload.config;
+        ApplicationManagerStatus status = {.running_applications = 0,
+                                           .Status = MSG_OK};
         int ret = 0;
 
         if (appl_manager->configuration != NULL)
@@ -555,11 +558,16 @@ ManagementReturncode handle_management_message(int fd, struct application_manage
             LOG_WARN("Already existing configuration available. Please terminate application manager before passing new configuration");
             goto error_occured;
         }
-
         if (config == NULL)
             goto error_occured;
 
         appl_manager->configuration = config;
+        if (appl_manager->configuration == NULL)
+            goto error_occured;
+        else
+        {
+            respond_with(fd, MSG_OK);
+        }
 
         if (ret < 0)
         {
@@ -572,17 +580,29 @@ ManagementReturncode handle_management_message(int fd, struct application_manage
             {
                 LOG_ERROR("appl within applications is NULL, ERROR");
                 appl_manager->configuration = NULL;
-                ret = pthread_mutex_unlock(&appl_manager->configuration->lock);
+                status.Status = MSG_ERROR;
                 goto error_occured;
             }
             ret = start_application(appl);
             if (ret < 0)
-                LOG_ERROR("application with appl_id %d couldnt be started correctly", appl->id);
+            {
+                LOG_ERROR("couldnt start proxy applciation with id %d", appl->id);
+                status.Status = MSG_ERROR;
+            }
             else
+            {
                 appl->state = true;
+                status.running_applications++;
+            }
         }
-        retval = MSG_OK;
-        break;
+        ret = req_send_status_report(status);
+        if (ret < 0)
+        {
+            LOG_ERROR("application_manager: couldnt send status report");
+        }
+
+        status.Status = MSG_OK;
+        return 0;
     }
     case APPLICATION_SERVICE_STOP_REQUEST:
     {

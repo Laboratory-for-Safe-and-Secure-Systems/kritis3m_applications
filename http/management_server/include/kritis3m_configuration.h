@@ -92,36 +92,17 @@ typedef struct certificates
     size_t root_buffer_size;
 } certificates;
 
-/**
- * @note when extending Kritis3mApplicationtype: DTLS_R_PROXY = MIN && TLS_R_PROXY = MAX
- * @example extension:
- * num Kritis3mApplicationtype
- * {
- *     DTLS_R_Proxy = 0,
- *     DTLS_F_Proxy = 1,
- *     DTLS_TUNNEL = 2
- *     TLS_F_PROXY = 3,
- *     TLS_R_PROXY = 4
- * };
- *
- */
-
-/**
-* @note when extending Kritis3mHelper Applicaitontype: ECHO_TCP_SERVER = minimal number and L2_BRIDGE = maximal number
-* @example extension:
-* enum Kritis3mHelperApplicationtype {
-*    ECHO_TCP_SERVER = 0,
-*    ECHO_UDP_SERVER = 1,
-*    EXAMPLE_STANDARD_APPL = 2,
-*    L2_BRIDGE =3,
-};
- */
-
 enum ApplicationStatus
 {
     APK_ERR = -1,
-    APK_OK = 1,
+    APK_OK = 0,
 };
+
+typedef struct
+{
+    enum ApplicationStatus Status;
+    int running_applications;
+} ApplicationManagerStatus;
 
 typedef enum
 {
@@ -179,8 +160,8 @@ struct CryptoProfile
     enum asl_hybrid_signature_mode HybridSignatureMode;
     bool Keylog;
     int32_t crypto_identity_id;
-    char* secure_middleware_path;
-    char* pin;
+    char *secure_middleware_path;
+    char *pin;
 };
 
 typedef struct
@@ -264,15 +245,13 @@ typedef struct
 
 } ConfigurationManager;
 
-typedef struct
-{
-    char serial_number[SERIAL_NUMBER_SIZE];
+typedef struct { char serial_number[SERIAL_NUMBER_SIZE];
     EndpointAddr server_endpoint_addr;
 
-    char* secure_middleware_path;
+    char *secure_middleware_path;
     int secure_middleware_path_size;
 
-    char* pin;
+    char *pin;
     int pin_size;
 
     crypto_identity identity;
@@ -315,11 +294,20 @@ typedef struct
     SelectedConfiguration selected_configuration;
 } Kritis3mNodeConfiguration;
 
+enum MSG_RESPONSE_CODE
+{
+    MSG_ERROR = -1,
+    MSG_OK = 0,
+    MSG_FORBIDDEN = 1,
+    MSG_BUSY = 2,
+};
+
 enum used_service
 {
     EST_ENROLL = 0,
     EST_REENROLL,
     MGMT_POLICY_REQ,
+    MGMT_SEND_STATUS_REQ,
     MGMT_HEARTBEAT_REQ,
     MGMT_POLICY_CONFIRM,
 };
@@ -360,6 +348,12 @@ SystemConfiguration *get_active_config(ConfigurationManager *manager);
 SystemConfiguration *get_inactive_config(ConfigurationManager *manager);
 Kritis3mApplications *find_application_by_application_id(Kritis3mApplications *appls, int number_appls, int appl_id);
 int get_identity_folder_path(char *out_path, size_t size, const char *base_path, network_identity identity);
+//used to send ApplicationStatus to Controller
+char* applicationManagerStatusToJson(
+    const ApplicationManagerStatus* status, 
+    char* json_buffer, 
+    size_t buffer_length
+);
 
 /*Cleanup Functions */
 

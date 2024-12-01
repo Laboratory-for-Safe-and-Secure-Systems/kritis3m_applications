@@ -291,15 +291,12 @@ ManagementReturncode parse_buffer_to_SystemConfiguration(char *json_buffer,
         goto error_occured;
     config->cfg_id = item->valueint;
 
-    item = cJSON_GetObjectItem(configs, "hb_interval");
-    if (item == NULL)
-        goto error_occured;
-    config->heartbeat_interval = item->valueint;
-
     item = cJSON_GetObjectItem(configs, "version");
     if (item != NULL)
     {
         config->version = item->valueint;
+    }else{
+        goto error_occured;
     }
     item = cJSON_GetObjectItem(configs, "log_level");
     if (item != NULL)

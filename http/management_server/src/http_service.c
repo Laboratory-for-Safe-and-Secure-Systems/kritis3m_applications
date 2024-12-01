@@ -19,8 +19,7 @@ LOG_MODULE_CREATE(http_service);
 
 #define MAX_NUMBER_THREADS 6
 #define DISTRIBUTION_BUFFER_SIZE 10000
-#define HEARTBEAT_BUFFER_SIZE 1000
-#define PKI_BUFFER_SIZE 4000
+#define STATUS_BUFFER_SIZE 1000
 
 //------------------------------------ DEFINTIONS------------------------------------------//
 typedef struct
@@ -87,6 +86,7 @@ static Http_service_module http_service = {0};
 
 /*-----------------------------  FORWARD DECLARATIONS -------------------------------------*/
 
+int create_send_status_url(char *url, int url_size,int cfg_id, int version_number);
 void set_http_service_defaults(Http_service_module *service);
 void destroy_thread_pool(ThreadPool *pool);
 void init_thread_pool(ThreadPool *pool);
@@ -98,7 +98,7 @@ int create_inital_controller_url(char *url, int url_size);
 int create_periodic_controller_url(char *url, int url_size, int version_number);
 /*-----------------------------  END FORWARD DECLARATIONS -------------------------------------*/
 
-static void http_get_cb(struct http_response *rsp,
+static void http_status_cb(struct http_response *rsp,
                         enum http_final_call final_data,
                         void *user_data);
 
@@ -131,7 +131,6 @@ int init_http_service(Kritis3mManagemntConfiguration *config,
     http_service.con.mgmt_endpoint = asl_setup_client_endpoint(mgmt_endpoint_config);
     if (!http_service.con.mgmt_endpoint)
         goto cleanup;
-
 
 // Perform address lookup for PKI endpoint
 #ifdef PKI_READY
@@ -235,7 +234,7 @@ int terminate_http_service(void)
 }
 
 /********   FORWARD DECLARATION ***************/
-static void http_get_cb(struct http_response *rsp,
+static void http_status_cb(struct http_response *rsp,
                         enum http_final_call final_data,
                         void *user_data)
 {
@@ -320,8 +319,94 @@ error_occured:
     return ret;
 }
 
-int update_call_controller(t_http_get_cb response_callback, int version_number, char *updated_at) { return 0; }
+int send_statusto_server(t_http_get_cb response_callback, int version_number, int cfg_id, char *payload, int payload_size)
+{
+    //---------------------------------initialization ---------------------------------//
+    char url[520];
+    char host[NI_MAXHOST];
+    char port[NI_MAXSERV];
+    int ret = 0;
+    int fd = -1;
+    struct http_request req = {0};
+    char response_buffer[STATUS_BUFFER_SIZE];
+    struct response response = {
+        .buffer = response_buffer,
+        .buffer_frag_start = NULL,
+        .buffer_size = STATUS_BUFFER_SIZE,
+        .http_status_code = -1,
+        .ret = -1,
+        .service_used = MGMT_SEND_STATUS_REQ};
+    //---------------------------------initialization ---------------------------------//
 
+    // get host
+    ret = getnameinfo(http_service.con.mgmt_sockaddr->ai_addr,
+                      http_service.con.mgmt_sockaddr->ai_addrlen,
+                      host,
+                      sizeof(host),
+                      NULL,
+                      0,
+                      NI_NUMERICHOST);
+    if (ret < 0)
+        goto error_occured;
+    // get port from addr info
+    ret = getnameinfo(http_service.con.mgmt_sockaddr->ai_addr,
+                      http_service.con.mgmt_sockaddr->ai_addrlen,
+                      NULL,
+                      0,
+                      port,
+                      sizeof(port),
+                      NI_NUMERICSERV);
+    if (ret < 0)
+        goto error_occured;
+
+    ret = create_send_status_url(url, 520,cfg_id, version_number);
+    if (ret < 0)
+        goto error_occured;
+
+    req.url = url;
+    req.method = HTTP_POST;
+    req.protocol = "HTTP/1.1";
+    req.response = http_status_cb;
+    req.host = host;
+    req.port = port;
+    req.recv_buf = response_buffer;
+    req.recv_buf_len = sizeof(response_buffer);
+    req.content_type_value = "application/json";
+    req.payload = payload;
+    req.payload_len = payload_size;
+
+    duration timeout = ms_toduration(2 * 1000);
+
+    ret = startup_connection(&http_service.con);
+    if (ret < 0)
+        goto error_occured;
+
+    ret = https_client_req(http_service.con.mgmt_req.sock,
+                           http_service.con.mgmt_req.session,
+                           &req,
+                           timeout,
+                           &response);
+    if (ret < 0)
+    {
+        LOG_ERROR("error occured calling distribution server %d", ret);
+        response.ret = MGMT_ERR;
+    }
+    else
+    {
+        LOG_DEBUG("succesfull http request to management server");
+        response.ret = MGMT_OK;
+    }
+
+
+    if (response_callback)
+        ret = response_callback(response);
+    cleanup_request_object(&http_service.con.mgmt_req);
+    return ret;
+error_occured:
+    ret = -1;
+    cleanup_request_object(&http_service.con.mgmt_req);
+    return ret;
+}
 int initial_call_controller(t_http_get_cb response_callback)
 {
     //---------------------------------initialization ---------------------------------//
@@ -372,12 +457,12 @@ int initial_call_controller(t_http_get_cb response_callback)
     req.url = url;
     req.method = HTTP_GET;
     req.protocol = "HTTP/1.1";
-    req.response = http_get_cb;
+    req.response = http_status_cb;
     req.host = host;
     req.port = port;
     req.recv_buf = response_buffer;
     req.recv_buf_len = sizeof(response_buffer);
-    duration timeout = ms_toduration(1 * 1000);
+    duration timeout = ms_toduration(2 * 1000);
 
     ret = startup_connection(&http_service.con);
     if (ret < 0)
@@ -506,6 +591,13 @@ int create_inital_controller_url(char *url, int url_size)
     if (url == NULL)
         return -1;
     return snprintf(url, url_size, "/api/node/%s/initial/register", http_service.serial_number);
+}
+
+int create_send_status_url(char *url, int url_size, int cfg_id, int version_number)
+{
+    if (url == NULL)
+        return -1;
+    return snprintf(url, url_size, "/api/node/%s/config/%d/version/%d", http_service.serial_number,cfg_id, version_number);
 }
 
 int create_periodic_controller_url(char *url, int url_size, int version_number)

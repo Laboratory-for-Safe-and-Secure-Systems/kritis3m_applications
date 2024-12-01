@@ -25,13 +25,6 @@ enum application_management_message_type
     APPLICATION_CONNECTION_REQUEST,
     MSG_RESPONSE,
 };
-enum MSG_RESPONSE_CODE
-{
-    MSG_ERROR = -1,
-    MSG_OK = 0,
-    MSG_FORBIDDEN = 1,
-    MSG_BUSY = 2,
-};
 
 void init_application_manager(void);
 int start_application_manager(ApplicationConfiguration *configuration);

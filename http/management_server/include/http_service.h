@@ -24,9 +24,11 @@ struct response
 
 typedef int (*t_http_get_cb)(struct response response);
 
+//http put
+//payload as json
 int initial_call_controller(t_http_get_cb response_callback);
-
-int update_call_controller(t_http_get_cb response_callback, int version_number, char *updated_at);
+//http_get
+int send_statusto_server(t_http_get_cb response_callback, int version_number, int cfg_id ,char* payload, int payload_size);
 
 int init_http_service(Kritis3mManagemntConfiguration *config,
                       asl_endpoint_configuration *mgmt_endpoint_config

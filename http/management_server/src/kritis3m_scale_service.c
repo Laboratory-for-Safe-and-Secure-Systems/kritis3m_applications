@@ -57,7 +57,8 @@ enum service_message_type
   SVC_MSG_INITIAL_POLICY_REQ_RSP,
   SVC_MSG_POLICY_REQ_RSP,
   SVC_MSG_KRITIS3M_SERVICE_STOP,
-  SVC_MSG_RESPONSE
+  SVC_MSG_RESPONSE,
+  SVC_MSG_APPLICATION_MANGER_STATUS_REQ,
 };
 
 typedef struct service_message
@@ -65,7 +66,10 @@ typedef struct service_message
   enum service_message_type msg_type;
   union kritis3m_service_payload
   {
-    int placeholder;
+    struct appl_manager_status
+    {
+      ApplicationManagerStatus status;
+    } appl_status;
     ManagementReturncode return_code;
   } payload;
 } service_message;
@@ -74,11 +78,11 @@ typedef struct service_message
 void *start_kristis3m_service(void *arg);
 void init_configuration_manager(ConfigurationManager *manager, Kritis3mNodeConfiguration *node_config);
 int create_folder_structure(Kritis3mNodeConfiguration *node_cfg);
-
 enum MSG_RESPONSE_CODE svc_request_helper(int socket, service_message *msg);
 int initial_policy_request_cb(struct response response);
 
-ManagementReturncode handle_svc_message(int socket, service_message *msg);
+// cfg_id and version number are temporary arguments and will be cleaned up after the testing
+ManagementReturncode handle_svc_message(int socket, service_message *msg, int cfg_id, int version_number);
 static int send_svc_message(int socket, service_message *msg);
 static int read_svc_message(int socket, service_message *msg);
 
@@ -136,11 +140,15 @@ int start_kritis3m_service(char *config_file, int log_level)
     LOG_ERROR("can't parse Config, error occured: %d ", errno);
     return ret;
   }
+  if ((svc.node_configuration.primary_path == NULL) || (svc.node_configuration.config_path == NULL) || (svc.node_configuration.pki_cert_path == NULL))
+  {
+    LOG_ERROR("filepaths incorrect"); 
+    return -1;
+  }
 
   // pass middleware and pin from cli to endpoint conf
   svc.management_endpoint_config.pkcs11.long_term_crypto_module.path = svc.node_configuration.management_identity.secure_middleware_path;
   svc.management_endpoint_config.pkcs11.long_term_crypto_module.pin = svc.node_configuration.management_identity.pin;
-
 
   // 2. setsup endpoint configuration, used to communicate with the controller
   ret = create_endpoint_config(&svc.node_configuration.management_identity.identity, &default_profile, &svc.management_endpoint_config);
@@ -191,11 +199,6 @@ int start_kritis3m_service(char *config_file, int log_level)
   // 6. prepare hardware
   ret = prepare_all_interfaces(svc.configuration_manager.primary.application_config.hw_config,
                                svc.configuration_manager.primary.application_config.number_hw_config);
-  if (ret < 0)
-  {
-    LOG_ERROR("can't prepare iface");
-    goto error_occured;
-  }
   svc.initialized = true;
 
   // 7. start management application
@@ -206,13 +209,6 @@ int start_kritis3m_service(char *config_file, int log_level)
     goto error_occured;
   }
 
-  // 8. Start application manager
-  ret = start_application_manager(&svc.configuration_manager.primary.application_config);
-  if (ret < 0)
-  {
-    LOG_ERROR("can't start application manage");
-    goto error_occured;
-  }
   return 0;
 error_occured:
   LOG_INFO("exit kritis3m_service");
@@ -235,28 +231,40 @@ void *start_kristis3m_service(void *arg)
   struct kritis3m_service *svc = (struct kritis3m_service *)arg;
   if (svc == NULL)
     goto terminate;
-  struct poll_set *pollfd = &svc->pollfd;
+
   int hb_interval_sec = 10;
   int ret = 0;
   SystemConfiguration *selected_sys_cfg = NULL;
   ManagementReturncode retval = MGMT_OK;
+  int cfg_id = -1;
+  int version_number = -1;
 
   asl_endpoint_configuration *ep_cfg = &svc->management_endpoint_config;
   Kritis3mNodeConfiguration node_configuration = svc->node_configuration;
   ConfigurationManager application_configuration_manager = svc->configuration_manager;
-  enum appl_state appl_state = APPLICATION_MANAGER_OFF;
 
-  ret = poll_set_add_fd(pollfd, svc->management_socket[THREAD_INT], POLLIN | POLLERR);
+  ret = poll_set_add_fd(&svc->pollfd, svc->management_socket[THREAD_INT], POLLIN | POLLERR);
   if (ret < 0)
   {
     LOG_ERROR("cant add fd to to pollset, shutting down management service");
     goto terminate;
   }
 
+  // 8. Start application manager
+  ret = start_application_manager(&application_configuration_manager.primary.application_config);
+  if (ret < 0)
+  {
+    LOG_ERROR("can't start application manage");
+    goto terminate;
+  }
+
+  cfg_id = application_configuration_manager.primary.cfg_id;
+  version_number = application_configuration_manager.primary.version;
+
   while (1)
   {
 
-    ret = poll(pollfd->fds, pollfd->num_fds, -1);
+    ret = poll(svc->pollfd.fds, svc->pollfd.num_fds, -1);
 
     if (ret == -1)
     {
@@ -267,10 +275,10 @@ void *start_kristis3m_service(void *arg)
     {
       continue;
     }
-    for (int i = 0; i < pollfd->num_fds; i++)
+    for (int i = 0; i < svc->pollfd.num_fds; i++)
     {
-      int fd = pollfd->fds[i].fd;
-      short event = pollfd->fds[i].revents;
+      int fd = svc->pollfd.fds[i].fd;
+      short event = svc->pollfd.fds[i].revents;
 
       if (event == 0)
         continue;
@@ -281,7 +289,8 @@ void *start_kristis3m_service(void *arg)
         if (event & POLLIN)
         {
           service_message req = {0};
-          ManagementReturncode return_code = handle_svc_message(svc->management_socket[THREAD_INT], &req);
+          ManagementReturncode return_code = handle_svc_message(svc->management_socket[THREAD_INT], &req, cfg_id, version_number);
+
           if (return_code == MGMT_THREAD_STOP)
           {
             poll_set_remove_fd(&svc->pollfd, svc->management_socket[THREAD_INT]);
@@ -290,6 +299,8 @@ void *start_kristis3m_service(void *arg)
           else if (return_code < 0)
           {
             poll_set_remove_fd(&svc->pollfd, svc->management_socket[THREAD_INT]);
+            closesocket(svc->management_socket[THREAD_INT]);
+            closesocket(svc->management_socket[THREAD_EXT]);
             LOG_ERROR("error occured in handling service message");
             goto terminate;
           }
@@ -362,48 +373,13 @@ int create_folder_structure(Kritis3mNodeConfiguration *node_config)
 
 void init_configuration_manager(ConfigurationManager *manager, Kritis3mNodeConfiguration *node_config)
 {
+  if ((node_config == NULL) || (manager == NULL))
+    return;
   manager->active_configuration = node_config->selected_configuration;
   strncpy(manager->primary_file_path, node_config->primary_path, MAX_FILEPATH_SIZE);
   strncpy(manager->secondary_file_path, node_config->secondary_path, MAX_FILEPATH_SIZE);
   cleanup_Systemconfiguration(&manager->primary);
   cleanup_Systemconfiguration(&manager->secondary);
-}
-
-int initial_policy_request_cb(struct response response)
-{
-  // -------------------- INIT ---------------------------//
-  int ret = 0;
-  service_message resp = {0};
-  service_message req = {0};
-  char *policy_filepath = svc.node_configuration.primary_path;
-
-  if ((response.ret != MGMT_OK) || (policy_filepath == NULL) || (response.buffer == NULL))
-  {
-    LOG_ERROR("RETURN CODE: %d", response.ret);
-    goto error_occured;
-  }
-
-  LOG_DEBUG("HTTP status code is %d", response.http_status_code);
-  LOG_DEBUG("Policy response is %d bytes long", response.bytes_received);
-
-  LOG_INFO("Received %d bytes from mgmt server: ", response.bytes_received);
-  LOG_DEBUG("write response to %s", policy_filepath);
-  if (response.http_status_code = 200)
-  {
-    ret = write_file(policy_filepath, response.buffer_frag_start, response.bytes_received);
-  }
-  if (ret < 0)
-  {
-    LOG_ERROR("can't write response into buffer");
-    goto error_occured;
-  }
-  /**
-   * @todo signal main thread
-   */
-  return ret;
-error_occured:
-  ret = -1;
-  return ret;
 }
 
 //------------------------------------------ HARDWARE INFORMATION --------------------------------------- //
@@ -463,6 +439,45 @@ int prepare_all_interfaces(HardwareConfiguration hw_config[], int num_configs)
   return (failures > 0) ? -1 : 0;
 }
 
+/*------------------------------------ MANAGEMENT REQUESTS ------------------------------------------------*/
+
+// status report
+//@brief sends report to controller
+int req_send_status_report(ApplicationManagerStatus manager_status)
+{
+  int socket = -1;
+  int ret = 0;
+  service_message request = {0};
+
+  if ((!svc.initialized) || (svc.management_socket[THREAD_EXT] < 0))
+  {
+    LOG_ERROR("Kritis3m_service is not initialized");
+    ret = -1;
+    return ret;
+  }
+
+  socket = svc.management_socket[THREAD_EXT];
+  request.msg_type = SVC_MSG_APPLICATION_MANGER_STATUS_REQ;
+  request.payload.appl_status.status = manager_status;
+
+  enum MSG_RESPONSE_CODE retval = svc_request_helper(socket, &request);
+  if (retval == MSG_ERROR)
+  {
+    LOG_DEBUG("req_send_status_report: Error occured, calling internal kritis3m_service thread");
+  }
+  else if (retval == MSG_OK)
+  {
+    ret = -1;
+    LOG_DEBUG("req_send_status_report: succesfully send request to internal thread");
+  }
+  else if (retval == MSG_BUSY)
+  {
+    LOG_INFO("req_send_status_report: internal thread busy");
+  }
+  return retval;
+}
+
+// initiates cleanup and appl_manager termination
 int stop_kritis3m_service()
 {
 
@@ -555,11 +570,13 @@ static int send_svc_message(int socket, service_message *msg)
   return 0;
 }
 
-ManagementReturncode handle_svc_message(int socket, service_message *msg)
+// cfg_id and version number are temporary arguments and will be cleaned up after the testing
+ManagementReturncode handle_svc_message(int socket, service_message *msg, int cfg_id, int version_number)
 {
   int ret = 0;
   ManagementReturncode return_code = MGMT_OK;
   service_message rsp = {0};
+  enum MSG_RESPONSE_CODE response_code = MSG_OK;
   ret = read_svc_message(socket, msg);
   if (ret < 0)
     goto error_occured;
@@ -576,12 +593,39 @@ ManagementReturncode handle_svc_message(int socket, service_message *msg)
     LOG_WARN("SVC_MSG_POLICY_REQ_RSP: handler not implemented yet");
     break;
   }
+  case SVC_MSG_APPLICATION_MANGER_STATUS_REQ:
+  {
+    char json_status[200];
+    char *json_buffer = applicationManagerStatusToJson(&msg->payload.appl_status.status, json_status, 200);
+    if (json_buffer == NULL)
+    {
+      response_code = MSG_ERROR;
+    }
+    else
+    {
+      int ret = send_statusto_server(NULL, version_number,
+                                     cfg_id,
+                                     json_buffer,
+                                     200);
+      if (ret > 0)
+      {
+        response_code = MSG_OK;
+        LOG_DEBUG("succesfully send status to server");
+      }
+      else
+      {
+        LOG_ERROR("couldnt send status to server");
+        response_code = MSG_ERROR;
+      }
+    }
+
+    break;
+  }
   case SVC_MSG_KRITIS3M_SERVICE_STOP:
   {
     LOG_INFO("SVC STOP: ");
-
-    LOG_WARN("Kritis3m service: Received Stop Request");
-    svc_respond_with(socket, MGMT_OK);
+    LOG_INFO("Kritis3m service: Received Stop Request");
+    response_code = MSG_OK;
     return_code = MGMT_THREAD_STOP;
     break;
   }
@@ -589,17 +633,21 @@ ManagementReturncode handle_svc_message(int socket, service_message *msg)
   {
     LOG_INFO("received response: %d", msg->payload.return_code);
     return_code = MGMT_OK;
+    return return_code;
     break;
   }
   default:
     LOG_WARN("message type %d, not covered", msg->msg_type);
     return_code = MGMT_ERR;
+    return return_code;
     break;
   }
+  svc_respond_with(socket, response_code);
   return return_code;
 
 error_occured:
   return_code = MGMT_ERR;
+  svc_respond_with(socket, MSG_ERROR);
   LOG_ERROR("handle_svc_message error: %d", ret);
   return ret;
 }
@@ -650,4 +698,47 @@ void cleanup_kritis3m_service()
   svc.initialized = false;
   free_NodeConfig(&svc.node_configuration);
   cleanup_configuration_manager(&svc.configuration_manager);
+}
+
+/**------------------------------ HTTP Callbacks */
+
+int initial_policy_request_cb(struct response response)
+{
+  // -------------------- INIT ---------------------------//
+  int ret = 0;
+  service_message resp = {0};
+  service_message req = {0};
+  char *policy_filepath = svc.node_configuration.primary_path;
+
+  if ((response.ret != MGMT_OK) || (policy_filepath == NULL) || (response.buffer == NULL))
+  {
+    LOG_ERROR("RETURN CODE: %d", response.ret);
+    goto error_occured;
+  }
+
+  LOG_DEBUG("HTTP status code is %d", response.http_status_code);
+
+  LOG_INFO("Received %d bytes from mgmt server: ", response.bytes_received);
+  LOG_DEBUG("write response to %s", policy_filepath);
+  if (response.http_status_code = 200)
+  {
+    if (response.bytes_received < 10)
+    {
+      LOG_ERROR("No config activated ");
+      goto error_occured;
+    }
+    ret = write_file(policy_filepath, response.buffer_frag_start, response.bytes_received);
+  }
+  if (ret < 0)
+  {
+    LOG_ERROR("can't write response into buffer");
+    goto error_occured;
+  }
+  /**
+   * @todo signal main thread
+   */
+  return ret;
+error_occured:
+  ret = -1;
+  return ret;
 }
