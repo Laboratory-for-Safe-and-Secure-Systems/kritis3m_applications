@@ -142,6 +142,8 @@ int proxy_backend_init(proxy_backend* backend, proxy_backend_config const* confi
 /* Create a new proxy and add it to the main event loop */
 static int add_new_proxy(enum tls_proxy_direction direction, proxy_config const* config)
 {
+        struct addrinfo* bind_addr = NULL;
+
         /* Search for a free server slot */
         int freeSlot = -1;
         for (int i = 0; i < MAX_PROXYS; i++)
@@ -194,7 +196,6 @@ static int add_new_proxy(enum tls_proxy_direction direction, proxy_config const*
         /* Create the TCP sockets for the incoming connections (IPv4 and IPv6).
          * Do a DNS lookup to make sure we have an IP address. If we already have an IP, this
          * results in a noop. */
-        struct addrinfo* bind_addr = NULL;
         if (address_lookup_server(config->own_ip_address, config->listening_port, &bind_addr) < 0)
                 ERROR_OUT_EX(proxy->log_module, "Error looking up bind IP address");
 
