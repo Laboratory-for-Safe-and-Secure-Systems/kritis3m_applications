@@ -562,6 +562,7 @@ ManagementReturncode handle_management_message(int fd, struct application_manage
             goto error_occured;
 
         appl_manager->configuration = config;
+
         if (appl_manager->configuration == NULL)
             goto error_occured;
         else
@@ -569,10 +570,6 @@ ManagementReturncode handle_management_message(int fd, struct application_manage
             respond_with(fd, MSG_OK);
         }
 
-        if (ret < 0)
-        {
-            LOG_ERROR("can't lock config");
-        }
         for (int i = 0; i < appl_manager->configuration->number_applications; i++)
         {
             Kritis3mApplications *appl = &appl_manager->configuration->applications[i];
@@ -930,19 +927,21 @@ int get_endpoint_configuration(int ep_id, asl_endpoint_configuration *ep)
     identity = manager.configuration->crypto_identity;
     profile = manager.configuration->crypto_profile;
 
+    //search crypto profiles
     for (int i = 0; i < number_crypto_profiles; i++)
     {
         if (profile[i].id == ep_id)
         {
+            //search matching crypto identity containing the certificates
             for (int j = 0; j < number_identitities; j++)
             {
                 if (identity[j].id == profile[i].crypto_identity_id)
                 {
-                    LOG_INFO("found crypto configuration for crypto id: %d", ep_id);
+                    LOG_DEBUG("found crypto configuration for crypto id: %d", ep_id);
                     ret = create_endpoint_config(&identity[j], &profile[i], ep);
                     if (ret < 0)
                     {
-                        LOG_ERROR("can't init endpoint");
+                        LOG_DEBUG("can't init endpoint");
                         return -1;
                     }
                     return 0;

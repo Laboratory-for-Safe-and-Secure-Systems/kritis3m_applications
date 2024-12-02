@@ -295,7 +295,9 @@ ManagementReturncode parse_buffer_to_SystemConfiguration(char *json_buffer,
     if (item != NULL)
     {
         config->version = item->valueint;
-    }else{
+    }
+    else
+    {
         goto error_occured;
     }
     item = cJSON_GetObjectItem(configs, "log_level");
@@ -631,8 +633,13 @@ ManagementReturncode parse_crypo_config(cJSON *json_obj, CryptoProfile *profile,
 
     item = cJSON_GetObjectItem(json_obj, "keylog");
     if (item == NULL)
-        goto error_occured;
-    profile->Keylog = cJSON_IsTrue(item);
+    {
+        profile->Keylog = false;
+    }
+    else
+    {
+        profile->Keylog = cJSON_IsTrue(item);
+    }
 
     item = cJSON_GetObjectItem(json_obj, "identity_id");
     if ((item == NULL) || (item->valueint < 0))

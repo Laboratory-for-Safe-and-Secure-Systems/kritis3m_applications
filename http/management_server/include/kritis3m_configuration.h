@@ -113,12 +113,6 @@ typedef enum
     max_identities
 } network_identity;
 
-typedef union
-{
-    struct sockaddr sockaddr;
-    struct sockaddr_in sockaddr_in;
-    struct sockaddr_in6 sockaddr_in6;
-} Kritis3mSockaddr;
 
 typedef struct
 {
@@ -178,6 +172,13 @@ typedef struct
     int32_t ep2_id;
     int log_level;
 } Kritis3mApplications;
+
+typedef union
+{
+    struct sockaddr sockaddr;
+    struct sockaddr_in sockaddr_in;
+    struct sockaddr_in6 sockaddr_in6;
+} Kritis3mSockaddr;
 
 typedef struct
 {

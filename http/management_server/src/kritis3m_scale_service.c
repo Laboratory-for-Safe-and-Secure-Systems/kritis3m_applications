@@ -57,8 +57,8 @@ enum service_message_type
   SVC_MSG_INITIAL_POLICY_REQ_RSP,
   SVC_MSG_POLICY_REQ_RSP,
   SVC_MSG_KRITIS3M_SERVICE_STOP,
-  SVC_MSG_RESPONSE,
   SVC_MSG_APPLICATION_MANGER_STATUS_REQ,
+  SVC_MSG_RESPONSE,
 };
 
 typedef struct service_message
@@ -121,6 +121,7 @@ int start_kritis3m_service(char *config_file, int log_level)
       .Name = "default",
       .NoEncryption = false,
       .UseSecureElement = false,
+      .Keylog = false,
   };
   /** -------------- set log level ----------------------------- */
   asl_enable_logging(true);
@@ -142,7 +143,7 @@ int start_kritis3m_service(char *config_file, int log_level)
   }
   if ((svc.node_configuration.primary_path == NULL) || (svc.node_configuration.config_path == NULL) || (svc.node_configuration.pki_cert_path == NULL))
   {
-    LOG_ERROR("filepaths incorrect"); 
+    LOG_ERROR("filepaths incorrect");
     return -1;
   }
 
@@ -194,11 +195,18 @@ int start_kritis3m_service(char *config_file, int log_level)
   // 5. Read and Parse application config
   ManagementReturncode retval = get_Systemconfig(&svc.configuration_manager, &svc.node_configuration);
   if (retval != MGMT_OK)
+  {
+    LOG_ERROR("reading primary.json failed. Shutdown");
     goto error_occured;
+  }
 
   // 6. prepare hardware
   ret = prepare_all_interfaces(svc.configuration_manager.primary.application_config.hw_config,
                                svc.configuration_manager.primary.application_config.number_hw_config);
+  if (ret < 0)
+  {
+    LOG_WARN("error occured when initializing net module. Continue");
+  }
   svc.initialized = true;
 
   // 7. start management application
@@ -234,10 +242,10 @@ void *start_kristis3m_service(void *arg)
 
   int hb_interval_sec = 10;
   int ret = 0;
-  SystemConfiguration *selected_sys_cfg = NULL;
-  ManagementReturncode retval = MGMT_OK;
   int cfg_id = -1;
   int version_number = -1;
+  SystemConfiguration *selected_sys_cfg = NULL;
+  ManagementReturncode retval = MGMT_OK;
 
   asl_endpoint_configuration *ep_cfg = &svc->management_endpoint_config;
   Kritis3mNodeConfiguration node_configuration = svc->node_configuration;
@@ -597,13 +605,15 @@ ManagementReturncode handle_svc_message(int socket, service_message *msg, int cf
   {
     char json_status[200];
     char *json_buffer = applicationManagerStatusToJson(&msg->payload.appl_status.status, json_status, 200);
+
     if (json_buffer == NULL)
     {
       response_code = MSG_ERROR;
     }
     else
     {
-      int ret = send_statusto_server(NULL, version_number,
+      int ret = send_statusto_server(NULL,
+                                     version_number,
                                      cfg_id,
                                      json_buffer,
                                      200);
@@ -678,11 +688,17 @@ enum MSG_RESPONSE_CODE svc_request_helper(int socket, service_message *msg)
     goto error_occured;
   ret = send_svc_message(socket, msg);
   if (ret < 0)
+  {
+    LOG_ERROR("error sending svc message");
     goto error_occured;
+  }
   ret = read_svc_message(socket, &response);
   if (ret < 0)
+  {
+    LOG_ERROR("reading management message");
     goto error_occured;
-  if (response.msg_type == MSG_RESPONSE)
+  }
+  if (response.msg_type == SVC_MSG_RESPONSE)
     retval = response.payload.return_code;
   else
     goto error_occured;
