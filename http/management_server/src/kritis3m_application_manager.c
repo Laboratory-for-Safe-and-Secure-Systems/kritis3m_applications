@@ -477,9 +477,16 @@ error_occured:
     LOG_ERROR("error occured starting application");
     return ret;
 }
-/**************
- * RESPONSES MISSING
- *  @TODO impl response
+
+/**
+ * @brief handles management request for the application manager
+ * @param fd: unix socket with data ready to receive
+ * @param appl_manager application manager
+ *
+ * @note running requests:
+ *  - stop request
+ *  - service start request
+ *  - whitelist service
  */
 ManagementReturncode handle_management_message(int fd, struct application_manager *appl_manager)
 {
@@ -495,10 +502,7 @@ ManagementReturncode handle_management_message(int fd, struct application_manage
     }
     switch (msg.msg_type)
     {
-    /** RETVAL
-     * -> OK, on successfull program start
-     * -> ERROR, on failure
-     */
+    // start a single application
     case APPLICATION_START_REQUEST:
     {
         Kritis3mApplications *appl = msg.payload.kritis3m_applicaiton;
@@ -512,22 +516,15 @@ ManagementReturncode handle_management_message(int fd, struct application_manage
         retval = MSG_OK;
         break;
     }
-    /** RETVAL
-     * -> OK, on successfull status Request
-     * -> ERROR, on failure
-     */
+    // not implemented yet
     case APPLICATION_STATUS_REQUEST:
     {
-
         retval = MSG_ERROR;
         LOG_INFO("application status request not implemented yet");
 
         break;
     }
-    /** RETVAL
-     * -> OK, on successfull Stop Request
-     * -> ERROR, on failure
-     */
+    // stops a single application
     case APPLICATION_STOP_REQUEST:
     {
         int appl_id = msg.payload.application_id;
@@ -546,6 +543,9 @@ ManagementReturncode handle_management_message(int fd, struct application_manage
         retval = MSG_OK;
         break;
     }
+    /**
+     * Start the Application manager with a ApplicationConfiguration Object
+     */
     case APPLICATION_SERVICE_START_REQUEST:
     {
         ApplicationConfiguration *config = msg.payload.config;
@@ -565,10 +565,9 @@ ManagementReturncode handle_management_message(int fd, struct application_manage
 
         if (appl_manager->configuration == NULL)
             goto error_occured;
-        else
-        {
-            respond_with(fd, MSG_OK);
-        }
+
+        //eraly response
+        respond_with(fd, MSG_OK);
 
         for (int i = 0; i < appl_manager->configuration->number_applications; i++)
         {
@@ -578,13 +577,14 @@ ManagementReturncode handle_management_message(int fd, struct application_manage
                 LOG_ERROR("appl within applications is NULL, ERROR");
                 appl_manager->configuration = NULL;
                 status.Status = MSG_ERROR;
-                goto error_occured;
+                return MGMT_ERR;
             }
             ret = start_application(appl);
             if (ret < 0)
             {
                 LOG_ERROR("couldnt start proxy applciation with id %d", appl->id);
                 status.Status = MSG_ERROR;
+                return MGMT_ERR;
             }
             else
             {
@@ -592,6 +592,7 @@ ManagementReturncode handle_management_message(int fd, struct application_manage
                 status.running_applications++;
             }
         }
+        //notify kritis3m_service
         ret = req_send_status_report(status);
         if (ret < 0)
         {
@@ -601,6 +602,8 @@ ManagementReturncode handle_management_message(int fd, struct application_manage
         status.Status = MSG_OK;
         return 0;
     }
+    //shut down application manager
+    //cleanup is processed in main thread
     case APPLICATION_SERVICE_STOP_REQUEST:
     {
         if (appl_manager == NULL)
@@ -625,10 +628,9 @@ ManagementReturncode handle_management_message(int fd, struct application_manage
         retval = MGMT_OK;
         break;
     }
-
+    //handle connection request 
     case APPLICATION_CONNECTION_REQUEST:
     {
-        char ip[INET_ADDRSTRLEN];
         client_connection_request con_req = msg.payload.client_con_request;
         int appl_id = con_req.application_id;
         if ((appl_id < 0))
@@ -668,11 +670,12 @@ error_occured:
 
 void *application_service_main_thread(void *arg)
 {
-
+    /*------------------------------------------ INITIALIZATION ------------------------------------------ */
     int ret = -1;
     bool shutodwn = true;
     int management_socket = -1;
     struct application_manager *appl_manager = (struct application_manager *)arg;
+
     // check if service is correctly initialized:
     if ((appl_manager == NULL) ||
         (appl_manager->management_pair[THREAD_INT] < 0))
@@ -680,14 +683,20 @@ void *application_service_main_thread(void *arg)
         LOG_ERROR("application manager can't be started correctly. Either management pair or appl_manager is NULL");
         goto cleanup_application_service;
     }
+
+    //signalize application manager is running
     manager.initialized = true;
     LOG_INFO("application manager started");
 
+    //update pollset 
     poll_set_add_fd(&appl_manager->notifier, appl_manager->management_pair[THREAD_INT], POLLIN | POLLERR | POLLHUP);
+
+    //signalize caller, that mainthread is started
     sem_post(&manager.thread_setup_sem);
 
     while (shutdown)
     {
+        //await events
         int number_events = poll(appl_manager->notifier.fds, appl_manager->notifier.num_fds, -1);
 
         if (number_events == -1)
@@ -702,11 +711,14 @@ void *application_service_main_thread(void *arg)
             int fd = appl_manager->notifier.fds[i].fd;
             short event = appl_manager->notifier.fds[i].revents;
 
+            //no event occured
             if (event == 0)
                 continue;
 
+            //Internal thread 
             if (fd == appl_manager->management_pair[THREAD_INT])
             {
+                //Internal thread, data available
                 if (event & POLLIN)
                 {
                     ManagementReturncode returncode = handle_management_message(fd, appl_manager);
@@ -927,12 +939,12 @@ int get_endpoint_configuration(int ep_id, asl_endpoint_configuration *ep)
     identity = manager.configuration->crypto_identity;
     profile = manager.configuration->crypto_profile;
 
-    //search crypto profiles
+    // search crypto profiles
     for (int i = 0; i < number_crypto_profiles; i++)
     {
         if (profile[i].id == ep_id)
         {
-            //search matching crypto identity containing the certificates
+            // search matching crypto identity containing the certificates
             for (int j = 0; j < number_identitities; j++)
             {
                 if (identity[j].id == profile[i].crypto_identity_id)

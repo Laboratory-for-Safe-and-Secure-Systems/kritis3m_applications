@@ -39,6 +39,7 @@ int parse_json_to_ManagementConfig(cJSON *json_management_service, Kritis3mManag
         config->secure_middleware_path = string_duplicate(js_middleware_path->valuestring);
         config->secure_middleware_path_size = strlen(config->secure_middleware_path) + 1;
     }
+
     cJSON *js_pin = cJSON_GetObjectItem(json_management_service, "pin");
     if ((js_pin == NULL) ||
         (strcmp(js_pin->valuestring, "") == 0))
