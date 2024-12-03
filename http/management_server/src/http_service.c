@@ -18,7 +18,7 @@
 LOG_MODULE_CREATE(http_service);
 
 #define MAX_NUMBER_THREADS 6
-#define DISTRIBUTION_BUFFER_SIZE 10000
+#define DISTRIBUTION_BUFFER_SIZE 5000
 #define STATUS_BUFFER_SIZE 1000
 
 //------------------------------------ DEFINTIONS------------------------------------------//
