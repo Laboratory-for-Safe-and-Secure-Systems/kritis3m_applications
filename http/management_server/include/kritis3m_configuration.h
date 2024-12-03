@@ -2,14 +2,14 @@
 #define KRITIS3M_CONFIGURATION_H
 
 #include <stdint.h>
-#include "asl.h"
 #include <stdbool.h>
 #include <net/if.h>
 #include <sys/socket.h>
 #include <time.h>
 #include <pthread.h>
-// #include "kritis3m_pki_client.h"
 #include <netinet/in.h>
+
+#include "asl.h"
 
 #define USE_MANAGEMENT
 

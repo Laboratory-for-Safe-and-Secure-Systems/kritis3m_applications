@@ -86,7 +86,7 @@ static Http_service_module http_service = {0};
 
 /*-----------------------------  FORWARD DECLARATIONS -------------------------------------*/
 
-int create_send_status_url(char *url, int url_size,int cfg_id, int version_number);
+int create_send_status_url(char *url, int url_size, int cfg_id, int version_number);
 void set_http_service_defaults(Http_service_module *service);
 void destroy_thread_pool(ThreadPool *pool);
 void init_thread_pool(ThreadPool *pool);
@@ -325,6 +325,7 @@ int send_statusto_server(t_http_get_cb response_callback, int version_number, in
     char url[520];
     char host[NI_MAXHOST];
     char port[NI_MAXSERV];
+    char ip_type[10];
     int ret = 0;
     int fd = -1;
     struct http_request req = {0};
@@ -336,6 +337,10 @@ int send_statusto_server(t_http_get_cb response_callback, int version_number, in
         .http_status_code = -1,
         .ret = -1,
         .service_used = MGMT_SEND_STATUS_REQ};
+
+    memset(host, 0, NI_MAXHOST);
+    memset(port, 0, NI_MAXSERV);
+    memset(ip_type, 0, 10);
     //---------------------------------initialization ---------------------------------//
 
     // get host
@@ -359,7 +364,21 @@ int send_statusto_server(t_http_get_cb response_callback, int version_number, in
     if (ret < 0)
         goto error_occured;
 
-    ret = create_send_status_url(url, 520,cfg_id, version_number);
+    // Determine IP type
+    if (http_service.con.mgmt_sockaddr->ai_addr->sa_family == AF_INET)
+    {
+        strcpy(ip_type, "IPv4");
+    }
+    else if (http_service.con.mgmt_sockaddr->ai_addr->sa_family == AF_INET6)
+    {
+        strcpy(ip_type, "IPv6");
+    }
+    else
+    {
+        strcpy(ip_type, "Unknown");
+    }
+
+    ret = create_send_status_url(url, 520, cfg_id, version_number);
     if (ret < 0)
         goto error_occured;
 
@@ -375,7 +394,7 @@ int send_statusto_server(t_http_get_cb response_callback, int version_number, in
     req.payload = payload;
     req.payload_len = payload_size;
 
-    duration timeout = ms_toduration(2 * 1000);
+    duration timeout = ms_toduration(14 * 1000);
 
     ret = startup_connection(&http_service.con);
     if (ret < 0)
@@ -398,9 +417,18 @@ int send_statusto_server(t_http_get_cb response_callback, int version_number, in
     }
 
 
+    // Print detailed connection information
+    LOG_INFO("Connection Details:\n"
+              "  IP Type:   %s\n"
+              "  Host/IP:   %s\n"
+              "  Port:      %s\n",
+              ip_type, host, port);
+
     if (response_callback)
         ret = response_callback(response);
+
     cleanup_request_object(&http_service.con.mgmt_req);
+
     return ret;
 error_occured:
     ret = -1;
@@ -413,6 +441,7 @@ int initial_call_controller(t_http_get_cb response_callback)
     char url[520];
     char host[NI_MAXHOST];
     char port[NI_MAXSERV];
+    char ip_type[10];
     int ret = 0;
     int fd = -1;
     struct http_request req = {0};
@@ -424,6 +453,10 @@ int initial_call_controller(t_http_get_cb response_callback)
         .http_status_code = -1,
         .ret = -1,
         .service_used = MGMT_POLICY_REQ};
+
+    memset(host, 0, NI_MAXHOST);
+    memset(port, 0, NI_MAXSERV);
+    memset(ip_type, 0, 10);
     //---------------------------------initialization ---------------------------------//
 
     if ((response_callback == NULL))
@@ -450,6 +483,27 @@ int initial_call_controller(t_http_get_cb response_callback)
     if (ret < 0)
         goto error_occured;
 
+    // Determine IP type
+    if (http_service.con.mgmt_sockaddr->ai_addr->sa_family == AF_INET)
+    {
+        strcpy(ip_type, "IPv4");
+    }
+    else if (http_service.con.mgmt_sockaddr->ai_addr->sa_family == AF_INET6)
+    {
+        strcpy(ip_type, "IPv6");
+    }
+    else
+    {
+        strcpy(ip_type, "Unknown");
+    }
+
+    // Print detailed connection information
+    LOG_INFO("Connection Details:\n"
+              "  IP Type:   %s\n"
+              "  Host/IP:   %s\n"
+              "  Port:      %s\n",
+              ip_type, host, port);
+
     ret = create_inital_controller_url(url, 520);
     if (ret < 0)
         goto error_occured;
@@ -462,7 +516,7 @@ int initial_call_controller(t_http_get_cb response_callback)
     req.port = port;
     req.recv_buf = response_buffer;
     req.recv_buf_len = sizeof(response_buffer);
-    duration timeout = ms_toduration(2 * 1000);
+    duration timeout = ms_toduration(14 * 1000);
 
     ret = startup_connection(&http_service.con);
     if (ret < 0)
@@ -597,7 +651,7 @@ int create_send_status_url(char *url, int url_size, int cfg_id, int version_numb
 {
     if (url == NULL)
         return -1;
-    return snprintf(url, url_size, "/api/node/%s/config/%d/version/%d", http_service.serial_number,cfg_id, version_number);
+    return snprintf(url, url_size, "/api/node/%s/config/%d/version/%d", http_service.serial_number, cfg_id, version_number);
 }
 
 int create_periodic_controller_url(char *url, int url_size, int version_number)
