@@ -312,4 +312,52 @@ int tls_proxy_backend_terminate(void)
 
         return 0;
 }
+#ifdef USE_MANAGEMENT
+/* Stop the running proxy with given id (returned by tls_forward_proxy_start or
+ * tls_forward_proxy_start).
+ *
+ * Returns 0 on success, -1 on failure (error message is printed to console).
+ */
+int tls_proxy_stop_mgmt_id(int appl_id)
+{
+        if ((the_backend.management_socket_pair[0] < 0) || (the_backend.management_socket_pair[0] < 0))
+        {
+                LOG_ERROR("Proxy backend not running");
+                return -1;
+        }
+
+        /* Create a PROXY_STOP_REQUEST message */
+        proxy_management_message request = {
+                .type = PROXY_STOP_REQUEST_MGMT,
+                .payload.mgmt_id = appl_id,
+        };
+        proxy_management_message response = {0};
+
+        /* Send request */
+        int ret = send_management_message(the_backend.management_socket_pair[0], &request);
+        if (ret < 0)
+        {
+                return -1;
+        }
+
+        /* Wait for response */
+        ret = read_management_message(the_backend.management_socket_pair[0], &response);
+        if (ret < 0)
+        {
+                return -1;
+        }
+        else if (response.type != RESPONSE)
+        {
+                LOG_ERROR("Received invalid response");
+                return -1;
+        }
+        else if (response.payload.response_code < 0)
+        {
+                LOG_ERROR("Error stopping TLS proxy (error %d)", response.payload.response_code);
+                return -1;
+        }
+
+        return 0;
+}
+#endif
 
