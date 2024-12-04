@@ -17,19 +17,10 @@
 #include "networking.h"
 LOG_MODULE_CREATE(http_service);
 
-#define MAX_NUMBER_THREADS 6
 #define DISTRIBUTION_BUFFER_SIZE 5000
 #define STATUS_BUFFER_SIZE 1000
 
 //------------------------------------ DEFINTIONS------------------------------------------//
-typedef struct
-{
-    pthread_t threads[MAX_NUMBER_THREADS];
-    pthread_attr_t thread_attr;
-    int available[MAX_NUMBER_THREADS]; // 1 = available, 0 = in use
-    pthread_mutex_t lock;
-    pthread_cond_t cond;
-} ThreadPool;
 
 enum request_type
 {
@@ -79,7 +70,6 @@ typedef struct
     } mgmt_pki;
 #endif
 
-    ThreadPool pool;
 } Http_service_module;
 
 static Http_service_module http_service = {0};
@@ -88,10 +78,6 @@ static Http_service_module http_service = {0};
 
 int create_send_status_url(char *url, int url_size, int cfg_id, int version_number);
 void set_http_service_defaults(Http_service_module *service);
-void destroy_thread_pool(ThreadPool *pool);
-void init_thread_pool(ThreadPool *pool);
-int get_free_thread_id();
-void signal_thread_finished(int thread_id);
 void cleanup_request_object(request_object *con);
 int startup_connection(struct conn *con);
 int create_inital_controller_url(char *url, int url_size);
@@ -148,9 +134,6 @@ int init_http_service(Kritis3mManagemntConfiguration *config,
         goto cleanup;
     }
 #endif
-    // Initialize thread pool
-    //@warn thread pool is not supported yet, but will be in the future
-    // init_thread_pool(&http_service.pool);
 
     return 0;
 
@@ -181,7 +164,6 @@ void set_http_service_defaults(Http_service_module *service)
     service->mgmt_pki.pki_endpoint = NULL;
 #endif
 
-    init_thread_pool(&http_service.pool);
 }
 
 /**
@@ -214,9 +196,6 @@ void cleanup_http_service(void)
         asl_free_endpoint(http_service.mgmt_pki.pki_endpoint);
 #endif
 
-    // Cleanup thread pool
-    // Function to destroy the ThreadPool (optional cleanup)
-    destroy_thread_pool(&http_service.pool);
 
     // Reset all pointers to NULL
     set_http_service_defaults(&http_service);
@@ -563,80 +542,7 @@ void cleanup_request_object(request_object *req)
     }
 }
 
-//----------------------------------------------   THREAD POOL -----------------------------------------//
-int get_free_thread_id()
-{
-    ThreadPool *pool = &http_service.pool;
 
-    int thread_id = -1;
-
-    pthread_mutex_lock(&pool->lock);
-
-    // Wait until a thread becomes available
-    while (thread_id == -1)
-    {
-        for (int i = 0; i < MAX_NUMBER_THREADS; i++)
-        {
-            if (pool->available[i] == 1)
-            {
-                thread_id = i;
-                pool->available[i] = 0; // Mark the thread as in use
-                break;
-            }
-        }
-        if (thread_id == -1)
-        {
-            // No threads are available, wait for one to finish
-            pthread_cond_wait(&pool->cond, &pool->lock);
-        }
-    }
-    return thread_id;
-}
-void signal_thread_finished(int thread_id)
-{
-    ThreadPool *pool = &http_service.pool;
-    pthread_mutex_lock(&pool->lock);
-    pool->available[thread_id] = 1;   // Mark the thread as available
-    pthread_cond_signal(&pool->cond); // Signal the condition variable
-    pthread_mutex_unlock(&pool->lock);
-}
-
-// Function to initialize the ThreadPool
-
-void init_thread_pool(ThreadPool *pool)
-{
-    // Initialize the mutex
-    if (pthread_mutex_init(&pool->lock, NULL) != 0)
-    {
-        perror("Failed to initialize mutex");
-        exit(EXIT_FAILURE);
-    }
-
-    // Initialize the condition variable
-    if (pthread_cond_init(&pool->cond, NULL) != 0)
-    {
-        perror("Failed to initialize condition variable");
-        exit(EXIT_FAILURE);
-    }
-
-    // Mark all threads as available
-    for (int i = 0; i < MAX_NUMBER_THREADS; i++)
-    {
-        pool->available[i] = 1; // 1 means the thread is available
-    }
-
-    printf("ThreadPool initialized with %d threads.\n", MAX_NUMBER_THREADS);
-}
-
-// Function to destroy the ThreadPool (optional cleanup)
-void destroy_thread_pool(ThreadPool *pool)
-{
-    pthread_mutex_destroy(&pool->lock); // Destroy the mutex
-    pthread_cond_destroy(&pool->cond);  // Destroy the condition variable
-    printf("ThreadPool destroyed.\n");
-}
-
-//----------------------------------------------   END THREAD POOL -----------------------------------------//
 
 //----------------------------------------------  CREATE URL ------------------------------------------------//
 
