@@ -81,7 +81,7 @@ int read_file(const char *filename, uint8_t **buffer, int *buffer_size)
     file = fopen(filename, "r");
     if (!file)
     {
-        LOG_ERROR("Error opening file: %s\n", filename);
+        LOG_ERROR("Error opening file: %s", filename);
         goto error_occured;
     }
     // https://cplusplus.com/reference/cstdio/fseek/
@@ -97,7 +97,7 @@ int read_file(const char *filename, uint8_t **buffer, int *buffer_size)
     if (!*buffer)
     {
         ret = -1;
-        LOG_ERROR("Memory allocation failed\n");
+        LOG_ERROR("Memory allocation failed");
         goto error_occured;
     }
     fread(*buffer, 1, file_size, file);

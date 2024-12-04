@@ -26,8 +26,11 @@ target_link_libraries(kritis3m_service PRIVATE kritis3m_http_libs)
 target_link_libraries(kritis3m_service PUBLIC kritis3m_applications_common)
 target_link_libraries(kritis3m_service PUBLIC kritis3m_applications_echo_server)
 target_link_libraries(kritis3m_service PUBLIC kritis3m_applications_tcp_client_stdin_bridge)
-target_link_libraries(kritis3m_service PUBLIC kritis3m_applications_proxy) 
+target_link_libraries(kritis3m_service PUBLIC kritis3m_applications_proxy)
 target_link_libraries(kritis3m_service PUBLIC kritis3m_applications_network_tester)
+
+find_package(Threads REQUIRED)
+target_link_libraries(kritis3m_service PRIVATE Threads::Threads)
 
 
 
