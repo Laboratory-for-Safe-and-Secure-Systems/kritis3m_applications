@@ -1,27 +1,23 @@
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <stdint.h>
-#include <string.h>
-#include <unistd.h>
 #include <errno.h>
-#include <signal.h>
-#include <stdbool.h>
-#include <time.h>
 #include <limits.h>
 #include <pthread.h>
+#include <signal.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+#include <unistd.h>
 
 #if defined(_WIN32)
-
-#include <winsock2.h>
-
+        #include <winsock2.h>
 #else
-
-#include <sys/socket.h>
-#include <netinet/tcp.h>
-#include <arpa/inet.h>
-#include <netinet/in.h>
-
+        #include <arpa/inet.h>
+        #include <netinet/in.h>
+        #include <netinet/tcp.h>
+        #include <sys/socket.h>
 #endif
 
 #include "logging.h"
@@ -30,44 +26,43 @@
 
 #include "network_tester.h"
 
-
 LOG_MODULE_CREATE(network_tester);
 
-
-#define ERROR_OUT(...) { LOG_ERROR(__VA_ARGS__); ret = -1; goto cleanup; }
-
+#define ERROR_OUT(...)                                                                             \
+        {                                                                                          \
+                LOG_ERROR(__VA_ARGS__);                                                            \
+                ret = -1;                                                                          \
+                goto cleanup;                                                                      \
+        }
 
 #if defined(__ZEPHYR__)
 
-#define TESTER_STACK_SIZE (32*1024)
-Z_KERNEL_STACK_DEFINE_IN(tester_stack, TESTER_STACK_SIZE, \
-                __attribute__((section(CONFIG_RAM_SECTION_STACKS_2))));
+        #define TESTER_STACK_SIZE (32 * 1024)
+Z_KERNEL_STACK_DEFINE_IN(tester_stack,
+                         TESTER_STACK_SIZE,
+                         __attribute__((section(CONFIG_RAM_SECTION_STACKS_2))));
 #endif
-
 
 enum network_tester_management_message_type
 {
         MANAGEMENT_MSG_START,
-	MANAGEMENT_MSG_STATUS_REQUEST,
-	MANAGEMENT_MSG_SHUTDOWN,
-	MANAGEMENT_RESPONSE
+        MANAGEMENT_MSG_STATUS_REQUEST,
+        MANAGEMENT_MSG_SHUTDOWN,
+        MANAGEMENT_RESPONSE
 };
 
 typedef struct network_tester_management_message
 {
-	enum network_tester_management_message_type type;
+        enum network_tester_management_message_type type;
 
         union
         {
                 network_tester_config config;      /* START */
                 network_tester_status* status_ptr; /* STATUS_REQUEST */
                 int dummy_unused;                  /* SHUTDOWN */
-		int response_code;                 /* RESPONSE */
-        }
-        payload;
-}
-network_tester_management_message;
-
+                int response_code;                 /* RESPONSE */
+        } payload;
+} network_tester_management_message;
 
 typedef struct network_tester
 {
@@ -86,9 +81,7 @@ typedef struct network_tester
         pthread_t thread;
         pthread_attr_t thread_attr;
         int management_socket_pair[2];
-}
-network_tester;
-
+} network_tester;
 
 /* File global variables */
 static network_tester the_tester = {
@@ -107,7 +100,6 @@ static network_tester the_tester = {
         .management_socket_pair = {-1, -1},
 };
 
-
 /* Internal method declarations */
 static void asl_log_callback(int32_t level, char const* message);
 static void print_progress(network_tester* tester, size_t count);
@@ -119,7 +111,6 @@ static int send_management_message(int socket, network_tester_management_message
 static int read_management_message(int socket, network_tester_management_message* msg);
 static int handle_management_message(network_tester* tester, int socket);
 static void tester_cleanup(network_tester* tester);
-
 
 static void asl_log_callback(int32_t level, char const* message)
 {
@@ -142,7 +133,6 @@ static void asl_log_callback(int32_t level, char const* message)
                 break;
         }
 }
-
 
 static void print_progress(network_tester* tester, size_t count)
 {
@@ -173,7 +163,6 @@ static void print_progress(network_tester* tester, size_t count)
         fflush(stdout);
 }
 
-
 static int network_init(network_tester* tester)
 {
         int ret = 0;
@@ -200,7 +189,9 @@ static int network_init(network_tester* tester)
         /* Configure TCP destination.
          * Do a DNS lookup to make sure we have an IP address. If we already have an IP, this
          * results in a noop. */
-        if (address_lookup_client(tester->config->target_ip, tester->config->target_port, &tester->target_addr) < 0)
+        if (address_lookup_client(tester->config->target_ip,
+                                  tester->config->target_port,
+                                  &tester->target_addr) < 0)
                 ERROR_OUT("Error looking up target IP address");
 
         /* Configure TLS endpoint */
@@ -217,7 +208,6 @@ cleanup:
         return ret;
 }
 
-
 static int connection_setup(network_tester* tester)
 {
         int ret = 0;
@@ -228,12 +218,12 @@ static int connection_setup(network_tester* tester)
                 ERROR_OUT("Error creating TCP socket");
 
         /* Set TCP_NODELAY option to disable Nagle algorithm */
-        if (setsockopt(tester->tcp_socket, IPPROTO_TCP, TCP_NODELAY, (char*)&(int){1}, sizeof(int)) < 0)
+        if (setsockopt(tester->tcp_socket, IPPROTO_TCP, TCP_NODELAY, (char*) &(int) {1}, sizeof(int)) < 0)
                 ERROR_OUT("setsockopt(TCP_NODELAY) failed: error %d", errno);
 
 #if !defined(__ZEPHYR__) && !defined(_WIN32)
         /* Set retry count to send a total of 3 SYN packets => Timeout ~7s */
-        if (setsockopt(tester->tcp_socket, IPPROTO_TCP, TCP_SYNCNT, (char*)&(int){2}, sizeof(int)) < 0)
+        if (setsockopt(tester->tcp_socket, IPPROTO_TCP, TCP_SYNCNT, (char*) &(int) {2}, sizeof(int)) < 0)
                 ERROR_OUT("setsockopt(TCP_SYNCNT) failed: error %d", errno);
 #endif
 
@@ -250,7 +240,6 @@ static int connection_setup(network_tester* tester)
 cleanup:
         return ret;
 }
-
 
 static int test_echo_message(network_tester* tester, size_t num_of_bytes)
 {
@@ -279,13 +268,20 @@ static int test_echo_message(network_tester* tester, size_t num_of_bytes)
         {
                 if (tester->config->use_tls)
                 {
-                        ret = asl_receive(tester->tls_session, tester->rx_buffer + bytes_received, num_of_bytes - bytes_received);
+                        ret = asl_receive(tester->tls_session,
+                                          tester->rx_buffer + bytes_received,
+                                          num_of_bytes - bytes_received);
                         if (ret < 0)
-                                ERROR_OUT("Error receiving message: %d (%s)", ret, asl_error_message(ret));
+                                ERROR_OUT("Error receiving message: %d (%s)",
+                                          ret,
+                                          asl_error_message(ret));
                 }
                 else
                 {
-                        ret = recv(tester->tcp_socket, tester->rx_buffer + bytes_received, num_of_bytes - bytes_received, 0);
+                        ret = recv(tester->tcp_socket,
+                                   tester->rx_buffer + bytes_received,
+                                   num_of_bytes - bytes_received,
+                                   0);
                         if (ret == -1)
                                 ERROR_OUT("Error receiving message: %d (%s)", ret, strerror(errno));
                 }
@@ -294,7 +290,8 @@ static int test_echo_message(network_tester* tester, size_t num_of_bytes)
         }
 
         /* Check if the echod data is correct */
-        if ((bytes_received != num_of_bytes) || (memcmp(tester->tx_buffer, tester->rx_buffer, num_of_bytes) != 0))
+        if ((bytes_received != num_of_bytes) ||
+            (memcmp(tester->tx_buffer, tester->rx_buffer, num_of_bytes) != 0))
                 ERROR_OUT("Echo NOT successfull");
 
         ret = 0;
@@ -302,7 +299,6 @@ static int test_echo_message(network_tester* tester, size_t num_of_bytes)
 cleanup:
         return ret;
 }
-
 
 static void* network_tester_main_thread(void* ptr)
 {
@@ -405,7 +401,6 @@ static void* network_tester_main_thread(void* ptr)
                 print_progress(tester, 0);
         }
 
-
         /* Loop over all handshake iterations we want to perform. We use a do {} while() loop here
          * to make sure the handshake loop is executed at least once, also in case no handshake
          * measurements should be taken (`handshake_test.iterations` is zero). */
@@ -422,13 +417,15 @@ static void* network_tester_main_thread(void* ptr)
 
                 /* Connect to the peer */
                 LOG_DEBUG("Establishing TCP connection");
-                ret = connect(tester->tcp_socket, (struct sockaddr*) tester->target_addr->ai_addr, tester->target_addr->ai_addrlen);
+                ret = connect(tester->tcp_socket,
+                              (struct sockaddr*) tester->target_addr->ai_addr,
+                              tester->target_addr->ai_addrlen);
                 if ((ret != 0) &&
-                #if defined(_WIN32)
-                        (WSAGetLastError() != WSAEWOULDBLOCK))
-                #else
-                        (errno != EINPROGRESS))
-                #endif
+#if defined(_WIN32)
+                    (WSAGetLastError() != WSAEWOULDBLOCK))
+#else
+                    (errno != EINPROGRESS))
+#endif
                         ERROR_OUT("Error establishing TCP connection to target peer");
 
                 /* Do TLS handshake */
@@ -438,7 +435,9 @@ static void* network_tester_main_thread(void* ptr)
 
                         ret = asl_handshake(tester->tls_session);
                         if (ret != ASL_SUCCESS)
-                                ERROR_OUT("Error performing TLS handshake: %d (%s)", ret, asl_error_message(ret));
+                                ERROR_OUT("Error performing TLS handshake: %d (%s)",
+                                          ret,
+                                          asl_error_message(ret));
                 }
 
                 /* Check if the echo of a single bytes works. This means that the connection is fully established. */
@@ -450,7 +449,9 @@ static void* network_tester_main_thread(void* ptr)
                 timing_metrics_end_measurement(tester->handshake_times);
 
                 /* Loop over all requested message latency measurements per handshake */
-                for (int message_count = 0; message_count < tester->config->message_latency_test.iterations; message_count++)
+                for (int message_count = 0;
+                     message_count < tester->config->message_latency_test.iterations;
+                     message_count++)
                 {
                         /* Start the measurement of the message latency */
                         timing_metrics_start_measurement(tester->messsage_latency_times);
@@ -466,8 +467,9 @@ static void* network_tester_main_thread(void* ptr)
                         /* Print progress bar to the console */
                         if (tester->config->silent_test == false)
                                 print_progress(tester,
-                                               (handshake_count * tester->config->message_latency_test.iterations)
-                                                        + message_count + 1);
+                                               (handshake_count *
+                                                tester->config->message_latency_test.iterations) +
+                                                       message_count + 1);
 
                         /* ToDo: Check fo a management message here?! Does that influece the results? */
 
@@ -494,9 +496,11 @@ static void* network_tester_main_thread(void* ptr)
                         if (tester->config->handshake_test.iterations == 0)
                                 print_progress(tester, tester->config->message_latency_test.iterations);
                         else if (tester->config->message_latency_test.iterations == 0)
-                                print_progress(tester, handshake_count+1);
+                                print_progress(tester, handshake_count + 1);
                         else
-                                print_progress(tester, (handshake_count+1) * tester->config->message_latency_test.iterations);
+                                print_progress(tester,
+                                               (handshake_count +
+                                                1) * tester->config->message_latency_test.iterations);
                 }
 
                 /* Check if we have received a management message */
@@ -573,7 +577,6 @@ cleanup:
         return NULL;
 }
 
-
 static int send_management_message(int socket, network_tester_management_message const* msg)
 {
         int ret = 0;
@@ -611,11 +614,10 @@ static int send_management_message(int socket, network_tester_management_message
         return 0;
 }
 
-
 static int read_management_message(int socket, network_tester_management_message* msg)
 {
         int ret = recv(socket, (char*) msg, sizeof(network_tester_management_message), 0);
-        if (ret < 0 && errno == EAGAIN )
+        if (ret < 0 && errno == EAGAIN)
         {
                 /* No message available on the non-blocking socket. This error condition is no
                  * actual error in this application. We indicate that with the +1 return value.
@@ -631,29 +633,29 @@ static int read_management_message(int socket, network_tester_management_message
         else if (ret != sizeof(network_tester_management_message))
         {
                 LOG_ERROR("Received invalid response (ret=%d; expected=%lu)",
-                          ret, sizeof(network_tester_management_message));
+                          ret,
+                          sizeof(network_tester_management_message));
                 return -1;
         }
 
         return 0;
 }
 
-
 /* Handle incoming management messages.
  *
- * Return 0 in case the message has been processed successfully, -1 otherwise. In case the connection thread has
- * to be stopped and the connection has to be cleaned up, +1 in returned.
+ * Return 0 in case the message has been processed successfully, -1 otherwise. In case the
+ * connection thread has to be stopped and the connection has to be cleaned up, +1 in returned.
  */
 static int handle_management_message(network_tester* tester, int socket)
 {
         /* Read message from the management socket. */
-	network_tester_management_message msg;
-	int ret = read_management_message(socket, &msg);
-	if (ret < 0)
-	{
-		LOG_ERROR("Error reading management message: %d", ret);
-		return -1;
-	}
+        network_tester_management_message msg;
+        int ret = read_management_message(socket, &msg);
+        if (ret < 0)
+        {
+                LOG_ERROR("Error reading management message: %d", ret);
+                return -1;
+        }
         else if (ret > 0)
         {
                 /* No message available */
@@ -662,43 +664,42 @@ static int handle_management_message(network_tester* tester, int socket)
 
         switch (msg.type)
         {
-		case MANAGEMENT_MSG_STATUS_REQUEST:
+        case MANAGEMENT_MSG_STATUS_REQUEST:
                 {
-			/* Fill status object */
-			network_tester_status* status = msg.payload.status_ptr;
-			status->is_running = tester->running;
+                        /* Fill status object */
+                        network_tester_status* status = msg.payload.status_ptr;
+                        status->is_running = tester->running;
                         status->progress_percent = tester->progress_percent;
 
                         /* Send response */
-			msg.type = MANAGEMENT_RESPONSE;
-			msg.payload.response_code = 0;
+                        msg.type = MANAGEMENT_RESPONSE;
+                        msg.payload.response_code = 0;
                         ret = send_management_message(socket, &msg);
                         break;
                 }
-		case MANAGEMENT_MSG_SHUTDOWN:
+        case MANAGEMENT_MSG_SHUTDOWN:
                 {
                         /* Return 1 to indicate we have to stop the connection thread and cleanup */
                         ret = 1;
 
                         /* Send response */
-			msg.type = MANAGEMENT_RESPONSE;
-			msg.payload.response_code = 0;
+                        msg.type = MANAGEMENT_RESPONSE;
+                        msg.payload.response_code = 0;
 
                         /* Do not update ret here to make sure the thread terminates */
                         send_management_message(socket, &msg);
 
-			LOG_DEBUG("Received shutdown message, stopping tester");
+                        LOG_DEBUG("Received shutdown message, stopping tester");
                         break;
                 }
-                default:
-                        LOG_ERROR("Received invalid management message: msg->type=%d", msg.type);
-                        ret = -1;
-                        break;
-	}
+        default:
+                LOG_ERROR("Received invalid management message: msg->type=%d", msg.type);
+                ret = -1;
+                break;
+        }
 
-	return ret;
+        return ret;
 }
-
 
 static void tester_cleanup(network_tester* tester)
 {
@@ -744,7 +745,6 @@ static void tester_cleanup(network_tester* tester)
         tester->running = false;
 }
 
-
 /* Create the default config for the network_tester */
 network_tester_config network_tester_default_config(void)
 {
@@ -772,7 +772,6 @@ network_tester_config network_tester_default_config(void)
         return default_config;
 }
 
-
 /* Start a new thread and run the network tester application.
  *
  * Returns 0 on success, -1 on failure (error message is printed to console).
@@ -791,7 +790,9 @@ int network_tester_run(network_tester_config const* config)
 
 #if defined(__ZEPHYR__)
         /* We have to properly set the attributes with the stack to use for Zephyr. */
-        pthread_attr_setstack(&the_tester.thread_attr, &tester_stack, K_THREAD_STACK_SIZEOF(tester_stack));
+        pthread_attr_setstack(&the_tester.thread_attr,
+                              &tester_stack,
+                              K_THREAD_STACK_SIZEOF(tester_stack));
 #endif
 
         /* Create the socket pair for external management */
@@ -799,11 +800,15 @@ int network_tester_run(network_tester_config const* config)
         if (ret < 0)
                 ERROR_OUT("Error creating socket pair for management: %d (%s)", errno, strerror(errno));
 
-        LOG_DEBUG("Created management socket pair (%d, %d)", the_tester.management_socket_pair[0],
-                                                            the_tester.management_socket_pair[1]);
+        LOG_DEBUG("Created management socket pair (%d, %d)",
+                  the_tester.management_socket_pair[0],
+                  the_tester.management_socket_pair[1]);
 
         /* Create the new thread */
-        ret = pthread_create(&the_tester.thread, &the_tester.thread_attr, network_tester_main_thread, &the_tester);
+        ret = pthread_create(&the_tester.thread,
+                             &the_tester.thread_attr,
+                             network_tester_main_thread,
+                             &the_tester);
         if (ret != 0)
                 ERROR_OUT("Error starting network tester thread: %d (%s)", errno, strerror(errno));
 
@@ -839,7 +844,6 @@ cleanup:
 
         return ret;
 }
-
 
 /* Querry status information from the network tester.
  *
@@ -889,26 +893,24 @@ int network_tester_get_status(network_tester_status* status)
         return 0;
 }
 
-
 /* Terminate the network tester application.
  *
  * Returns 0 on success, -1 on failure (error message is printed to console).
  */
 int network_tester_terminate(void)
 {
-        if ((the_tester.management_socket_pair[0] < 0) ||
-            (the_tester.management_socket_pair[0] < 0))
+        if ((the_tester.management_socket_pair[0] < 0) || (the_tester.management_socket_pair[0] < 0))
         {
                 LOG_DEBUG("Tester thread not running");
                 return -1;
         }
 
         /* Send shutdown message to the management socket */
-	network_tester_management_message msg = {0};
+        network_tester_management_message msg = {0};
         msg.type = MANAGEMENT_MSG_SHUTDOWN;
         msg.payload.dummy_unused = 0;
 
-	/* Send request */
+        /* Send request */
         int ret = send_management_message(the_tester.management_socket_pair[0], &msg);
         if (ret < 0)
         {

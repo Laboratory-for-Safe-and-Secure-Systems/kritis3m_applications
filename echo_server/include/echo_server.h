@@ -1,15 +1,15 @@
 #ifndef ECHO_SERVER_H
 #define ECHO_SERVER_H
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <stdbool.h>
 
 #include "asl.h"
 
 typedef struct echo_server_config
 {
-        char *own_ip_address;
+        char* own_ip_address;
         uint16_t listening_port;
         int32_t log_level;
 
@@ -32,13 +32,13 @@ echo_server_config echo_server_default_config(void);
  *
  * Returns 0 on success, -1 on failure (error message is printed to console).
  */
-int echo_server_run(echo_server_config const *config);
+int echo_server_run(echo_server_config const* config);
 
 /* Querry status information from the echo server.
  *
  * Returns 0 on success, -1 on failure (error message is printed to console).
  */
-int echo_server_get_status(echo_server_status *status);
+int echo_server_get_status(echo_server_status* status);
 
 /* Terminate the echo server.
  *

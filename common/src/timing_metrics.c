@@ -1,11 +1,11 @@
 
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
-#include <math.h>
 
 #if !defined(__ZEPHYR__) && !defined(_WIN32)
 
-#include <unistd.h>
+        #include <unistd.h>
 
 #endif
 
@@ -13,9 +13,12 @@
 
 #include "timing_metrics.h"
 
-
-#define ERROR_OUT(...) { LOG_ERROR_EX(*metrics->log_module, __VA_ARGS__); ret = -1; goto cleanup; }
-
+#define ERROR_OUT(...)                                                                             \
+        {                                                                                          \
+                LOG_ERROR_EX(*metrics->log_module, __VA_ARGS__);                                   \
+                ret = -1;                                                                          \
+                goto cleanup;                                                                      \
+        }
 
 struct timing_metrics
 {
@@ -31,24 +34,22 @@ struct timing_metrics
         char* output_file;
 };
 
-
 /* Internal helper methods */
 static int take_timestamp(struct timespec* ts);
 
-
 #if defined(_WIN32) && defined(_MSC_VER)
 
-#include <winsock2.h>
+        #include <winsock2.h>
 
 static int take_timestamp(struct timespec* ts)
 {
         __int64 wintime;
 
-        GetSystemTimeAsFileTime((FILETIME*)&wintime);
+        GetSystemTimeAsFileTime((FILETIME*) &wintime);
 
-        wintime      -=116444736000000000i64;  //1jan1601 to 1jan1970
-        ts->tv_sec    =wintime / 10000000i64;           //seconds
-        ts->tv_nsec   =wintime % 10000000i64 * 100;      //nano-seconds
+        wintime -= 116444736000000000i64;          // 1jan1601 to 1jan1970
+        ts->tv_sec = wintime / 10000000i64;        // seconds
+        ts->tv_nsec = wintime % 10000000i64 * 100; // nano-seconds
 
         return 0;
 }
@@ -62,14 +63,11 @@ static int take_timestamp(struct timespec* ts)
 
 #endif
 
-
-
 /* Create a new timing_metrics object.
  *
  * Returns NULL on failure.
  */
-timing_metrics* timing_metrics_create(char const* name, size_t max_measurements,
-                                      log_module* log_module)
+timing_metrics* timing_metrics_create(char const* name, size_t max_measurements, log_module* log_module)
 {
         if (name == NULL || log_module == NULL)
                 return NULL;
@@ -79,7 +77,7 @@ timing_metrics* timing_metrics_create(char const* name, size_t max_measurements,
 
         timing_metrics* self = malloc(sizeof(timing_metrics));
 
-        if(self != NULL)
+        if (self != NULL)
         {
                 self->last_start_time.tv_sec = 0;
                 self->last_start_time.tv_nsec = 0;
@@ -88,7 +86,7 @@ timing_metrics* timing_metrics_create(char const* name, size_t max_measurements,
                 self->max_measurements = max_measurements;
                 self->measurements = (uint32_t*) malloc(max_measurements * sizeof(uint32_t));
 
-                if(self->measurements == NULL)
+                if (self->measurements == NULL)
                 {
                         free(self);
                         return NULL;
@@ -103,17 +101,15 @@ timing_metrics* timing_metrics_create(char const* name, size_t max_measurements,
         return self;
 }
 
-
 /* Start the next measurement */
 void timing_metrics_start_measurement(timing_metrics* metrics)
 {
         if (metrics == NULL)
                 return;
 
-        if(take_timestamp(&metrics->last_start_time) != 0)
+        if (take_timestamp(&metrics->last_start_time) != 0)
                 LOG_ERROR_EX(*metrics->log_module, "Error taking timestamp - start_time.");
 }
-
 
 /* Stop the current measurement and store the data */
 void timing_metrics_end_measurement(timing_metrics* metrics)
@@ -123,12 +119,12 @@ void timing_metrics_end_measurement(timing_metrics* metrics)
 
         struct timespec end_time = {0};
 
-        if(take_timestamp(&end_time) != 0)
+        if (take_timestamp(&end_time) != 0)
                 LOG_ERROR_EX(*metrics->log_module, "Error taking timestamp - end_time.");
 
         /* Calculate duration */
         uint32_t duration_us = (end_time.tv_sec - metrics->last_start_time.tv_sec) * 1000000.0 +
-                                (end_time.tv_nsec - metrics->last_start_time.tv_nsec) / 1000.0;
+                               (end_time.tv_nsec - metrics->last_start_time.tv_nsec) / 1000.0;
 
         /* Store measurement */
         if (metrics->measurements_count < metrics->max_measurements)
@@ -138,10 +134,9 @@ void timing_metrics_end_measurement(timing_metrics* metrics)
         }
 }
 
-
-int compare(const void *a, const void *b)
+int compare(const void* a, const void* b)
 {
-        return (*(uint32_t *)a - *(uint32_t *)b);
+        return (*(uint32_t*) a - *(uint32_t*) b);
 }
 
 /* Calculate the results of the measurement */
@@ -156,7 +151,8 @@ void timing_metrics_get_results(timing_metrics* metrics, timing_metrics_results*
         uint64_t average_sum = 0;
 
         /* Copy the array */
-        uint32_t* measurements_copy = (uint32_t*) malloc(metrics->measurements_count * sizeof(uint32_t));
+        uint32_t* measurements_copy = (uint32_t*) malloc(metrics->measurements_count *
+                                                         sizeof(uint32_t));
         if (measurements_copy == NULL)
                 /* In case we cannot allocate memory for a copy, we just sort the actual data */
                 measurements_copy = metrics->measurements;
@@ -195,7 +191,8 @@ void timing_metrics_get_results(timing_metrics* metrics, timing_metrics_results*
         if (metrics->measurements_count % 2 == 0)
         {
                 results->median = (measurements_copy[metrics->measurements_count / 2 - 1] +
-                                   measurements_copy[metrics->measurements_count / 2]) / 2;
+                                   measurements_copy[metrics->measurements_count / 2]) /
+                                  2;
         }
         else
         {
@@ -203,18 +200,17 @@ void timing_metrics_get_results(timing_metrics* metrics, timing_metrics_results*
         }
 
         /* Calculate 90th percentile */
-        size_t index = (size_t)(metrics->measurements_count * 0.9);
+        size_t index = (size_t) (metrics->measurements_count * 0.9);
         results->percentile_90 = measurements_copy[index];
 
         /* Calculate 99th percentile */
-        index = (size_t)(metrics->measurements_count * 0.99);
+        index = (size_t) (metrics->measurements_count * 0.99);
         results->percentile_99 = measurements_copy[index];
 
         /* Free the copy if it was allocated */
         if (measurements_copy != metrics->measurements)
                 free(measurements_copy);
 }
-
 
 /* Prepare the output file. This creates a new CSV file at `path` that is named
  * after the `name` argument passed to `timing_metrics_create()`. The final file
@@ -255,7 +251,7 @@ int timing_metrics_prepare_output_file(timing_metrics* metrics, char const* path
         int i = 1;
         while (access(metrics->output_file, F_OK) == 0)
         {
-                LOG_DEBUG_EX(*metrics->log_module ,"File %s already exists", metrics->output_file);
+                LOG_DEBUG_EX(*metrics->log_module, "File %s already exists", metrics->output_file);
 
                 char* filename = strstr(metrics->output_file, metrics->name);
                 if (filename == NULL)
@@ -268,7 +264,7 @@ int timing_metrics_prepare_output_file(timing_metrics* metrics, char const* path
                 i += 1;
         }
 
-        LOG_INFO_EX(*metrics->log_module ,"Output file: %s", metrics->output_file);
+        LOG_INFO_EX(*metrics->log_module, "Output file: %s", metrics->output_file);
 
         /* Write initial information to the file to test if writing is possible */
         FILE* fptr = fopen(metrics->output_file, "w");
@@ -285,7 +281,6 @@ cleanup:
         return ret;
 #endif
 }
-
 
 /* Write the measured values in CSV format to the prepared output file.
  *
@@ -306,7 +301,6 @@ int timing_metrics_write_to_file(timing_metrics* metrics)
         if (access(metrics->output_file, F_OK) != 0)
         {
                 ERROR_OUT("File %s doesn't exist", metrics->output_file);
-
         }
 
         FILE* fptr = fopen(metrics->output_file, "a");
@@ -342,7 +336,6 @@ cleanup:
         return ret;
 #endif
 }
-
 
 /* Destroy the timing_metrics object and free all memory */
 void timing_metrics_destroy(timing_metrics** metrics)

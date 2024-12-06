@@ -1,461 +1,472 @@
+#include "kritis3m_configuration.h" // Assuming this is the header file containing the struct definitions
+#include "cJSON.h"
+#include "configuration_parser.h"
+#include "errno.h"
+#include "logging.h"
+#include "utils.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdio.h>
 #include <time.h>
-#include "cJSON.h"
-#include "kritis3m_configuration.h" // Assuming this is the header file containing the struct definitions
-#include "logging.h"
-#include "utils.h"
-#include "errno.h"
-#include "configuration_parser.h"
 LOG_MODULE_CREATE(kritis3m_configuration);
 
 // Function prototypes
 
-const char *identity_folder_names[max_identities] = {
-    "management_service",
-    "management",
-    "remote",
-    "production"};
+const char* identity_folder_names[max_identities] = {"management_service",
+                                                     "management",
+                                                     "remote",
+                                                     "production"};
 
 static ConfigurationManager config_manger;
 
-int get_Kritis3mNodeConfiguration(char *filename, Kritis3mNodeConfiguration *config)
+int get_Kritis3mNodeConfiguration(char* filename, Kritis3mNodeConfiguration* config)
 {
-    int ret = 0;
-    uint8_t *json_buffer = NULL;
-    int file_size = -1;
+        int ret = 0;
+        uint8_t* json_buffer = NULL;
+        int file_size = -1;
 
-    if ((filename == NULL) || (config == NULL))
-        goto error_occured;
+        if ((filename == NULL) || (config == NULL))
+                goto error_occured;
 
-    ret = read_file(filename, &json_buffer, &file_size);
-    if ((ret < 0) || (file_size <= 0))
-    {
-        LOG_ERROR("can't read node configuration file");
-        goto error_occured;
-    }
-    ret = parse_buffer_to_Config(json_buffer, file_size, config);
-    if (ret < 0)
-    {
-        LOG_ERROR("couldnt parse configuration file to KRITIS3MNodeConfiguration");
-        goto error_occured;
-    }
-    if (json_buffer != NULL)
-        free(json_buffer);
-    return ret;
+        ret = read_file(filename, &json_buffer, &file_size);
+        if ((ret < 0) || (file_size <= 0))
+        {
+                LOG_ERROR("can't read node configuration file");
+                goto error_occured;
+        }
+        ret = parse_buffer_to_Config(json_buffer, file_size, config);
+        if (ret < 0)
+        {
+                LOG_ERROR("couldnt parse configuration file to KRITIS3MNodeConfiguration");
+                goto error_occured;
+        }
+        if (json_buffer != NULL)
+                free(json_buffer);
+        return ret;
 
 error_occured:
-    LOG_ERROR("Error occured in Read configuration, with error code %d", errno);
-    if (json_buffer != NULL)
-        free(json_buffer);
-    return ret;
+        LOG_ERROR("Error occured in Read configuration, with error code %d", errno);
+        if (json_buffer != NULL)
+                free(json_buffer);
+        return ret;
 }
 /**
  * what happens if file has no content:
  * -> new file will be created
  */
-ManagementReturncode get_systemconfig(char *filename, SystemConfiguration *systemconfig, char *cryptopath, char *secure_middleware_path, char *pin)
+ManagementReturncode get_systemconfig(char* filename,
+                                      SystemConfiguration* systemconfig,
+                                      char* cryptopath,
+                                      char* secure_middleware_path,
+                                      char* pin)
 {
-    int ret = 0;
-    ManagementReturncode retval = MGMT_OK;
-    uint8_t *json_buffer = NULL;
-    int file_size = -1;
+        int ret = 0;
+        ManagementReturncode retval = MGMT_OK;
+        uint8_t* json_buffer = NULL;
+        int file_size = -1;
 
-    if ((filename == NULL) || (systemconfig == NULL))
-        goto error_occured;
+        if ((filename == NULL) || (systemconfig == NULL))
+                goto error_occured;
 
-    ret = read_file(filename, &json_buffer, &file_size);
-    if ((ret < 0))
-    {
-        retval = MGMT_ERR;
-        LOG_ERROR("can't read systemconfiguration file");
-        goto error_occured;
-    }
-    else if (file_size <= 1)
-    {
-        retval = MGMT_EMPTY_OBJECT_ERROR;
-        goto error_occured;
-    }
+        ret = read_file(filename, &json_buffer, &file_size);
+        if ((ret < 0))
+        {
+                retval = MGMT_ERR;
+                LOG_ERROR("can't read systemconfiguration file");
+                goto error_occured;
+        }
+        else if (file_size <= 1)
+        {
+                retval = MGMT_EMPTY_OBJECT_ERROR;
+                goto error_occured;
+        }
 
-    retval = parse_buffer_to_SystemConfiguration(json_buffer, file_size, systemconfig, cryptopath, secure_middleware_path, pin);
-    if (retval == MGMT_PARSE_ERROR)
-    {
-        LOG_ERROR("error parsing system configuration");
-        goto error_occured;
-    }
-    else if (retval < MGMT_ERR)
-    {
-        LOG_ERROR("error occured during parsing configuration");
-        goto error_occured;
-    }
-    if (json_buffer != NULL)
-        free(json_buffer);
+        retval = parse_buffer_to_SystemConfiguration(json_buffer,
+                                                     file_size,
+                                                     systemconfig,
+                                                     cryptopath,
+                                                     secure_middleware_path,
+                                                     pin);
+        if (retval == MGMT_PARSE_ERROR)
+        {
+                LOG_ERROR("error parsing system configuration");
+                goto error_occured;
+        }
+        else if (retval < MGMT_ERR)
+        {
+                LOG_ERROR("error occured during parsing configuration");
+                goto error_occured;
+        }
+        if (json_buffer != NULL)
+                free(json_buffer);
 
-    return ret;
+        return ret;
 
 error_occured:
-    if (retval > MGMT_ERR)
-        retval = MGMT_ERR;
-    LOG_ERROR("Error occured in Read configuration, with error code %d", errno);
-    if(json_buffer != NULL)
-        free(json_buffer);
-    return retval;
+        if (retval > MGMT_ERR)
+                retval = MGMT_ERR;
+        LOG_ERROR("Error occured in Read configuration, with error code %d", errno);
+        if (json_buffer != NULL)
+                free(json_buffer);
+        return retval;
 }
 
-SystemConfiguration *get_active_config(ConfigurationManager *manager)
+SystemConfiguration* get_active_config(ConfigurationManager* manager)
 {
-    if (manager->active_configuration == CFG_PRIMARY)
-    {
-        return &manager->primary;
-    }
-    else if (manager->active_configuration == CFG_SECONDARY)
-    {
-        return &manager->secondary;
-    }
-    else
-    {
-        return NULL;
-    }
+        if (manager->active_configuration == CFG_PRIMARY)
+        {
+                return &manager->primary;
+        }
+        else if (manager->active_configuration == CFG_SECONDARY)
+        {
+                return &manager->secondary;
+        }
+        else
+        {
+                return NULL;
+        }
 }
-SystemConfiguration *get_inactive_config(ConfigurationManager *manager)
+SystemConfiguration* get_inactive_config(ConfigurationManager* manager)
 {
-    if (manager->active_configuration == CFG_PRIMARY)
-    {
-        return &manager->secondary;
-    }
-    else if (manager->active_configuration == CFG_SECONDARY)
-    {
-        return &manager->primary;
-    }
-    else
-    {
-        return NULL;
-    }
+        if (manager->active_configuration == CFG_PRIMARY)
+        {
+                return &manager->secondary;
+        }
+        else if (manager->active_configuration == CFG_SECONDARY)
+        {
+                return &manager->primary;
+        }
+        else
+        {
+                return NULL;
+        }
 }
 
 // calls the management server, if no config exists,
 // returns the active configuration
-ManagementReturncode get_Systemconfig(ConfigurationManager *applconfig, Kritis3mNodeConfiguration *node_config)
+ManagementReturncode get_Systemconfig(ConfigurationManager* applconfig,
+                                      Kritis3mNodeConfiguration* node_config)
 {
-    /***
-     * Three cases must be checked:
-     * - No config is available: The Management Server must be instantly called for a configuration
-     * - One/Two config/s is/are available: The application can be started. And the next Heartbeat is awaited
-     * - Configuration is available, but incomplete
-     */
-    ManagementReturncode ret = 0;
-    SystemConfiguration *sys_config = NULL;
-    char *filepath;
-    SelectedConfiguration selected_configuration = CFG_NONE;
+        /***
+         * Three cases must be checked:
+         * - No config is available: The Management Server must be instantly called for a configuration
+         * - One/Two config/s is/are available: The application can be started. And the next Heartbeat is awaited
+         * - Configuration is available, but incomplete
+         */
+        ManagementReturncode ret = 0;
+        SystemConfiguration* sys_config = NULL;
+        char* filepath;
+        SelectedConfiguration selected_configuration = CFG_NONE;
 
-    if ((applconfig == NULL) || (node_config == NULL))
-        goto error_occured;
+        if ((applconfig == NULL) || (node_config == NULL))
+                goto error_occured;
 
-    switch (applconfig->active_configuration)
-    {
-    case CFG_PRIMARY:
-        applconfig->active_configuration = CFG_PRIMARY;
-        sys_config = &applconfig->primary;
-        filepath = applconfig->primary_file_path;
-        // get primary filepath
-        break;
-    case CFG_SECONDARY:
-        applconfig->active_configuration = CFG_SECONDARY;
-        sys_config = &applconfig->secondary;
-        filepath = applconfig->secondary_file_path;
-        // get secondary filepath
-        if (ret < 0)
-            goto error_occured;
-        break;
-    case CFG_NONE:
-        applconfig->active_configuration = CFG_PRIMARY;
-        LOG_INFO("selected config not provided. Use primary as new selected config");
-        return MGMT_EMPTY_OBJECT_ERROR;
-        break;
-    default:
-        LOG_INFO("selected config not provided. Use primary as new selected config");
-        return MGMT_EMPTY_OBJECT_ERROR;
-        break;
-    }
-    // reads and parses data from filepath to sys_config object
-    ret = get_systemconfig(filepath,
-                           sys_config,
-                           node_config->pki_cert_path,
-                           node_config->management_identity.secure_middleware_path,
-                           node_config->management_identity.pin);
-    return ret;
+        switch (applconfig->active_configuration)
+        {
+        case CFG_PRIMARY:
+                applconfig->active_configuration = CFG_PRIMARY;
+                sys_config = &applconfig->primary;
+                filepath = applconfig->primary_file_path;
+                // get primary filepath
+                break;
+        case CFG_SECONDARY:
+                applconfig->active_configuration = CFG_SECONDARY;
+                sys_config = &applconfig->secondary;
+                filepath = applconfig->secondary_file_path;
+                // get secondary filepath
+                if (ret < 0)
+                        goto error_occured;
+                break;
+        case CFG_NONE:
+                applconfig->active_configuration = CFG_PRIMARY;
+                LOG_INFO("selected config not provided. Use primary as new selected config");
+                return MGMT_EMPTY_OBJECT_ERROR;
+                break;
+        default:
+                LOG_INFO("selected config not provided. Use primary as new selected config");
+                return MGMT_EMPTY_OBJECT_ERROR;
+                break;
+        }
+        // reads and parses data from filepath to sys_config object
+        ret = get_systemconfig(filepath,
+                               sys_config,
+                               node_config->pki_cert_path,
+                               node_config->management_identity.secure_middleware_path,
+                               node_config->management_identity.pin);
+        return ret;
 
 error_occured:
-    if (ret > MGMT_ERR)
-        ret = MGMT_ERR;
-    return ret;
+        if (ret > MGMT_ERR)
+                ret = MGMT_ERR;
+        return ret;
 }
 
-int write_SystemConfig_toflash(SystemConfiguration *sys_cfg, char *filepath, int filepath_size)
+int write_SystemConfig_toflash(SystemConfiguration* sys_cfg, char* filepath, int filepath_size)
 {
-    memset(filepath, 0, sizeof(filepath));
-    // SystemConfig to json String
-    // reads and parses data from filepath to sys_config object
-    char *buffer;
-    int buffer_size;
-    int ret = write_file(filepath, buffer, buffer_size);
-    return ret;
+        memset(filepath, 0, sizeof(filepath));
+        // SystemConfig to json String
+        // reads and parses data from filepath to sys_config object
+        char* buffer;
+        int buffer_size;
+        int ret = write_file(filepath, buffer, buffer_size);
+        return ret;
 error_occured:
-    if (ret > -1)
-        ret = -1;
+        if (ret > -1)
+                ret = -1;
 }
 
-Kritis3mApplications *find_application_by_application_id(Kritis3mApplications *appls, int number_appls, int appl_id)
+Kritis3mApplications* find_application_by_application_id(Kritis3mApplications* appls,
+                                                         int number_appls,
+                                                         int appl_id)
 {
-    if (appls == NULL)
-        goto error_occured;
-    Kritis3mApplications *t_appl = NULL;
+        if (appls == NULL)
+                goto error_occured;
+        Kritis3mApplications* t_appl = NULL;
 
-    for (int i = 0; i < number_appls; i++)
-    {
-        t_appl = &appls[i];
-        if (t_appl == NULL)
-            goto error_occured;
-        if (t_appl->id == appl_id)
-            return t_appl;
-    }
-    return NULL;
+        for (int i = 0; i < number_appls; i++)
+        {
+                t_appl = &appls[i];
+                if (t_appl == NULL)
+                        goto error_occured;
+                if (t_appl->id == appl_id)
+                        return t_appl;
+        }
+        return NULL;
 
 error_occured:
-    LOG_ERROR("No matching applicaiton for application id %d found", appl_id);
-    return NULL;
+        LOG_ERROR("No matching applicaiton for application id %d found", appl_id);
+        return NULL;
 }
 // Function to return the path of the identity folder
 
-int get_identity_folder_path(char *out_path, size_t size, const char *base_path, network_identity identity)
+int get_identity_folder_path(char* out_path, size_t size, const char* base_path, network_identity identity)
 {
-    if (identity < MANAGEMENT_SERVICE || identity >= max_identities)
-    {
-        LOG_ERROR("Invalid identity\n");
-        return -1;
-    }
+        if (identity < MANAGEMENT_SERVICE || identity >= max_identities)
+        {
+                LOG_ERROR("Invalid identity\n");
+                return -1;
+        }
 
-    snprintf(out_path, size, "%s/%s", base_path, identity_folder_names[identity]);
-    return 0;
+        snprintf(out_path, size, "%s/%s", base_path, identity_folder_names[identity]);
+        return 0;
 }
 
-void free_ManagementConfiguration(Kritis3mManagemntConfiguration *config)
+void free_ManagementConfiguration(Kritis3mManagemntConfiguration* config)
 {
-    memset(config->serial_number, 0, SERIAL_NUMBER_SIZE);
-    memset(config->server_endpoint_addr.address, 0, ENDPOINT_LEN);
-    memset(&config->identity.certificates, 0, sizeof(certificates));
-    config->secure_middleware_path_size = 0;
-    config->pin_size = 0;
+        memset(config->serial_number, 0, SERIAL_NUMBER_SIZE);
+        memset(config->server_endpoint_addr.address, 0, ENDPOINT_LEN);
+        memset(&config->identity.certificates, 0, sizeof(certificates));
+        config->secure_middleware_path_size = 0;
+        config->pin_size = 0;
 
-    config->identity.filepath_size = 0;
-    if (config->identity.filepath != NULL)
-        free(config->identity.filepath);
-    if (config->identity.revocation_list_url != NULL)
-        free(config->identity.revocation_list_url);
-    if (config->identity.server_url != NULL)
-        free(config->identity.server_url);
-    if (config->secure_middleware_path != NULL)
-        free(config->secure_middleware_path);
-    if (config->pin != NULL)
-        free(config->pin);
+        config->identity.filepath_size = 0;
+        if (config->identity.filepath != NULL)
+                free(config->identity.filepath);
+        if (config->identity.revocation_list_url != NULL)
+                free(config->identity.revocation_list_url);
+        if (config->identity.server_url != NULL)
+                free(config->identity.server_url);
+        if (config->secure_middleware_path != NULL)
+                free(config->secure_middleware_path);
+        if (config->pin != NULL)
+                free(config->pin);
 }
 
-void free_CryptoIdentity(crypto_identity *identity)
+void free_CryptoIdentity(crypto_identity* identity)
 {
-    if (identity == NULL)
-        return;
-    identity->filepath_size = 0;
-    identity->server_url_size = 0;
-    identity->revocation_list_url_size = 0;
-    identity->certificates.additional_key_buffer_size = 0;
-    identity->certificates.root_buffer_size = 0;
-    identity->certificates.key_buffer_size = 0;
-    identity->certificates.chain_buffer_size = 0;
-    if (identity != NULL)
-    {
-        if (identity->filepath != NULL)
-            free(identity->filepath);
+        if (identity == NULL)
+                return;
+        identity->filepath_size = 0;
+        identity->server_url_size = 0;
+        identity->revocation_list_url_size = 0;
+        identity->certificates.additional_key_buffer_size = 0;
+        identity->certificates.root_buffer_size = 0;
+        identity->certificates.key_buffer_size = 0;
+        identity->certificates.chain_buffer_size = 0;
+        if (identity != NULL)
+        {
+                if (identity->filepath != NULL)
+                        free(identity->filepath);
 
-        if (identity->server_url != NULL)
-            free(identity->server_url);
+                if (identity->server_url != NULL)
+                        free(identity->server_url);
 
-        if (identity->revocation_list_url != NULL)
-            free(identity->revocation_list_url);
+                if (identity->revocation_list_url != NULL)
+                        free(identity->revocation_list_url);
 
-        if (identity->certificates.additional_key_buffer != NULL)
-            free(identity->certificates.additional_key_buffer);
+                if (identity->certificates.additional_key_buffer != NULL)
+                        free(identity->certificates.additional_key_buffer);
 
-        if (identity->certificates.key_buffer != NULL)
-            free(identity->certificates.key_buffer);
+                if (identity->certificates.key_buffer != NULL)
+                        free(identity->certificates.key_buffer);
 
-        if (identity->certificates.chain_buffer != NULL)
-            free(identity->certificates.chain_buffer);
+                if (identity->certificates.chain_buffer != NULL)
+                        free(identity->certificates.chain_buffer);
 
-        if (identity->certificates.root_buffer != NULL)
-            free(identity->certificates.root_buffer);
-    }
+                if (identity->certificates.root_buffer != NULL)
+                        free(identity->certificates.root_buffer);
+        }
 }
 
-void free_NodeConfig(Kritis3mNodeConfiguration *config)
+void free_NodeConfig(Kritis3mNodeConfiguration* config)
 {
 
-    if (config != NULL)
-    {
-        config->config_path_size = 0;
-        config->primary_path_size = 0;
-        config->secondary_path_size = 0;
-        config->pki_cert_path_size = 0;
-        config->machine_crypto_path_size = 0;
+        if (config != NULL)
+        {
+                config->config_path_size = 0;
+                config->primary_path_size = 0;
+                config->secondary_path_size = 0;
+                config->pki_cert_path_size = 0;
+                config->machine_crypto_path_size = 0;
 
-        config->remote_path_size = 0;
-        config->production_path_size = 0;
-        config->management_path_size = 0;
-        config->management_service_path_size = 0;
+                config->remote_path_size = 0;
+                config->production_path_size = 0;
+                config->management_path_size = 0;
+                config->management_service_path_size = 0;
 
-        if (config->primary_path != NULL)
-            free(config->primary_path);
-        if (config->secondary_path != NULL)
-            free(config->secondary_path);
+                if (config->primary_path != NULL)
+                        free(config->primary_path);
+                if (config->secondary_path != NULL)
+                        free(config->secondary_path);
 
-        if (config->remote_path != NULL)
-            free(config->remote_path);
-        if (config->management_path != NULL)
-            free(config->management_path);
-        if (config->management_service_path != NULL)
-            free(config->management_service_path);
-        if (config->production_path != NULL)
-            free(config->production_path);
+                if (config->remote_path != NULL)
+                        free(config->remote_path);
+                if (config->management_path != NULL)
+                        free(config->management_path);
+                if (config->management_service_path != NULL)
+                        free(config->management_service_path);
+                if (config->production_path != NULL)
+                        free(config->production_path);
 
-        if (config->machine_crypto_path != NULL)
-            free(config->machine_crypto_path);
+                if (config->machine_crypto_path != NULL)
+                        free(config->machine_crypto_path);
 
-        if (config->pki_cert_path != NULL)
-            free(config->pki_cert_path);
+                if (config->pki_cert_path != NULL)
+                        free(config->pki_cert_path);
 
-        if (config->crypto_path != NULL)
-            free(config->crypto_path);
-    }
-    free_CryptoIdentity(&config->management_identity.identity);
+                if (config->crypto_path != NULL)
+                        free(config->crypto_path);
+        }
+        free_CryptoIdentity(&config->management_identity.identity);
 }
 
-void cleanup_Systemconfiguration(SystemConfiguration *systemconfiguration)
+void cleanup_Systemconfiguration(SystemConfiguration* systemconfiguration)
 {
-    if (systemconfiguration == NULL)
-        return;
+        if (systemconfiguration == NULL)
+                return;
 
-    systemconfiguration->cfg_id = 0;
-    systemconfiguration->node_id = 0;
-    memset(systemconfiguration->locality, 0, NAME_LEN);
-    memset(systemconfiguration->serial_number, 0, NAME_LEN);
-    systemconfiguration->node_network_index = 0;
-    systemconfiguration->heartbeat_interval = 0;
-    systemconfiguration->version = 0;
+        systemconfiguration->cfg_id = 0;
+        systemconfiguration->node_id = 0;
+        memset(systemconfiguration->locality, 0, NAME_LEN);
+        memset(systemconfiguration->serial_number, 0, NAME_LEN);
+        systemconfiguration->node_network_index = 0;
+        systemconfiguration->heartbeat_interval = 0;
+        systemconfiguration->version = 0;
 
-    /**------------------------------ WHITELIST FREE---------------------------------------- */
-    Whitelist *whitelist = &systemconfiguration->application_config.whitelist;
-    for (int i = 0; i < whitelist->number_trusted_clients; i++)
-    {
-        memset(&whitelist->TrustedClients[i].trusted_client, 0, sizeof(Kritis3mSockaddr));
-        whitelist->TrustedClients[i].id = 0;
-        whitelist->TrustedClients[i].number_trusted_applications = 0;
-        for (int j = 0; j < whitelist->TrustedClients[i].number_trusted_applications; j++)
-            whitelist->TrustedClients[i].trusted_applications_id[j] = 0;
-    }
+        /**------------------------------ WHITELIST FREE---------------------------------------- */
+        Whitelist* whitelist = &systemconfiguration->application_config.whitelist;
+        for (int i = 0; i < whitelist->number_trusted_clients; i++)
+        {
+                memset(&whitelist->TrustedClients[i].trusted_client, 0, sizeof(Kritis3mSockaddr));
+                whitelist->TrustedClients[i].id = 0;
+                whitelist->TrustedClients[i].number_trusted_applications = 0;
+                for (int j = 0; j < whitelist->TrustedClients[i].number_trusted_applications; j++)
+                        whitelist->TrustedClients[i].trusted_applications_id[j] = 0;
+        }
 
-    /**------------------------------ CRYPTO FREE---------------------------------------- */
-    for (int i = 0; i < MAX_NUMBER_CRYPTOPROFILE; i++)
-    {
-        CryptoProfile *profile = &systemconfiguration->application_config.crypto_profile[i];
-        profile->id = 0;
-        profile->ASLKeyExchangeMethod = ASL_KEX_DEFAULT,
-        profile->HybridSignatureMode = ASL_HYBRID_SIGNATURE_MODE_DEFAULT;
-        profile->crypto_identity_id = 0;
-        profile->Keylog = false;
-        profile->NoEncryption = false;
-        profile->UseSecureElement = false;
-        memset(profile->Name, 0, MAX_NAME_SIZE);
-    }
+        /**------------------------------ CRYPTO FREE---------------------------------------- */
+        for (int i = 0; i < MAX_NUMBER_CRYPTOPROFILE; i++)
+        {
+                CryptoProfile* profile = &systemconfiguration->application_config.crypto_profile[i];
+                profile->id = 0;
+                profile->ASLKeyExchangeMethod = ASL_KEX_DEFAULT,
+                profile->HybridSignatureMode = ASL_HYBRID_SIGNATURE_MODE_DEFAULT;
+                profile->crypto_identity_id = 0;
+                profile->Keylog = false;
+                profile->NoEncryption = false;
+                profile->UseSecureElement = false;
+                memset(profile->Name, 0, MAX_NAME_SIZE);
+        }
 
-    /**------------------------------ APPLICATIONS FREE---------------------------------------- */
-    for (int i = 0; i < MAX_NUMBER_APPLICATIONS; i++)
-    {
-        Kritis3mApplications *appl = &systemconfiguration->application_config.applications[i];
-        appl->id = 0;
-        appl->ep1_id = 0;
-        appl->ep2_id = 0;
-        appl->config_id = 0;
-        appl->log_level = 0;
-        appl->state = false;
-        appl->type = UNDEFINED;
-        memset(appl->client_endpoint_addr.address, 0, ENDPOINT_LEN);
-        appl->client_endpoint_addr.port = 0;
+        /**------------------------------ APPLICATIONS FREE---------------------------------------- */
+        for (int i = 0; i < MAX_NUMBER_APPLICATIONS; i++)
+        {
+                Kritis3mApplications* appl = &systemconfiguration->application_config.applications[i];
+                appl->id = 0;
+                appl->ep1_id = 0;
+                appl->ep2_id = 0;
+                appl->config_id = 0;
+                appl->log_level = 0;
+                appl->state = false;
+                appl->type = UNDEFINED;
+                memset(appl->client_endpoint_addr.address, 0, ENDPOINT_LEN);
+                appl->client_endpoint_addr.port = 0;
 
-        memset(appl->server_endpoint_addr.address, 0, ENDPOINT_LEN);
-        appl->server_endpoint_addr.port = 0;
-    }
+                memset(appl->server_endpoint_addr.address, 0, ENDPOINT_LEN);
+                appl->server_endpoint_addr.port = 0;
+        }
 
-    /**------------------------------ Identity FREE---------------------------------------- */
-    for (int i = 0; i < MAX_NUMBER_CRYPTOPROFILE; i++)
-    {
-        crypto_identity *cr_identity = &systemconfiguration->application_config.crypto_identity[i];
-        cr_identity->identity = MANAGEMENT_SERVICE;
-        memset(cr_identity->server_endpoint_addr.address, 0, ENDPOINT_LEN);
-        cr_identity->server_endpoint_addr.port = 0;
-        free_CryptoIdentity(cr_identity);
-    }
-    systemconfiguration->application_config.number_applications = 0;
-    systemconfiguration->application_config.number_crypto_identity = 0;
-    systemconfiguration->application_config.number_crypto_profiles = 0;
-    systemconfiguration->application_config.number_hw_config = 0;
+        /**------------------------------ Identity FREE---------------------------------------- */
+        for (int i = 0; i < MAX_NUMBER_CRYPTOPROFILE; i++)
+        {
+                crypto_identity* cr_identity = &systemconfiguration->application_config.crypto_identity[i];
+                cr_identity->identity = MANAGEMENT_SERVICE;
+                memset(cr_identity->server_endpoint_addr.address, 0, ENDPOINT_LEN);
+                cr_identity->server_endpoint_addr.port = 0;
+                free_CryptoIdentity(cr_identity);
+        }
+        systemconfiguration->application_config.number_applications = 0;
+        systemconfiguration->application_config.number_crypto_identity = 0;
+        systemconfiguration->application_config.number_crypto_profiles = 0;
+        systemconfiguration->application_config.number_hw_config = 0;
 }
 
-void cleanup_configuration_manager(ConfigurationManager *configuration_manager)
+void cleanup_configuration_manager(ConfigurationManager* configuration_manager)
 {
-    if (configuration_manager == NULL)
-        return;
-    cleanup_Systemconfiguration(&configuration_manager->primary);
-    cleanup_Systemconfiguration(&configuration_manager->secondary);
-    configuration_manager->active_configuration = CFG_NONE;
-    memset(configuration_manager->primary_file_path, 0, MAX_FILEPATH_SIZE);
-    memset(configuration_manager->secondary_file_path, 0, MAX_FILEPATH_SIZE);
+        if (configuration_manager == NULL)
+                return;
+        cleanup_Systemconfiguration(&configuration_manager->primary);
+        cleanup_Systemconfiguration(&configuration_manager->secondary);
+        configuration_manager->active_configuration = CFG_NONE;
+        memset(configuration_manager->primary_file_path, 0, MAX_FILEPATH_SIZE);
+        memset(configuration_manager->secondary_file_path, 0, MAX_FILEPATH_SIZE);
 }
 
-char* applicationManagerStatusToJson(
-    const ApplicationManagerStatus* status, 
-    char* json_buffer, 
-    size_t buffer_length
-) {
-    // Clear the buffer
-    memset(json_buffer, 0, buffer_length);
+char* applicationManagerStatusToJson(const ApplicationManagerStatus* status,
+                                     char* json_buffer,
+                                     size_t buffer_length)
+{
+        // Clear the buffer
+        memset(json_buffer, 0, buffer_length);
 
-    // Create a cJSON object
-    cJSON* json_obj = cJSON_CreateObject();
-    if (json_obj == NULL) {
-        return NULL;
-    }
+        // Create a cJSON object
+        cJSON* json_obj = cJSON_CreateObject();
+        if (json_obj == NULL)
+        {
+                return NULL;
+        }
 
-    // Add fields to JSON
-    cJSON_AddNumberToObject(json_obj, "status", status->Status);
-    cJSON_AddNumberToObject(json_obj, "running_applications", status->running_applications);
+        // Add fields to JSON
+        cJSON_AddNumberToObject(json_obj, "status", status->Status);
+        cJSON_AddNumberToObject(json_obj, "running_applications", status->running_applications);
 
-    // Convert to string and copy to buffer
-    char* json_str = cJSON_Print(json_obj);
-    if (json_str == NULL) {
+        // Convert to string and copy to buffer
+        char* json_str = cJSON_Print(json_obj);
+        if (json_str == NULL)
+        {
+                cJSON_Delete(json_obj);
+                return NULL;
+        }
+
+        // Copy to buffer (with safety check)
+        strncpy(json_buffer, json_str, buffer_length - 1);
+        json_buffer[buffer_length - 1] = '\0'; // Ensure null-termination
+
+        // Free the dynamically allocated JSON string from cJSON_Print
+        free(json_str);
+
+        // Clean up the cJSON object
         cJSON_Delete(json_obj);
-        return NULL;
-    }
 
-    // Copy to buffer (with safety check)
-    strncpy(json_buffer, json_str, buffer_length - 1);
-    json_buffer[buffer_length - 1] = '\0';  // Ensure null-termination
-
-    // Free the dynamically allocated JSON string from cJSON_Print
-    free(json_str);
-
-    // Clean up the cJSON object
-    cJSON_Delete(json_obj);
-
-    return json_buffer;
+        return json_buffer;
 }

@@ -20,12 +20,12 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
  * IN THE SOFTWARE.
  */
-#ifndef __HTTP_PARSER_URL_H__ 
+#ifndef __HTTP_PARSER_URL_H__
 #define __HTTP_PARSER_URL_H__
 
-#include <sys/types.h>
-#include <stdint.h>
 #include <stddef.h>
+#include <stdint.h>
+#include <sys/types.h>
 
 /********************************************
  *              PLATFORM SPECIFIC			*
@@ -34,25 +34,27 @@
 /********************************************
  * 			    ZEPHYR				  	    *
  * *****************************************/
-#if defined (__ZEPYHR__)
-#include <zephyr/types.h>
-#endif 
-
-#include "http_parser_state.h" 
-
-#ifdef __cplusplus
-extern "C" {
+#if defined(__ZEPYHR__)
+        #include <zephyr/types.h>
 #endif
 
-enum http_parser_url_fields {
-	  UF_SCHEMA           = 0
-	, UF_HOST             = 1
-	, UF_PORT             = 2
-	, UF_PATH             = 3
-	, UF_QUERY            = 4
-	, UF_FRAGMENT         = 5
-	, UF_USERINFO         = 6
-	, UF_MAX              = 7
+#include "http_parser_state.h"
+
+#ifdef __cplusplus
+extern "C"
+{
+#endif
+
+enum http_parser_url_fields
+{
+        UF_SCHEMA = 0,
+        UF_HOST = 1,
+        UF_PORT = 2,
+        UF_PATH = 3,
+        UF_QUERY = 4,
+        UF_FRAGMENT = 5,
+        UF_USERINFO = 6,
+        UF_MAX = 7
 };
 
 /* Result structure for http_parser_url_fields().
@@ -62,26 +64,27 @@ enum http_parser_url_fields {
  * because we probably have padding left over), we convert any port to
  * a uint16_t.
  */
-struct http_parser_url {
-	uint16_t field_set;           /* Bitmask of (1 << UF_*) values */
-	uint16_t port;                /* Converted UF_PORT string */
+struct http_parser_url
+{
+        uint16_t field_set; /* Bitmask of (1 << UF_*) values */
+        uint16_t port;      /* Converted UF_PORT string */
 
-	struct {
-		uint16_t off;               /* Offset into buffer in which field
-					  * starts
-					  */
-		uint16_t len;               /* Length of run in buffer */
-	} field_data[UF_MAX];
+        struct
+        {
+                uint16_t off; /* Offset into buffer in which field
+                               * starts
+                               */
+                uint16_t len; /* Length of run in buffer */
+        } field_data[UF_MAX];
 };
 
 enum state parse_url_char(enum state s, const char ch);
 
 /* Initialize all http_parser_url members to 0 */
-void http_parser_url_init(struct http_parser_url *u);
+void http_parser_url_init(struct http_parser_url* u);
 
 /* Parse a URL; return nonzero on failure */
-int http_parser_parse_url(const char *buf, size_t buflen,
-			  int is_connect, struct http_parser_url *u);
+int http_parser_parse_url(const char* buf, size_t buflen, int is_connect, struct http_parser_url* u);
 
 #ifdef __cplusplus
 }

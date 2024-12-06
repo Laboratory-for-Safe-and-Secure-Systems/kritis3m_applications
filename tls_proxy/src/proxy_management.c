@@ -1,32 +1,26 @@
 
 #include <errno.h>
 #include <pthread.h>
-#include <unistd.h>
 #include <stdint.h>
-#include <string.h>
 #include <stdio.h>
+#include <string.h>
+#include <unistd.h>
 
 #if defined(_WIN32)
-
-#include <winsock2.h>
-
+        #include <winsock2.h>
 #else
-
-#include <sys/socket.h>
-#include <netinet/tcp.h>
-
+        #include <netinet/tcp.h>
+        #include <sys/socket.h>
 #endif
 
-#include "proxy_management.h"
-#include "proxy_connection.h"
 #include "proxy_backend.h"
+#include "proxy_connection.h"
+#include "proxy_management.h"
 
 #include "logging.h"
 #include "poll_set.h"
 
-
 LOG_MODULE_CREATE(proxy_management);
-
 
 int send_management_message(int socket, proxy_management_message const* msg)
 {
@@ -65,7 +59,6 @@ int send_management_message(int socket, proxy_management_message const* msg)
         return 0;
 }
 
-
 int read_management_message(int socket, proxy_management_message* msg)
 {
         int ret = recv(socket, (char*) msg, sizeof(proxy_management_message), 0);
@@ -76,10 +69,11 @@ int read_management_message(int socket, proxy_management_message* msg)
         }
         else if (ret != sizeof(proxy_management_message))
         {
-                LOG_ERROR("Received invalid response (ret=%d; expected=%lu)", ret, sizeof(proxy_management_message));
+                LOG_ERROR("Received invalid response (ret=%d; expected=%lu)",
+                          ret,
+                          sizeof(proxy_management_message));
                 return -1;
         }
 
         return 0;
 }
-

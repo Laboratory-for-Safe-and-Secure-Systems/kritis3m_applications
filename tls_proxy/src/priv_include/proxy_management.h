@@ -24,7 +24,7 @@ enum proxy_management_message_type
 typedef struct proxy_status_request
 {
         int proxy_id;
-        proxy_status *status_obj_ptr;
+        proxy_status* status_obj_ptr;
 } proxy_status_request;
 
 typedef struct proxy_management_message
@@ -45,8 +45,8 @@ typedef struct proxy_management_message
         } payload;
 } proxy_management_message;
 
-int send_management_message(int socket, proxy_management_message const *msg);
+int send_management_message(int socket, proxy_management_message const* msg);
 
-int read_management_message(int socket, proxy_management_message *msg);
+int read_management_message(int socket, proxy_management_message* msg);
 
 #endif /* PROXY_MANAGEMENT_H */
