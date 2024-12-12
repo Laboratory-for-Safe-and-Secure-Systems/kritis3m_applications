@@ -150,10 +150,10 @@ int start_kritis3m_service(char* config_file, int log_level)
         }
 
         // pass middleware and pin from cli to endpoint conf
-        svc.management_endpoint_config.pkcs11.long_term_crypto_module
-                .path = svc.node_configuration.management_identity.secure_middleware_path;
-        svc.management_endpoint_config.pkcs11.long_term_crypto_module
-                .pin = svc.node_configuration.management_identity.pin;
+        svc.management_endpoint_config.pkcs11
+                .module_path = svc.node_configuration.management_identity.secure_middleware_path;
+        svc.management_endpoint_config.pkcs11.module_pin = svc.node_configuration
+                                                                   .management_identity.pin;
 
         // 2. setsup endpoint configuration, used to communicate with the controller
         ret = create_endpoint_config(&svc.node_configuration.management_identity.identity,
