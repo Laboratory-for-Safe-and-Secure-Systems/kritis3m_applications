@@ -3,6 +3,7 @@ option(ENABLE_ECHO_SERVER "Enable echo server" ON)
 option(ENABLE_TCP_CLIENT_STDIN_BRIDGE "Enable TCP client stdin bridge" ON)
 option(ENABLE_TLS_PROXY "Enable TLS proxy" ON)
 option(ENABLE_NETWORK_TESTER "Enable network tester" ON)
+option(ENABLE_MANAGEMENT "Enable Scale management" ON)
 
 # Common files
 add_subdirectory(common)
@@ -26,4 +27,8 @@ endif()
 if (ENABLE_NETWORK_TESTER)
         add_subdirectory(network_tester)
 endif()
-add_subdirectory(http)
+
+# Scale management
+if (ENABLE_MANAGEMENT)
+        add_subdirectory(http)
+endif()
