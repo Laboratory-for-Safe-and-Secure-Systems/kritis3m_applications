@@ -103,7 +103,12 @@ int read_file(const char* filename, uint8_t** buffer, int* buffer_size)
                 LOG_ERROR("Memory allocation failed");
                 goto error_occured;
         }
-        fread(*buffer, 1, file_size, file);
+        ret = fread(*buffer, 1, file_size, file);
+        if (ret != file_size)
+        {
+                LOG_ERROR("Error reading file: %s", filename);
+                goto error_occured;
+        }
         (*buffer)[file_size] = '\0';
         *buffer_size = file_size;
 
