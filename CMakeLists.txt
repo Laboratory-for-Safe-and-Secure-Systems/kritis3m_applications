@@ -30,5 +30,5 @@ endif()
 
 # Scale management
 if (ENABLE_MANAGEMENT)
-        add_subdirectory(http)
+        add_subdirectory(management_service)
 endif()
