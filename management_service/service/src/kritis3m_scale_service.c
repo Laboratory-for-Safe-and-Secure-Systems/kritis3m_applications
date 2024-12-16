@@ -1,5 +1,6 @@
 #include <errno.h>
 #include <pthread.h>
+#include <string.h>
 #include <unistd.h>
 
 #include "http_service.h"
@@ -23,20 +24,6 @@ LOG_MODULE_CREATE(kritis3m_service);
 #define HEARTBEAT_REQ_BUFFER_SIZE 1000
 
 
-/*------------------------ FORWARD DECLARATION --------------------------------*/
-//ipc
-enum MSG_RESPONSE_CODE svc_request_helper(int socket, service_message* msg);
-static int send_svc_message(int socket, service_message* msg);
-static int read_svc_message(int socket, service_message* msg);
-int respond_with(int socket, enum MSG_RESPONSE_CODE response_code);
-ManagementReturncode handle_svc_message(int socket, service_message* msg, int cfg_id, int version_number);
-//init
-void* kritis3m_service_main_thread(void* arg);
-void init_configuration_manager(ConfigurationManager* manager, Kritis3mNodeConfiguration* node_config);
-int prepare_all_interfaces(HardwareConfiguration hw_config[], int num_configs);
-//http
-int initial_policy_request_cb(struct response response);
-void cleanup_kritis3m_service();
 
 //main kritis3m_service module type
 // Variable static struct kritis3m_service svc = {0}, single instance used by the kritis3m_service module
@@ -51,6 +38,16 @@ struct kritis3m_service
         poll_set pollfd;
         asl_endpoint_configuration management_endpoint_config;
         asl_endpoint* client_endpoint;
+};
+
+//ipc services
+enum service_message_type
+{
+        SVC_MSG_INITIAL_POLICY_REQ_RSP,
+        SVC_MSG_POLICY_REQ_RSP,
+        SVC_MSG_KRITIS3M_SERVICE_STOP,
+        SVC_MSG_APPLICATION_MANGER_STATUS_REQ,
+        SVC_MSG_RESPONSE,
 };
 
 /**
@@ -70,15 +67,21 @@ typedef struct service_message
         } payload;
 } service_message;
 
-//ipc services
-enum service_message_type
-{
-        SVC_MSG_INITIAL_POLICY_REQ_RSP,
-        SVC_MSG_POLICY_REQ_RSP,
-        SVC_MSG_KRITIS3M_SERVICE_STOP,
-        SVC_MSG_APPLICATION_MANGER_STATUS_REQ,
-        SVC_MSG_RESPONSE,
-};
+
+/*------------------------ FORWARD DECLARATION --------------------------------*/
+//ipc
+enum MSG_RESPONSE_CODE svc_request_helper(int socket, service_message* msg);
+static int send_svc_message(int socket, service_message* msg);
+static int read_svc_message(int socket, service_message* msg);
+int respond_with(int socket, enum MSG_RESPONSE_CODE response_code);
+ManagementReturncode handle_svc_message(int socket, service_message* msg, int cfg_id, int version_number);
+//init
+void* kritis3m_service_main_thread(void* arg);
+void init_configuration_manager(ConfigurationManager* manager, Kritis3mNodeConfiguration* node_config);
+int prepare_all_interfaces(HardwareConfiguration hw_config[], int num_configs);
+//http
+int initial_policy_request_cb(struct response response);
+void cleanup_kritis3m_service();
 
 
 /* ----------------------- MAIN kritis3m_service module -------------------------*/
@@ -90,8 +93,8 @@ void set_kritis3m_serivce_defaults(struct kritis3m_service* svc)
 {
         if (svc == NULL)
                 return;
-        memset(&svc->configuration_manager, 0, sizeof(ConfigurationManager));
         memset(&svc->management_endpoint_config, 0, sizeof(asl_endpoint_configuration));
+        memset(&svc->configuration_manager, 0, sizeof(ConfigurationManager));
         memset(&svc->node_configuration, 0, sizeof(Kritis3mNodeConfiguration));
         create_socketpair(svc->management_socket);
         pthread_attr_init(&svc->thread_attr);
