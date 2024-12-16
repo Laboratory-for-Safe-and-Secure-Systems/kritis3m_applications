@@ -5,7 +5,7 @@ add_library(kritis3m_applications_common STATIC
         ${CMAKE_CURRENT_SOURCE_DIR}/src/logging.c
         ${CMAKE_CURRENT_SOURCE_DIR}/src/poll_set.c
         ${CMAKE_CURRENT_SOURCE_DIR}/src/timing_metrics.c
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/io.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/file_io.c
 )
 
 # Add the getopt implementation for Windows if MSVC is used

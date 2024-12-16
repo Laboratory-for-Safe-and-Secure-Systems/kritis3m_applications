@@ -77,7 +77,7 @@ IndentCaseBlocks: true
 IndentCaseLabels: false
 IndentExternBlock: NoIndent
 IndentGotoLabels: true
-IndentPPDirectives: BeforeHash
+IndentPPDirectives: None
 IndentWidth: 8
 IndentWrappedFunctionNames: true
 KeepEmptyLinesAtTheStartOfBlocks: true

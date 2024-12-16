@@ -1,16 +1,14 @@
 #ifndef KRITIS3M_CONFIGURATION_H
 #define KRITIS3M_CONFIGURATION_H
 
-#include <net/if.h>
-#include <netinet/in.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
-#include <sys/socket.h>
 #include <time.h>
 
 #include "asl.h"
-#include "io.h"
+#include "file_io.h"
+#include "networking.h"
 
 #define USE_MANAGEMENT
 

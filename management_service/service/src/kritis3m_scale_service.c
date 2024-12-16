@@ -1,5 +1,3 @@
-
-
 #include <errno.h>
 #include <pthread.h>
 #include <unistd.h>
@@ -7,7 +5,7 @@
 #include "http_service.h"
 #include "logging.h"
 #include "networking.h"
-#include "sys/timerfd.h"
+// #include "sys/timerfd.h"
 
 #include "cJSON.h"
 #include "http_client.h"
@@ -487,7 +485,7 @@ static int send_svc_message(int socket, service_message* msg)
 
         while ((ret <= 0) && (retries < max_retries))
         {
-                ret = send(socket, msg, sizeof(service_message), 0);
+                ret = send(socket, (char*) msg, sizeof(service_message), 0);
                 if (ret < 0)
                 {
                         if (errno != EAGAIN)
@@ -603,7 +601,7 @@ error_occured:
 
 static int read_svc_message(int socket, service_message* msg)
 {
-        int ret = recv(socket, msg, sizeof(service_message), 0);
+        int ret = recv(socket, (char*) msg, sizeof(service_message), 0);
         if (ret < 0)
         {
                 LOG_ERROR("Error receiving message: %d (%s)", errno, strerror(errno));

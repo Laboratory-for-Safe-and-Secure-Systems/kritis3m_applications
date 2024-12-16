@@ -3,28 +3,34 @@
 #include <stdint.h>
 
 #if defined(__ZEPHYR__)
-        #include <sys/socket.h>
-        #include <zephyr/net/net_l2.h>
-        #include <zephyr/posix/fcntl.h>
-#elif defined(_WIN32)
-        #include <sys/types.h>
-        #include <winsock2.h>
-#else
-        #include <ctype.h>
-        #include <stdarg.h>
-        #include <stdbool.h>
-        #include <stdio.h>
-        #include <stdlib.h>
-        #include <string.h>
-        #include <sys/socket.h>
 
-        #include <arpa/inet.h>
-        #include <fcntl.h>
-        #include <netinet/in.h>
-        #include <unistd.h>
+#include <sys/socket.h>
+#include <zephyr/net/net_l2.h>
+#include <zephyr/posix/fcntl.h>
+
+#elif defined(_WIN32)
+
+#include <sys/types.h>
+#include <winsock2.h>
+
+#else
+
+#include <ctype.h>
+#include <stdarg.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/socket.h>
+
+#include <arpa/inet.h>
+#include <fcntl.h>
+#include <netinet/in.h>
+#include <unistd.h>
+
 #endif
 
-#include "io.h"
+#include "file_io.h"
 #include "logging.h"
 #include "networking.h"
 
@@ -356,18 +362,18 @@ int initialize_network_interfaces(int32_t log_level)
         /* Initialize the Management VLAN */
         ifaces.management = net_if_get_default();
 
-        #if defined(CONFIG_NET_VLAN)
+#if defined(CONFIG_NET_VLAN)
         int ret = net_eth_vlan_enable(ifaces.management, CONFIG_VLAN_TAG_MANAGEMENT);
         if (ret < 0)
         {
                 LOG_ERROR("Cannot enable VLAN for tag %d: error %d", CONFIG_VLAN_TAG_MANAGEMENT, ret);
                 return ret;
         }
-        #endif
+#endif
 
         net_if_foreach(iface_cb, &ifaces);
 
-        #if defined(CONFIG_NET_VLAN)
+#if defined(CONFIG_NET_VLAN)
         /* Initialize LAN VLAN */
         ret = net_eth_vlan_enable(ifaces.lan, CONFIG_VLAN_TAG_LAN);
         if (ret < 0)
@@ -431,7 +437,7 @@ int initialize_network_interfaces(int32_t log_level)
         }
 
         net_if_ipv4_set_gw(ifaces.wan, &helper_addr);
-        #endif
+#endif
 
         return 0;
 }
@@ -470,7 +476,7 @@ int remove_ipv4_address(void* iface, struct in_addr ipv4_addr)
 
 #elif defined(_WIN32)
 
-        #include <stdio.h>
+#include <stdio.h>
 
 /* Initialize the network interfaces */
 int initialize_network_interfaces(int32_t log_level)
@@ -490,7 +496,7 @@ int initialize_network_interfaces(int32_t log_level)
         }
 }
 
-#else // defined (__ZEPHYR__)
+#else // Linux
 
 /* Initialize the network interfaces */
 int initialize_network_interfaces(int32_t log_level)
@@ -504,9 +510,11 @@ int initialize_network_interfaces(int32_t log_level)
         return 0;
 }
 
-int run_ip_shell_cmd(char const* command, char** output)
+#endif
+
+int run_shell_cmd(char const* command, char** output)
 {
-        #define MALLOC_SIZE 4096
+#define MALLOC_SIZE 4096
 
         *output = (char*) malloc(MALLOC_SIZE);
 
@@ -534,34 +542,62 @@ int run_ip_shell_cmd(char const* command, char** output)
         (*output)[bytesRead] = '\0';
 
         /* Close the pipe and read the return code of the executed command */
-        return WEXITSTATUS(pclose(fp));
+        int status = pclose(fp);
+
+#ifndef _WIN32
+        /* ask how the process ended to clean up the exit code. */
+        if (WIFEXITED(status))
+                status = WEXITSTATUS(status);
+        else if (WIFSIGNALED(status))
+                status = WTERMSIG(status);
+        else if (WIFSTOPPED(status))
+                status = WSTOPSIG(status);
+#else
+        /* Do we have to do something here? */
+#endif
+
+        return status;
 }
 
 /* Add an ip address to a network interface */
-int add_ipv4_address(void* iface, struct in_addr ipv4_addr)
+int add_ip_address(const void* iface, const char* ip_addr, const char* cidr, bool is_ipv6)
 {
         int ret = 0;
         char command[100];
         char* output = NULL;
 
         /* Create the command */
+#ifdef _WIN32
         snprintf(command,
                  sizeof(command),
-                 "ip addr add %s/24 dev %s 2>&1",
-                 inet_ntoa(ipv4_addr),
+                 "netsh interface %s add address \"%s\" %s/%s",
+                 is_ipv6 ? "ipv6" : "ipv4",
+                 (char const*) iface,
+                 ip_addr,
+                 cidr);
+#else
+        snprintf(command,
+                 sizeof(command),
+                 "ip %s addr add %s/%s dev %s 2>&1",
+                 is_ipv6 ? "-6" : "-4",
+                 ip_addr,
+                 cidr,
                  (char const*) iface);
+#endif
 
         /* Run the command and catch return code and stdout + stderr */
-        ret = run_ip_shell_cmd(command, &output);
+        ret = run_shell_cmd(command, &output);
 
         if (ret != 0)
         {
+#ifndef _WIN32
                 if ((ret == 2) && (strcmp(output, "RTNETLINK answers: File exists\n") == 0))
                 {
                         /* IP address is already set, we continue silently */
                         ret = 0;
                 }
                 else
+#endif
                 {
                         LOG_ERROR("Command %s failed with error code %d (output %s)", ret, output);
                 }
@@ -573,31 +609,39 @@ int add_ipv4_address(void* iface, struct in_addr ipv4_addr)
 }
 
 /* Remove an ip address from a network interface */
-int remove_ipv4_address(void* iface, struct in_addr ipv4_addr)
+int remove_ip_address(const void* iface, const char* ip_addr, const char* cidr, bool is_ipv6)
 {
         int ret = 0;
         char command[100];
         char* output = NULL;
 
         /* Create the command */
+#ifdef _WIN32
         snprintf(command,
                  sizeof(command),
-                 "ip addr del %s/24 dev %s 2>&1",
-                 inet_ntoa(ipv4_addr),
-                 (char const*) iface);
+                 "netsh interface %s delete address \"%s\" %s/%s",
+                 is_ipv6 ? "ipv6" : "ipv4",
+                 (char const*) iface,
+                 ip_addr,
+                 cidr);
+#else
+        snprintf(command, sizeof(command), "ip addr del %s/%s dev %s 2>&1", ip_addr, cidr, (char const*) iface);
+#endif
 
         /* Run the command and catch return code and stdout + stderr */
-        ret = run_ip_shell_cmd(command, &output);
+        ret = run_shell_cmd(command, &output);
 
         if (ret != 0)
         {
                 // ToDo: Update error message to the actual error
+#ifndef _WIN32
                 if ((ret == 2) && (strcmp(output, "RTNETLINK answers: File exists\n") == 0))
                 {
                         /* IP address is already set, we continue silently */
                         ret = 0;
                 }
                 else
+#endif
                 {
                         LOG_ERROR("Command %s failed with error code %d (output %s)", ret, output);
                 }
@@ -607,8 +651,6 @@ int remove_ipv4_address(void* iface, struct in_addr ipv4_addr)
 
         return ret;
 }
-
-#endif // defined (__ZEPHYR__)
 
 /* Get a const pointer to the initialized structure containing the network interfaces */
 struct network_interfaces const* network_interfaces(void)
@@ -772,39 +814,6 @@ static int address_lookup_internal(char const* dest, uint16_t port, struct addri
 
         return 0;
 }
-
-#ifdef _WIN32
-int add_ip_address(const char* device, const char* ip_addr, const char* cidr, bool is_ipv6)
-{
-        char cmd[512];
-        char* output = NULL;
-
-        snprintf(cmd,
-                 sizeof(cmd),
-                 "netsh interface %s add address \"%s\" %s/%s",
-                 is_ipv6 ? "ipv6" : "ipv4",
-                 device,
-                 ip_addr,
-                 cidr);
-
-        int result = run_ip_shell_cmd(cmd, &output);
-        free(output);
-        return result;
-}
-
-#else
-int add_ip_address(const char* device, const char* ip_addr, const char* cidr, bool is_ipv6)
-{
-        char cmd[512];
-        char* output = NULL;
-
-        snprintf(cmd, sizeof(cmd), "ip %s addr add %s/%s dev %s", is_ipv6 ? "-6" : "-4", ip_addr, cidr, device);
-
-        int result = run_ip_shell_cmd(cmd, &output);
-        free(output);
-        return result;
-}
-#endif
 
 /* Lookup the provided outgoing destination and fill the linked-list accordingly. */
 int address_lookup_client(char const* dest, uint16_t port, struct addrinfo** addr)

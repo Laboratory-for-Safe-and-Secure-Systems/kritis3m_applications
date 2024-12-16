@@ -2,11 +2,6 @@
 #include <pthread.h>
 #include <semaphore.h>
 
-// net
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-
 // std
 #include <errno.h>
 #include <string.h>
@@ -800,7 +795,7 @@ static int send_management_message(int socket, application_message* msg)
 
         while ((ret <= 0) && (retries < max_retries))
         {
-                ret = send(socket, msg, sizeof(application_message), 0);
+                ret = send(socket, (char*) msg, sizeof(application_message), 0);
                 if (ret < 0)
                 {
                         if (errno != EAGAIN)
@@ -830,7 +825,7 @@ static int send_management_message(int socket, application_message* msg)
 
 static int read_management_message(int socket, application_message* msg)
 {
-        int ret = recv(socket, msg, sizeof(application_message), 0);
+        int ret = recv(socket, (char*) msg, sizeof(application_message), 0);
         if (ret < 0)
         {
                 LOG_ERROR("Error receiving message: %d (%s)", errno, strerror(errno));

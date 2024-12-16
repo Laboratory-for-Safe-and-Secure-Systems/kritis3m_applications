@@ -25,7 +25,7 @@ LOG_MODULE_CREATE(tcp_client_stdin_bridge);
                 goto cleanup;                                                                      \
         }
 
-#if !defined(__ZEPHYR__)
+#if !defined(__ZEPHYR__) && !defined(_WIN32)
 
         #define RECV_BUFFER_SIZE 1024
 
@@ -381,7 +381,7 @@ int tcp_client_stdin_bridge_run(tcp_client_stdin_bridge_config const* config)
         /* Set the log level */
         LOG_LVL_SET(config->log_level);
 
-#if defined(__ZEPHYR__)
+#if defined(__ZEPHYR__) || defined(_WIN32)
         LOG_ERROR("TCP client stdin bridge not supported on Zephyr");
         return -1;
 #else
@@ -486,7 +486,7 @@ cleanup:
  */
 int tcp_client_stdin_bridge_get_status(tcp_client_stdin_bridge_status* status)
 {
-#if defined(__ZEPHYR__)
+#if defined(__ZEPHYR__) || defined(_WIN32)
         LOG_ERROR("TCP client stdin bridge not supported on Zephyr");
         return -1;
 #else
@@ -536,7 +536,7 @@ int tcp_client_stdin_bridge_get_status(tcp_client_stdin_bridge_status* status)
  */
 int tcp_client_stdin_bridge_terminate(void)
 {
-#if defined(__ZEPHYR__)
+#if defined(__ZEPHYR__) || defined(_WIN32)
         LOG_ERROR("TCP client stdin bridge not supported on Zephyr");
         return -1;
 #else

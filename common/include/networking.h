@@ -8,9 +8,10 @@
         #define closesocket close
         #define addrinfo zsock_addrinfo
 #elif defined(_WIN32)
-        #include <stdbool.h>
         #include <winsock2.h>
         #include <ws2tcpip.h>
+
+        #include <netioapi.h>
 
         #define poll WSAPoll
 
@@ -18,8 +19,8 @@
         #define net_addr_pton inet_pton
 #else
         #include <arpa/inet.h>
+        #include <net/if.h>
         #include <netinet/in.h>
-        #include <stdbool.h>
 
         #include <netdb.h>
         #include <sys/socket.h>
@@ -30,6 +31,9 @@
         #define net_addr_ntop inet_ntop
         #define net_addr_pton inet_pton
 #endif
+
+#include <stdbool.h>
+#include <stdint.h>
 
 struct network_interfaces
 {
@@ -45,13 +49,10 @@ int initialize_network_interfaces(int32_t log_level);
 struct network_interfaces const* network_interfaces(void);
 
 /* Add an ip address to a network interface */
-int add_ipv4_address(void* iface, struct in_addr ipv4_addr);
-
-/* Add an ipv4 or ipv6 addr*/
-int add_ip_address(const char* device, const char* ip_addr, const char* cidr, bool is_ipv6);
+int add_ip_address(const void* iface, const char* ip_addr, const char* cidr, bool is_ipv6);
 
 /* Remove an ip address from a network interface */
-int remove_ipv4_address(void* iface, struct in_addr ipv4_addr);
+int remove_ipv4_address(const void* iface, const char* ip_addr, const char* cidr, bool is_ipv6);
 
 /* Helper method to set a socket to (non) blocking */
 int setblocking(int fd, bool val);

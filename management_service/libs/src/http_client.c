@@ -26,7 +26,7 @@
         #include <zephyr/kernel.h>
 #else
         #include <limits.h>
-        #include <linux/kernel.h> // for offset of and other kernel utilities
+        // #include <linux/kernel.h> // for offset of and other kernel utilities
         #include <stdio.h>
 
         #define CONTAINER_OF(ptr, type, member)                                                    \
@@ -38,10 +38,11 @@
 
 #endif
 
-#include <netinet/in.h>
-#include <poll.h>
-#include <sys/socket.h>
+// #include <netinet/in.h>
+// #include <poll.h>
+// #include <sys/socket.h>
 
+#include "networking.h"
 #include "http_client.h"
 #include "logging.h"
 

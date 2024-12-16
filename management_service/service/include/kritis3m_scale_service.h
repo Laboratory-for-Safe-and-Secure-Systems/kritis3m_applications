@@ -2,9 +2,7 @@
 #define KRITIS3M_SCALE_SERVICE_H
 
 #include "kritis3m_configuration.h"
-#include <netinet/in.h>
-#include <stdio.h>
-#include <string.h>
+
 
 /*********************************************************
  *              MANAGEMENT SERVICE STARTUP

@@ -1,4 +1,3 @@
-#include <arpa/inet.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,6 +9,7 @@
 #include "kritis3m_configuration.h" // Assuming this is the header file containing the struct definitions
 #include "logging.h"
 #include "networking.h"
+
 LOG_MODULE_CREATE(kritis3m_configuration);
 
 // Function prototypes

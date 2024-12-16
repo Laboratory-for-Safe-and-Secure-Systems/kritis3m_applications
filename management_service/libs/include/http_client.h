@@ -37,15 +37,11 @@ k_timeout_t
 #else
         #define AT_LEAST(a, b) (((a) < (b)) ? (a) : (b))
         #include "linux_comp.h"
-        /********************************************
-         * 				LINUX				*
-         *******************************************/
-        #include <netinet/in.h>
-        #include <sys/socket.h>
 #endif // __ZEPHYR__
 
 #include "asl.h"
 #include "http_parser.h"
+#include "networking.h"
 
 #ifdef __cplusplus
         extern "C"
@@ -114,7 +110,7 @@ k_timeout_t
          *        is there still more data to come.
          * @param user_data User specified data specified in http_client_req()
          */
-        typedef void (*http_response_cb_t)(struct http_response* rsp,
+        typedef void (*http_response_cb_t)(struct http_response * rsp,
                                            enum http_final_call final_data,
                                            void* user_data);
 

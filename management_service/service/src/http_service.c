@@ -1,9 +1,6 @@
-#include <arpa/inet.h>
-#include <netdb.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/socket.h>
 #include <unistd.h>
 
 #include "asl.h"
@@ -13,6 +10,7 @@
 #include "linux_comp.h"
 #include "logging.h"
 #include "networking.h"
+
 LOG_MODULE_CREATE(http_service);
 
 #define DISTRIBUTION_BUFFER_SIZE 5000

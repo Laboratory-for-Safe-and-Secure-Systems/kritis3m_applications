@@ -3,12 +3,12 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "io.h"
+#include "file_io.h"
 #include "logging.h"
 
 LOG_MODULE_CREATE(networking);
 
-//asl defines
+// asl defines
 #define PKCS11_LABEL_IDENTIFIER "pkcs11:"
 #define PKCS11_LABEL_IDENTIFIER_LEN 7
 

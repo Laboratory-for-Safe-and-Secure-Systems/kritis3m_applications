@@ -1,8 +1,16 @@
-#ifndef _IO_H_
-#define _IO_H_
+#ifndef _FILE_IO_H_
+#define _FILE_IO_H_
 
 #include <inttypes.h>
 #include <unistd.h>
+
+#ifdef _WIN32
+
+#include <io.h>
+#define F_OK 0
+#define access _access
+
+#endif
 
 typedef struct certificates
 {
@@ -54,4 +62,4 @@ void cleanup_certificates(struct certificates* certs);
 // check if file estists
 int file_exists(const char* filepath);
 
-#endif //_IO_H_
+#endif //_FILE_IO_H_
