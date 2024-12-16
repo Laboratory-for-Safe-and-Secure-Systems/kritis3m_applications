@@ -11,17 +11,13 @@
 
 LOG_MODULE_CREATE(kritis3m_config_paser);
 
+/*--------------------- FORWARD DECLARATION ------------------------------------*/
 int parse_whitelist(cJSON* json_obj, Whitelist* whitelist);
-int parse_crypo_config(cJSON* json_obj,
-                       CryptoProfile* CryptoProfile,
-                       char* secure_middleware_path,
-                       char* pin);
+int parse_crypo_config(cJSON* json_obj, CryptoProfile* CryptoProfile, char* secure_middleware_path, char* pin);
 int parse_crypo_identity(cJSON* json_obj, crypto_identity* crypto_identity, char* crypto_identity_path);
 int parse_application(cJSON* json_obj, Kritis3mApplications* application);
 
-int parse_json_to_ManagementConfig(cJSON* json_management_service,
-                                   Kritis3mManagemntConfiguration* config,
-                                   char* identity_path)
+int parse_json_to_ManagementConfig(cJSON* json_management_service, Kritis3mManagemntConfiguration* config, char* identity_path)
 {
         int ret = 0;
 
@@ -455,6 +451,16 @@ error_occured:
         return retval;
 }
 
+/**
+ * @brief Initializes a Whitelist from a JSON object.
+ *
+ * This function parses the provided JSON object to populate the 
+ * Whitelist structure with the corresponding whitelist data.
+ *
+ * @param json_obj Pointer to the cJSON object containing the whitelist data.
+ * @param whitelist Pointer to the Whitelist structure to be initialized.
+ * @return A ManagementReturncode indicating the success or failure of the operation.
+ */
 ManagementReturncode parse_whitelist(cJSON* json_obj, Whitelist* whitelist)
 {
         ManagementReturncode ret = MGMT_OK;
@@ -505,6 +511,16 @@ error_occured:
         return ret;
 }
 
+/**
+ * @brief Initializes a Kritis3mApplication from a JSON object.
+ *
+ * This function parses the provided JSON object to populate the 
+ * Kritis3mApplications structure with the corresponding application data.
+ *
+ * @param[in] json_obj Pointer to the cJSON object containing the application data.
+ * @param[out] application Pointer to the Kritis3mApplications structure to be initialized.
+ * @return A ManagementReturncode indicating the success or failure of the operation.
+ */
 ManagementReturncode parse_application(cJSON* json_obj, Kritis3mApplications* application)
 {
         ManagementReturncode ret = MGMT_OK;
@@ -562,10 +578,18 @@ error_occured:
         LOG_ERROR("cannot parse Kritis3m_application");
         return ret;
 }
+
 /**
- * parses a crypto idenity
- * @brief at the moment, identity paths are stored twice, once in the identity structure and one in the parent object.
- * @todo make paths more consistent
+ * @brief Parses a JSON object to initialize a crypto identity.
+ *
+ * This function extracts the crypto identity information from the provided JSON object,
+ * retrieves certificates from the specified crypto identity path, and initializes 
+ * the crypto_identity structure with the parsed data.
+ *
+ * @param json_obj Pointer to the cJSON object containing the crypto identity data.
+ * @param crypto_identity Pointer to the crypto_identity structure to be initialized.
+ * @param crypto_identity_path Path to the directory containing the crypto identity certificates.
+ * @return 0 on success, or an error code on failure.
  */
 ManagementReturncode parse_crypo_identity(cJSON* identity_json,
                                           crypto_identity* identity,
@@ -627,6 +651,19 @@ error_occured:
         return ret;
 }
 
+/**
+ * @brief Parses a JSON object to initialize a cryptographic configuration.
+ *
+ * This function extracts cryptographic configuration details from the given JSON object to initialize the Cryptoprofile
+ * structure. The secure middleware path and PIN are 
+ * obtained from the Kritis3mNodeConfiguration.
+ *
+ * @param[in] json_obj Pointer to the cJSON object containing the cryptographic configuration.
+ * @param[out] profile Pointer to the CryptoProfile structure to be initialized.
+ * @param[in] secure_middleware_path Path to the secure middleware, as specified in Kritis3mNodeConfiguration.
+ * @param[in] pin The PIN required for the secure middleware, as specified in Kritis3mNodeConfiguration.
+ * @return A ManagementReturncode indicating the success or failure of the operation.
+ */
 ManagementReturncode parse_crypo_config(cJSON* json_obj,
                                         CryptoProfile* profile,
                                         char* secure_middleware_path,

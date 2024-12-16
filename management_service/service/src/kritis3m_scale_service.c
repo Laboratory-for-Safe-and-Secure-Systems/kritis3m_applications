@@ -22,18 +22,24 @@ LOG_MODULE_CREATE(kritis3m_service);
 #define POLICY_RESP_BUFFER_SIZE 1000
 #define HEARTBEAT_REQ_BUFFER_SIZE 1000
 
-// returned by http request
-// thread object for http get requests
-struct http_get_request
-{
-        char* request_url;
-        struct sockaddr_in server_addr;
-        enum used_service used_service;
-        asl_endpoint* ep; // used for tls
-        t_http_get_cb cb; // callback function to signal the mainthread the result
-};
 
-// main service object
+/*------------------------ FORWARD DECLARATION --------------------------------*/
+//ipc
+enum MSG_RESPONSE_CODE svc_request_helper(int socket, service_message* msg);
+static int send_svc_message(int socket, service_message* msg);
+static int read_svc_message(int socket, service_message* msg);
+int respond_with(int socket, enum MSG_RESPONSE_CODE response_code);
+ManagementReturncode handle_svc_message(int socket, service_message* msg, int cfg_id, int version_number);
+//init
+void* kritis3m_service_main_thread(void* arg);
+void init_configuration_manager(ConfigurationManager* manager, Kritis3mNodeConfiguration* node_config);
+int prepare_all_interfaces(HardwareConfiguration hw_config[], int num_configs);
+//http
+int initial_policy_request_cb(struct response response);
+void cleanup_kritis3m_service();
+
+//main kritis3m_service module type
+// Variable static struct kritis3m_service svc = {0}, single instance used by the kritis3m_service module
 struct kritis3m_service
 {
         bool initialized;
@@ -47,16 +53,10 @@ struct kritis3m_service
         asl_endpoint* client_endpoint;
 };
 
-// will be used for management service
-enum service_message_type
-{
-        SVC_MSG_INITIAL_POLICY_REQ_RSP,
-        SVC_MSG_POLICY_REQ_RSP,
-        SVC_MSG_KRITIS3M_SERVICE_STOP,
-        SVC_MSG_APPLICATION_MANGER_STATUS_REQ,
-        SVC_MSG_RESPONSE,
-};
-
+/**
+ * @brief Represents a message used for IPC communication between internal threads 
+ *        of the `kritis3m_scale_service` module.
+ */
 typedef struct service_message
 {
         enum service_message_type msg_type;
@@ -70,27 +70,22 @@ typedef struct service_message
         } payload;
 } service_message;
 
-// forward declarations
-void* start_kristis3m_service(void* arg);
-void init_configuration_manager(ConfigurationManager* manager, Kritis3mNodeConfiguration* node_config);
-enum MSG_RESPONSE_CODE svc_request_helper(int socket, service_message* msg);
-int initial_policy_request_cb(struct response response);
+//ipc services
+enum service_message_type
+{
+        SVC_MSG_INITIAL_POLICY_REQ_RSP,
+        SVC_MSG_POLICY_REQ_RSP,
+        SVC_MSG_KRITIS3M_SERVICE_STOP,
+        SVC_MSG_APPLICATION_MANGER_STATUS_REQ,
+        SVC_MSG_RESPONSE,
+};
 
-// cfg_id and version number are temporary arguments and will be cleaned up after the testing
-ManagementReturncode handle_svc_message(int socket, service_message* msg, int cfg_id, int version_number);
-static int send_svc_message(int socket, service_message* msg);
-static int read_svc_message(int socket, service_message* msg);
 
-void cleanup_kritis3m_service();
-
-int respond_with(int socket, enum MSG_RESPONSE_CODE response_code);
-
-int prepare_all_interfaces(HardwareConfiguration hw_config[], int num_configs);
-
-/*********************************************************
- *              HTTP-SERVICE
- */
+/* ----------------------- MAIN kritis3m_service module -------------------------*/
 static struct kritis3m_service svc = {0};
+
+
+//reset svc
 void set_kritis3m_serivce_defaults(struct kritis3m_service* svc)
 {
         if (svc == NULL)
@@ -104,6 +99,20 @@ void set_kritis3m_serivce_defaults(struct kritis3m_service* svc)
         poll_set_init(&svc->pollfd);
 }
 
+/**
+ * @brief Starts the `kritis3m_service` module.
+ * 
+ * This function initializes and starts the `kritis3m_service` module using the provided configuration file.
+ * The config file is then used to obtain the Kritis3mNodeConfiguration, which contains the initial startup configuration
+ * 
+ * @param[in] config_file Path to the configuration file in json format
+ * @param[in] log_level The log level to set for the service (e.g., DEBUG, INFO, ERROR).
+ * 
+ * @return Returns 0 if the service is successfully started, otherwise returns a non-zero error code.
+ * 
+ * @note This function assumes that the necessary dependencies and environment are already in place
+ * for the service to be initialized and run.
+ */
 int start_kritis3m_service(char* config_file, int log_level)
 {
         // initializations
@@ -213,7 +222,7 @@ int start_kritis3m_service(char* config_file, int log_level)
         svc.initialized = true;
 
         // 7. start management application
-        ret = pthread_create(&svc.mainthread, &svc.thread_attr, start_kristis3m_service, &svc);
+        ret = pthread_create(&svc.mainthread, &svc.thread_attr, kritis3m_service_main_thread, &svc);
         if (ret < 0)
         {
                 LOG_ERROR("can't create kritis3m_service thread");
@@ -228,7 +237,7 @@ error_occured:
         return ret;
 }
 
-void* start_kristis3m_service(void* arg)
+void* kritis3m_service_main_thread(void* arg)
 {
 
         enum appl_state
@@ -348,7 +357,6 @@ void init_configuration_manager(ConfigurationManager* manager, Kritis3mNodeConfi
 }
 
 //------------------------------------------ HARDWARE INFORMATION --------------------------------------- //
-#define MAX_CMD_LENGTH 512
 
 int prepare_all_interfaces(HardwareConfiguration hw_config[], int num_configs)
 {
@@ -383,8 +391,6 @@ int prepare_all_interfaces(HardwareConfiguration hw_config[], int num_configs)
 
 /*------------------------------------ MANAGEMENT REQUESTS ------------------------------------------------*/
 
-// status report
-//@brief sends report to controller
 int req_send_status_report(ApplicationManagerStatus manager_status)
 {
         int socket = -1;
