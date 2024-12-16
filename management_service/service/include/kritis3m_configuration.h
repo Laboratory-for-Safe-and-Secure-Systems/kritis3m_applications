@@ -10,6 +10,7 @@
 #include <time.h>
 
 #include "asl.h"
+#include "io.h"
 
 #define USE_MANAGEMENT
 
@@ -65,6 +66,51 @@ typedef enum
         L2_BRIDGE = 5,
 } Kritis3mApplicationtype;
 
+typedef enum
+{
+        MANAGEMENT_SERVICE,
+        MANAGEMENT,
+        REMOTE,
+        PRODUCTION,
+        max_identities
+} network_identity;
+
+enum ApplicationStatus
+{
+        APK_ERR = -1,
+        APK_OK = 0,
+};
+
+/**
+ * @brief Enumeration of IPC return codes.
+ *
+ * This enumeration defines the response codes used for inter-process communication (IPC),
+ * indicating the status of a message or request.
+ */
+enum MSG_RESPONSE_CODE
+{
+        MSG_ERROR = -1,    /**< Indicates an error occurred. */
+        MSG_OK = 0,        /**< Indicates the operation was successful. */
+        MSG_FORBIDDEN = 1, /**< Indicates the request was forbidden. */
+        MSG_BUSY = 2,      /**< Indicates the system is currently busy. */
+};
+
+/**
+ * @brief Enumeration of services used to identify requests in the HTTP module.
+ *
+ * This enumeration specifies the type of service being requested, which is used
+ * to identify and handle the request within the HTTP module. Currently only MGMT_POLICY_REQ &
+ * MGMT_SEND_STATUS_REQ is implemented.
+ */
+enum used_service
+{
+        EST_ENROLL = 0,       /**< Request for EST enrollment. */
+        EST_REENROLL,         /**< Request for EST re-enrollment. */
+        MGMT_POLICY_REQ,      /**< Request to retrieve the management policy. */
+        MGMT_SEND_STATUS_REQ, /**< Request to send the status to the management server. */
+        MGMT_POLICY_CONFIRM,  /**< Request to confirm the management policy. */
+};
+
 typedef struct SystemConfiguration SystemConfiguration;
 struct SystemConfiguration;
 
@@ -77,46 +123,16 @@ struct ConnectionWhitelist;
 typedef struct ApplicationConfiguration ApplicationConfiguration;
 struct ApplicationConfiguration;
 
-typedef struct certificates
-{
-        uint8_t* chain_buffer; /* Entity and intermediate certificates */
-        size_t chain_buffer_size;
-
-        uint8_t* key_buffer;
-        size_t key_buffer_size;
-
-        uint8_t* additional_key_buffer;
-        size_t additional_key_buffer_size;
-
-        uint8_t* root_buffer;
-        size_t root_buffer_size;
-} certificates;
-
-enum ApplicationStatus
-{
-        APK_ERR = -1,
-        APK_OK = 0,
-};
-
 typedef struct
 {
         enum ApplicationStatus Status;
         int running_applications;
 } ApplicationManagerStatus;
 
-typedef enum
-{
-        MANAGEMENT_SERVICE,
-        MANAGEMENT,
-        REMOTE,
-        PRODUCTION,
-        max_identities
-} network_identity;
-
 typedef struct
 {
-        char address[ENDPOINT_LEN]; // Stores IP or IPv4/URL
-        uint16_t port;              // Stores parsed port
+        char* address; // Stores IP or IPv4/URL
+        uint16_t port; // Stores parsed port
 } EndpointAddr;
 
 typedef struct
@@ -296,72 +312,58 @@ typedef struct
         SelectedConfiguration selected_configuration;
 } Kritis3mNodeConfiguration;
 
-enum MSG_RESPONSE_CODE
-{
-        MSG_ERROR = -1,
-        MSG_OK = 0,
-        MSG_FORBIDDEN = 1,
-        MSG_BUSY = 2,
-};
+/* ------------------------- Startup Configuration ----------------------------*/
 
-enum used_service
-{
-        EST_ENROLL = 0,
-        EST_REENROLL,
-        MGMT_POLICY_REQ,
-        MGMT_SEND_STATUS_REQ,
-        MGMT_HEARTBEAT_REQ,
-        MGMT_POLICY_CONFIRM,
-};
-
-#define HTTP_OK 200
-#define HTTP_CREATED 201
-#define HTTP_NO_CONTENT 204
-#define HTTP_BAD_REQUEST 400
-#define HTTP_UNAUTHORIZED 401
-#define HTTP_FORBIDDEN 403
-#define HTTP_NOT_FOUND 404
-#define HTTP_METHOD_NOT_ALLOWED 405
-#define HTTP_TOO_MANY_REQUESTS 429
-#define HTTP_INTERNAL_SERVER_ERROR 500
-#define HTTP_BAD_GATEWAY 502
-#define HTTP_SERVICE_UNAVAILABLE 503
-#define HTTP_GATEWAY_TIMEOUT 504
-
-/**********ERROR MSGS **********/
-#define HTTP_OK_MSG "OK"
-#define HTTP_CREATED_MSG "Created"
-#define HTTP_NO_CONTENT_MSG "No Content"
-#define HTTP_BAD_REQUEST_MSG "Bad Request"
-#define HTTP_UNAUTHORIZED_MSG "Unauthorized"
-#define HTTP_FORBIDDEN_MSG "Forbidden"
-#define HTTP_NOT_FOUND_MSG "Not Found"
-#define HTTP_METHOD_NOT_ALLOWED_MSG "Method Not Allowed"
-#define HTTP_TOO_MANY_REQUESTS_MSG "Too Many Requests"
-#define HTTP_INTERNAL_SERVER_ERROR_MSG "Internal Server Error"
-#define HTTP_BAD_GATEWAY_MSG "Bad Gateway"
-#define HTTP_SERVICE_UNAVAILABLE_MSG "Service Unavailable"
-#define HTTP_GATEWAY_TIMEOUT_MSG "Gateway Timeout"
-#define HTTP_DEFAULT_MSG "HTTP error occured"
-
+/**
+ * @brief Retrieves the initial node configuration from the specified startup JSON file.
+ *
+ * This function reads the startup configuration data from the given file path
+ * and populates the provided Kritis3mNodeConfiguration structure.
+ *
+ * @param filename The path to the startup.json file containing the initial configuration.
+ * @param[out] config Pointer to the Kritis3mNodeConfiguration structure
+ * @return 0 on success, or an error code on failure.
+ */
 int get_Kritis3mNodeConfiguration(char* filename, Kritis3mNodeConfiguration* config);
+int get_identity_folder_path(char* out_path, size_t size, const char* base_path, network_identity identity);
+
+/*-------------------------  Systemconfiguration ---------------------------------- */
+
+/**
+ * @brief Reads the application configuration from the filesystem.
+ *
+ * This function retrieves the system configuration, containing the configurations of the kritis3m applications
+ * (forward- & reverse proxy) and populates these within the ConfigurationManager struct. Ensure that
+ * the control server has been called beforehand to obtain the latest configuration.
+ *
+ * @param[out] applconfig Pointer to the ConfigurationManager structure to store application configuration.
+ * @param[in] node_config Pointer to the Kritis3mNodeConfiguration structure, containing the required filepaths.
+ * @return 0 on success, or an error code on failure.
+ */
 int get_Systemconfig(ConfigurationManager* applconfig, Kritis3mNodeConfiguration* node_config);
 SystemConfiguration* get_active_config(ConfigurationManager* manager);
 SystemConfiguration* get_inactive_config(ConfigurationManager* manager);
 Kritis3mApplications* find_application_by_application_id(Kritis3mApplications* appls,
                                                          int number_appls,
                                                          int appl_id);
-int get_identity_folder_path(char* out_path, size_t size, const char* base_path, network_identity identity);
-// used to send ApplicationStatus to Controller
+// parses an ApplicationManagerStatus object into json format and writes content to json_buffer
 char* applicationManagerStatusToJson(const ApplicationManagerStatus* status,
                                      char* json_buffer,
                                      size_t buffer_length);
 
-/*Cleanup Functions */
+/*-------------------------- Networking Functions ---------------------------------*/
+// net helper methods
+int parse_addr_toKritis3maddr(char* ip_port, Kritis3mSockaddr* dst);
+// creates filepaths of certificates and reads certificate
+int load_certificates(crypto_identity* identity);
+// obtains endpoint configuration from crypto identity and crypto_profile object
+int create_endpoint_config(crypto_identity* crypto_id,
+                           CryptoProfile* crypto_profile,
+                           asl_endpoint_configuration* ep_cfg);
 
+/*Cleanup Functions */
 void cleanup_configuration_manager(ConfigurationManager* configuation_manager);
 void cleanup_Systemconfiguration(SystemConfiguration* systemconfiguration);
-
 void free_ManagementConfiguration(Kritis3mManagemntConfiguration* config);
 void free_CryptoIdentity(crypto_identity* identity);
 void free_NodeConfig(Kritis3mNodeConfiguration* config);

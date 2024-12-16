@@ -7,9 +7,10 @@
 #include "cJSON.h"
 #include "configuration_parser.h"
 #include "errno.h"
+#include "io.h"
 #include "logging.h"
+#include "networking.h"
 #include "string.h"
-#include "utils.h"
 
 LOG_MODULE_CREATE(kritis3m_config_paser);
 
@@ -27,10 +28,9 @@ int parse_json_to_ManagementConfig(cJSON* json_management_service,
 {
         int ret = 0;
 
-        ret = parse_endpoint_addr(cJSON_GetObjectItem(json_management_service, "server_addr")->valuestring,
-                                  config->server_endpoint_addr.address,
-                                  ENDPOINT_LEN,
-                                  &config->server_endpoint_addr.port);
+        ret = parse_ip_address(cJSON_GetObjectItem(json_management_service, "server_addr")->valuestring,
+                               &config->server_endpoint_addr.address,
+                               &config->server_endpoint_addr.port);
         if (ret < 0)
                 goto error_occured;
         cJSON* js_middleware_path = cJSON_GetObjectItem(json_management_service,
@@ -44,7 +44,7 @@ int parse_json_to_ManagementConfig(cJSON* json_management_service,
         else
         {
                 LOG_DEBUG("no middleware path provided");
-                config->secure_middleware_path = string_duplicate(js_middleware_path->valuestring);
+                config->secure_middleware_path = duplicate_string(js_middleware_path->valuestring);
                 config->secure_middleware_path_size = strlen(config->secure_middleware_path) + 1;
         }
 
@@ -58,7 +58,7 @@ int parse_json_to_ManagementConfig(cJSON* json_management_service,
         else
         {
                 LOG_DEBUG("no middleware path provided");
-                config->pin = string_duplicate(js_pin->valuestring);
+                config->pin = duplicate_string(js_pin->valuestring);
                 config->pin_size = strlen(config->pin) + 1;
         }
 
@@ -101,10 +101,9 @@ int parse_json_to_ManagementConfig(cJSON* json_management_service,
         }
         config->identity.identity = nw_identitiy;
 
-        ret = parse_endpoint_addr(cJSON_GetObjectItem(json_identity, "server_addr")->valuestring,
-                                  config->identity.server_endpoint_addr.address,
-                                  ENDPOINT_LEN,
-                                  &config->identity.server_endpoint_addr.port);
+        ret = parse_ip_address(cJSON_GetObjectItem(json_identity, "server_addr")->valuestring,
+                               &config->identity.server_endpoint_addr.address,
+                               &config->identity.server_endpoint_addr.port);
         if (ret < 0)
                 goto error_occured;
 
@@ -116,7 +115,7 @@ int parse_json_to_ManagementConfig(cJSON* json_management_service,
                                  identity_path,
                                  config->identity.identity);
 
-        config->identity.revocation_list_url = string_duplicate(
+        config->identity.revocation_list_url = duplicate_string(
                 cJSON_GetObjectItem(json_identity, "revocation_list_url")->valuestring);
         if (config->identity.revocation_list_url == NULL)
         {
@@ -124,7 +123,7 @@ int parse_json_to_ManagementConfig(cJSON* json_management_service,
         }
         config->identity.revocation_list_url_size = strlen(config->identity.revocation_list_url) + 1; //'\0'
 
-        config->identity.server_url = string_duplicate(
+        config->identity.server_url = duplicate_string(
                 cJSON_GetObjectItem(json_identity, "server_url")->valuestring);
         if (config->identity.server_url == NULL)
         {
@@ -149,7 +148,7 @@ int parse_buffer_to_Config(char* json_buffer, int json_buffer_size, Kritis3mNode
         /** ---------------------------   Derive Folder Crypto Folder from crypto_path ------------------------- */
         // base crypto path
         cJSON* root = cJSON_ParseWithLength(json_buffer, json_buffer_size);
-        config->crypto_path = string_duplicate(cJSON_GetObjectItem(root, "crypto_path")->valuestring);
+        config->crypto_path = duplicate_string(cJSON_GetObjectItem(root, "crypto_path")->valuestring);
         if (config->crypto_path == NULL)
         {
                 ret = -1;
@@ -157,7 +156,7 @@ int parse_buffer_to_Config(char* json_buffer, int json_buffer_size, Kritis3mNode
         }
         config->crypto_path_size = strlen(config->crypto_path) + 1;
 
-        config->config_path = string_duplicate(cJSON_GetObjectItem(root, "config_path")->valuestring);
+        config->config_path = duplicate_string(cJSON_GetObjectItem(root, "config_path")->valuestring);
         if (config->config_path == NULL)
         {
                 ret = -1;
@@ -167,42 +166,42 @@ int parse_buffer_to_Config(char* json_buffer, int json_buffer_size, Kritis3mNode
 
         // machine folder
         snprintf(helper_string, sizeof(helper_string), "%s/%s", config->crypto_path, "machine");
-        config->machine_crypto_path = string_duplicate(helper_string);
+        config->machine_crypto_path = duplicate_string(helper_string);
         if (config->machine_crypto_path == NULL)
                 goto error_occured;
         config->machine_crypto_path_size = strlen(config->machine_crypto_path) + 1;
 
         // identity folder
         snprintf(helper_string, sizeof(helper_string), "%s/%s", config->crypto_path, "identity");
-        config->pki_cert_path = string_duplicate(helper_string);
+        config->pki_cert_path = duplicate_string(helper_string);
         if (config->pki_cert_path == NULL)
                 goto error_occured;
         config->pki_cert_path_size = strlen(config->pki_cert_path) + 1;
 
         // management_service
         snprintf(helper_string, sizeof(helper_string), "%s/%s", config->pki_cert_path, "management_service");
-        config->management_service_path = string_duplicate(helper_string);
+        config->management_service_path = duplicate_string(helper_string);
         if (config->management_service_path == NULL)
                 goto error_occured;
         config->management_service_path_size = strlen(config->management_service_path) + 1;
 
         // management
         snprintf(helper_string, sizeof(helper_string), "%s/%s", config->pki_cert_path, "management");
-        config->management_path = string_duplicate(helper_string);
+        config->management_path = duplicate_string(helper_string);
         if (config->management_path == NULL)
                 goto error_occured;
         config->management_path_size = strlen(config->management_path) + 1;
 
         // remote
         snprintf(helper_string, sizeof(helper_string), "%s/%s", config->pki_cert_path, "remote");
-        config->remote_path = string_duplicate(helper_string);
+        config->remote_path = duplicate_string(helper_string);
         if (config->remote_path == NULL)
                 goto error_occured;
         config->remote_path_size = strlen(config->remote_path) + 1;
 
         // production
         snprintf(helper_string, sizeof(helper_string), "%s/%s", config->pki_cert_path, "production");
-        config->production_path = string_duplicate(helper_string);
+        config->production_path = duplicate_string(helper_string);
         if (config->production_path == NULL)
                 goto error_occured;
         config->production_path_size = strlen(config->production_path) + 1;
@@ -221,7 +220,7 @@ int parse_buffer_to_Config(char* json_buffer, int json_buffer_size, Kritis3mNode
         /** ------------------------------- Application Config--------------------------------------- */
         // primary file path
         snprintf(helper_string, sizeof(helper_string), "%s/%s", config->config_path, "primary.json");
-        config->primary_path = string_duplicate(helper_string);
+        config->primary_path = duplicate_string(helper_string);
         if (config->primary_path == NULL)
         {
                 goto error_occured;
@@ -230,7 +229,7 @@ int parse_buffer_to_Config(char* json_buffer, int json_buffer_size, Kritis3mNode
 
         // secondary file path
         snprintf(helper_string, sizeof(helper_string), "%s/%s", config->config_path, "secondary.json");
-        config->secondary_path = string_duplicate(helper_string);
+        config->secondary_path = duplicate_string(helper_string);
         if (config->secondary_path == NULL)
         {
                 goto error_occured;
@@ -526,10 +525,9 @@ ManagementReturncode parse_application(cJSON* json_obj, Kritis3mApplications* ap
         item = cJSON_GetObjectItem(json_obj, "server_endpoint_addr");
         if (item == NULL)
                 goto error_occured;
-        ret = parse_endpoint_addr(item->valuestring,
-                                  application->server_endpoint_addr.address,
-                                  ENDPOINT_LEN,
-                                  &application->server_endpoint_addr.port);
+        ret = parse_ip_address(item->valuestring,
+                               &application->server_endpoint_addr.address,
+                               &application->server_endpoint_addr.port);
         if (ret < 0)
         {
                 LOG_ERROR("cant parse ip addr from ip:port");
@@ -540,10 +538,9 @@ ManagementReturncode parse_application(cJSON* json_obj, Kritis3mApplications* ap
         if (item == NULL)
                 goto error_occured;
 
-        ret = parse_endpoint_addr(item->valuestring,
-                                  application->client_endpoint_addr.address,
-                                  ENDPOINT_LEN,
-                                  &application->client_endpoint_addr.port);
+        ret = parse_ip_address(item->valuestring,
+                               &application->client_endpoint_addr.address,
+                               &application->client_endpoint_addr.port);
         if (ret < 0)
         {
                 LOG_ERROR("cant parse ip addr from ip:port");
@@ -603,10 +600,9 @@ ManagementReturncode parse_crypo_identity(cJSON* identity_json,
         if ((item == NULL) || (strlen(item->valuestring) < 1))
                 goto error_occured;
 
-        ret = parse_endpoint_addr(item->valuestring,
-                                  identity->server_endpoint_addr.address,
-                                  ENDPOINT_LEN,
-                                  &identity->server_endpoint_addr.port);
+        ret = parse_ip_address(item->valuestring,
+                               &identity->server_endpoint_addr.address,
+                               &identity->server_endpoint_addr.port);
         if (ret < 0)
         {
                 LOG_ERROR("cant parse ip addr from ip:port");
@@ -623,7 +619,7 @@ ManagementReturncode parse_crypo_identity(cJSON* identity_json,
         }
         else
         {
-                identity->server_url = string_duplicate(item->valuestring);
+                identity->server_url = duplicate_string(item->valuestring);
                 identity->server_url_size = strlen(identity->server_url) + 1;
         }
         return ret;

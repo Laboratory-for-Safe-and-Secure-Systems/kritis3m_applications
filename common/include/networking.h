@@ -48,7 +48,7 @@ struct network_interfaces const* network_interfaces(void);
 int add_ipv4_address(void* iface, struct in_addr ipv4_addr);
 
 /* Add an ipv4 or ipv6 addr*/
-int add_ip_address(const char* device, const char* ip_addr, const char* cidr, int is_ipv6);
+int add_ip_address(const char* device, const char* ip_addr, const char* cidr, bool is_ipv6);
 
 /* Remove an ip address from a network interface */
 int remove_ipv4_address(void* iface, struct in_addr ipv4_addr);
@@ -70,5 +70,25 @@ int address_lookup_server(char const* dest, uint16_t port, struct addrinfo** add
  * Return value is the socket file descriptor or -1 in case of an error.
  */
 int create_listening_socket(int type, struct sockaddr* addr, socklen_t addr_len);
+
+/**
+ * @brief Parses an input string to extract an IP address and port number.
+ *
+ * @param input The input string containing an IP address and/or port (e.g., "127.0.0.1:4433",
+ * "[::1]:4433", "localhost:4433").
+ * @param ip Pointer to a string where the extracted IP address will be stored. Memory is allocated
+ * dynamically and must be freed by the caller.
+ * @param port Pointer to a `uint16_t` where the extracted port number will be stored. If no port is
+ * provided, it will be set to 0.
+ * @return 0 on success, -1 on failure (error messages are logged).
+ *
+ * @note The function supports IPv4, IPv6, and URI formats, and checks for invalid port numbers or
+ * malformed input.
+ */
+int parse_ip_address(char* input, char** ip, uint16_t* port);
+
+int parse_ip_cidr(const char* ip_cidr, char* ip_addr, size_t ip_len, char* cidr, size_t cidr_len);
+
+int is_ipv6(const char* ip_str);
 
 #endif

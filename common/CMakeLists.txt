@@ -5,6 +5,7 @@ add_library(kritis3m_applications_common STATIC
         ${CMAKE_CURRENT_SOURCE_DIR}/src/logging.c
         ${CMAKE_CURRENT_SOURCE_DIR}/src/poll_set.c
         ${CMAKE_CURRENT_SOURCE_DIR}/src/timing_metrics.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/io.c
 )
 
 # Add the getopt implementation for Windows if MSVC is used
@@ -26,10 +27,10 @@ endif()
 
 # Link the library with the required libraries
 if(NOT MSVC)
-        target_link_libraries(kritis3m_applications_common
+        target_link_libraries(kritis3m_applications_common PRIVATE
                 m # Timing metrics need the math library
         )
 endif()
 if(WIN32)
-        target_link_libraries(kritis3m_applications_common wsock32 ws2_32)
+        target_link_libraries(kritis3m_applications_common PRIVATE wsock32 ws2_32)
 endif()

@@ -10,6 +10,7 @@
         #include <sys/types.h>
         #include <winsock2.h>
 #else
+        #include <ctype.h>
         #include <stdarg.h>
         #include <stdbool.h>
         #include <stdio.h>
@@ -23,6 +24,7 @@
         #include <unistd.h>
 #endif
 
+#include "io.h"
 #include "logging.h"
 #include "networking.h"
 
@@ -39,6 +41,260 @@ static struct network_interfaces ifaces = {
         .lan = NULL,
         .wan = NULL,
 };
+
+static int is_numeric(char const* str)
+{
+        while (*str)
+        {
+                if (!isdigit(*str))
+                        return 0;
+                str++;
+        }
+
+        return 1;
+}
+
+/**
+ * @brief Parses an input string to extract an IP address and port number.
+ *
+ * @param input The input string containing an IP address and/or port (e.g., "127.0.0.1:4433",
+ * "[::1]:4433", "localhost:4433").
+ * @param ip Pointer to a string where the extracted IP address will be stored. Memory is allocated
+ * dynamically and must be freed by the caller.
+ * @param port Pointer to a `uint16_t` where the extracted port number will be stored. If no port is
+ * provided, it will be set to 0.
+ * @return 0 on success, -1 on failure (error messages are logged).
+ *
+ * @note The function supports IPv4, IPv6, and URI formats, and checks for invalid port numbers or
+ * malformed input.
+ */
+int parse_ip_address(char* input, char** ip, uint16_t* port)
+{
+        /* Search for the first colon.
+         *
+         * 1) If non is found, we have either only an IPv4 address, or only an URI, or
+         *    only a port number, e.g. "127.0.0.1", "localhost" or "4433".
+         *
+         * 2) If we only find a single colon, we have either an IPv4 address or an URI
+         *    with a port number, e.g. "127.0.0.1:4433" or "localhost:4433".
+         *
+         * 3) If we find multiple colons, we have an IPv6 address. In this case, we have
+         *    to check whether a port is also provided. If so, the IPv6 address must be
+         *    wrapped in square brackets, e.g. "[::1]:4433".
+         *    Otherwise, only an address is given, e.g. "::1".
+         *
+         * Rough code at the momemt, but it works for now...
+         * ToDo: Refactor this code to make it more readable and maintainable.
+         */
+        char* first_colon = strchr(input, ':');
+
+        if (first_colon == NULL)
+        {
+                /* First case */
+
+                struct in_addr addr;
+                if (net_addr_pton(AF_INET, input, &addr) == 1)
+                {
+                        /* We have an IPv4 address */
+                        *ip = duplicate_string(input);
+                        if (*ip == NULL)
+                        {
+                                LOG_ERROR("unable to allocate memory for IP address");
+                                return -1;
+                        }
+                        *port = 0;
+                }
+                else if (is_numeric(input))
+                {
+                        /* We have a port number */
+                        *ip = NULL;
+                        unsigned long new_port = strtoul(input, NULL, 10);
+                        if ((new_port == 0) || (new_port > 65535))
+                        {
+                                LOG_ERROR("invalid port number %lu", new_port);
+                                return -1;
+                        }
+                        *port = (uint16_t) new_port;
+                }
+                else
+                {
+                        /* We have an URI */
+                        *ip = duplicate_string(input);
+                        if (*ip == NULL)
+                        {
+                                LOG_ERROR("unable to allocate memory for IP address");
+                                return -1;
+                        }
+                        *port = 0;
+                }
+        }
+        else
+        {
+                char* last_colon = strchr(first_colon + 1, ':');
+
+                if (last_colon == NULL)
+                {
+                        /* Second case */
+
+                        *first_colon = '\0';
+                        *ip = duplicate_string(input);
+                        if (*ip == NULL)
+                        {
+                                LOG_ERROR("unable to allocate memory for IP address");
+                                return -1;
+                        }
+                        unsigned long new_port = strtoul(first_colon + 1, NULL, 10);
+                        if ((new_port == 0) || (new_port > 65535))
+                        {
+                                LOG_ERROR("invalid port number %lu", new_port);
+                                return -1;
+                        }
+                        *port = (uint16_t) new_port;
+                }
+                else
+                {
+                        /* Third case */
+
+                        /* Move to the last colon*/
+                        char* tmp = last_colon;
+                        while ((tmp = strchr(tmp + 1, ':')) != NULL)
+                        {
+                                last_colon = tmp;
+                        }
+
+                        if (*(last_colon - 1) == ']')
+                        {
+                                if (*input != '[')
+                                {
+                                        LOG_ERROR("invalid IPv6 address: %s", input);
+                                        return -1;
+                                }
+
+                                /* Port is given */
+                                *(last_colon - 1) = '\0';
+
+                                *ip = duplicate_string(input + 1);
+                                if (*ip == NULL)
+                                {
+                                        LOG_ERROR("unable to allocate memory for IP address");
+                                        return -1;
+                                }
+                                unsigned long new_port = strtoul(last_colon + 1, NULL, 10);
+                                if ((new_port == 0) || (new_port > 65535))
+                                {
+                                        LOG_ERROR("invalid port number %lu", new_port);
+                                        return -1;
+                                }
+                                *port = (uint16_t) new_port;
+                        }
+                        else
+                        {
+                                /* Check if the user wrongly provided a port without square brackets */
+                                *last_colon = '\0';
+                                struct in6_addr addr;
+                                if (net_addr_pton(AF_INET6, input, &addr) == 1)
+                                {
+                                        *last_colon = ':';
+                                        LOG_ERROR("missing square brackets around IPv6 address "
+                                                  "before port: %s",
+                                                  input);
+                                        return -1;
+                                }
+                                *last_colon = ':';
+
+                                /* No port given */
+                                *ip = duplicate_string(input);
+                                if (*ip == NULL)
+                                {
+                                        LOG_ERROR("unable to allocate memory for IP address");
+                                        return -1;
+                                }
+                                *port = 0;
+                        }
+                }
+        }
+
+        return 0;
+}
+
+/**
+ * @brief Parses an IP address and CIDR prefix from a string.
+ *
+ * Extracts the IP address and CIDR prefix from a `<ip_address>/<cidr>` format.
+ * Validates the IP address format using `inet_pton`. Ensures buffers are sufficient.
+ *
+ * @param[in]  ip_cidr    Input string with IP/CIDR.
+ * @param[out] ip_addr    Buffer to store the IP address.
+ * @param[in]  ip_len     Length of the IP address buffer.
+ * @param[out] cidr       Buffer to store the CIDR prefix.
+ * @param[in]  cidr_len   Length of the CIDR buffer.
+ *
+ * @return int 0 on success, -1 on error (e.g., invalid format, insufficient buffer).
+ */
+int parse_ip_cidr(const char* ip_cidr, char* ip_addr, size_t ip_len, char* cidr, size_t cidr_len)
+{
+        if (!ip_cidr || !ip_addr || !cidr || ip_len == 0 || cidr_len == 0)
+        {
+                return -1; // Invalid parameters
+        }
+
+        // Locate the slash separating IP and CIDR
+        const char* slash = strchr(ip_cidr, '/');
+        if (!slash)
+        {
+                return -1; // No CIDR part found
+        }
+
+        // Calculate the length of the IP address part
+        size_t ip_part_len = slash - ip_cidr;
+        if (ip_part_len >= ip_len)
+        {
+                return -1; // IP address buffer is too small
+        }
+
+        // Copy and null-terminate the IP address
+        strncpy(ip_addr, ip_cidr, ip_part_len);
+        ip_addr[ip_part_len] = '\0';
+
+        // Validate the IP address format (IPv4 or IPv6)
+        struct in_addr ipv4;
+        struct in6_addr ipv6;
+        if (inet_pton(AF_INET, ip_addr, &ipv4) != 1 && inet_pton(AF_INET6, ip_addr, &ipv6) != 1)
+        {
+                return -1; // Invalid IP address
+        }
+
+        // Copy and null-terminate the CIDR prefix
+        size_t cidr_part_len = strlen(slash + 1);
+        if (cidr_part_len >= cidr_len)
+        {
+                return -1; // CIDR buffer is too small
+        }
+        strncpy(cidr, slash + 1, cidr_len - 1);
+        cidr[cidr_len - 1] = '\0';
+
+        return 0;
+}
+
+/**
+ * @brief Checks if the given IP address is a valid IPv6 address.
+ *
+ * Uses `inet_pton` to determine if the provided IP string is a valid IPv6 address.
+ *
+ * @param[in] ip_str Input string containing the IP address.
+ *
+ * @return int 1 if the IP is a valid IPv6 address, 0 otherwise.
+ */
+int is_ipv6(const char* ip_str)
+{
+        if (!ip_str)
+        {
+                return 0; // Null input is not a valid IPv6 address
+        }
+
+        struct in6_addr ipv6;
+        return inet_pton(AF_INET6, ip_str, &ipv6) == 1;
+}
 
 #if defined(__ZEPHYR__)
 
@@ -518,7 +774,7 @@ static int address_lookup_internal(char const* dest, uint16_t port, struct addri
 }
 
 #ifdef _WIN32
-int add_ip_address(const char* device, const char* ip_addr, const char* cidr, int is_ipv6)
+int add_ip_address(const char* device, const char* ip_addr, const char* cidr, bool is_ipv6)
 {
         char cmd[512];
         char* output = NULL;
@@ -537,7 +793,7 @@ int add_ip_address(const char* device, const char* ip_addr, const char* cidr, in
 }
 
 #else
-int add_ip_address(const char* device, const char* ip_addr, const char* cidr, int is_ipv6)
+int add_ip_address(const char* device, const char* ip_addr, const char* cidr, bool is_ipv6)
 {
         char cmd[512];
         char* output = NULL;

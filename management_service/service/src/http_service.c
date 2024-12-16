@@ -13,7 +13,6 @@
 #include "linux_comp.h"
 #include "logging.h"
 #include "networking.h"
-#include "utils.h"
 LOG_MODULE_CREATE(http_service);
 
 #define DISTRIBUTION_BUFFER_SIZE 5000
@@ -218,44 +217,40 @@ static void http_status_cb(struct http_response* rsp, enum http_final_call final
         {
                 switch (rsp->http_status_code)
                 {
-                case HTTP_OK:
+                case 200: // bad request
                         LOG_INFO("SUCCESFULL REQUEST");
+
+                        // DEBUG OUTPUT
+                        LOG_DEBUG("received %d bytes from server", rsp->body_frag_len);
+
                         http_request_status->bytes_received = rsp->body_frag_len;
+                        http_request_status->http_status_code = rsp->http_status_code;
                         http_request_status->buffer_frag_start = rsp->body_frag_start;
                         http_request_status->ret = MGMT_OK;
                         break;
-                case HTTP_BAD_REQUEST:
-                        LOG_ERROR("bad request");
-                        http_request_status->ret = MGMT_BAD_PARAMS;
-                        goto error_occured;
-                        break;
-                case HTTP_SERVICE_UNAVAILABLE:
-                        http_request_status->ret = MGMT_BAD_REQUEST;
-                        goto error_occured;
-                        break;
-                case HTTP_TOO_MANY_REQUESTS:
-                        LOG_DEBUG("Retry later");
-                        http_request_status->ret = MGMT_BUSY;
-                        goto error_occured;
-                        break;
                 default:
-                        LOG_ERROR("responded http code is not handled, http response code: %d",
-                                  rsp->http_status_code);
-                        break;
-                }
+                        {
+                                LOG_ERROR("status code: %d. Request not succesfull",
+                                          rsp->http_status_code);
 
-                http_request_status->http_status_code = HTTP_OK;
+                                // fill caller response. Since buffer is not dynamically created, it must be not freed
+                                http_request_status->http_status_code = rsp->http_status_code;
+                                http_request_status->buffer = NULL;
+                                http_request_status->buffer_frag_start = NULL;
+                                http_request_status->bytes_received = 0;
+                                http_request_status->ret = MGMT_ERR;
+                                if (!rsp->body_frag_start)
+                                {
+                                        LOG_DEBUG("Server error response: %s", rsp->body_frag_start);
+                                }
+                        }
+                }
         }
         else
         {
                 LOG_DEBUG("Partial data received (%zd bytes)", rsp->data_len);
         }
 
-        return;
-error_occured:
-        http_request_status->http_status_code = rsp->http_status_code;
-        http_request_status->bytes_received = 0;
-        http_request_status->buffer_frag_start = NULL;
         return;
 }
 

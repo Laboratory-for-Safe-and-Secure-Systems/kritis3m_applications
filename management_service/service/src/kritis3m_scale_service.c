@@ -8,12 +8,10 @@
 #include "logging.h"
 #include "networking.h"
 #include "sys/timerfd.h"
-#include "utils.h"
 
 #include "cJSON.h"
 #include "http_client.h"
 
-#include "crypto_parser.h"
 #include "kritis3m_application_manager.h"
 #include "kritis3m_scale_service.h"
 
@@ -77,7 +75,6 @@ typedef struct service_message
 // forward declarations
 void* start_kristis3m_service(void* arg);
 void init_configuration_manager(ConfigurationManager* manager, Kritis3mNodeConfiguration* node_config);
-int create_folder_structure(Kritis3mNodeConfiguration* node_cfg);
 enum MSG_RESPONSE_CODE svc_request_helper(int socket, service_message* msg);
 int initial_policy_request_cb(struct response response);
 
@@ -341,61 +338,6 @@ terminate:
         return NULL;
 }
 
-// deprecated
-int create_identity_folder(const char* base_path, network_identity identity)
-{
-        char identity_path[256];
-
-        // Get the path for the identity folder
-        if (get_identity_folder_path(identity_path, sizeof(identity_path), base_path, identity) == -1)
-        {
-                return -1;
-        }
-        // Create the directory for the specified identity
-        if (create_directory(identity_path) == -1)
-        {
-                return -1;
-        }
-
-        return 0;
-}
-
-//@todo clean up
-int create_folder_structure(Kritis3mNodeConfiguration* node_config)
-{
-        char helper_string[512];
-        /**---------------------- Create Base Folder Structure -------------------------- */
-        if (!directory_exists(node_config->config_path))
-        {
-                LOG_ERROR("config path does not exist. Pls check the config folder path, or create "
-                          "the folder");
-                return -1;
-        }
-        if (!directory_exists(node_config->crypto_path))
-        {
-                LOG_ERROR("crypto path does not exist. Pls check the crypto folder path, or create "
-                          "the folder");
-                return -1;
-        }
-
-        /**---------------------- Create Identity Path and machine path -------------------------- */
-        if (create_directory(node_config->pki_cert_path) == -1)
-                return -1;
-        if (create_directory(node_config->machine_crypto_path) == -1)
-                return -1;
-        if (create_directory(node_config->management_path) == -1)
-                return -1;
-        if (create_directory(node_config->management_service_path) == -1)
-                return -1;
-        if (create_directory(node_config->remote_path) == -1)
-                return -1;
-        if (create_directory(node_config->production_path) == -1)
-                return -1;
-
-        /**------------------------Create Subfolder for application config primary and secondary ----*/
-        return 0;
-}
-
 void init_configuration_manager(ConfigurationManager* manager, Kritis3mNodeConfiguration* node_config)
 {
         if ((node_config == NULL) || (manager == NULL))
@@ -409,29 +351,6 @@ void init_configuration_manager(ConfigurationManager* manager, Kritis3mNodeConfi
 
 //------------------------------------------ HARDWARE INFORMATION --------------------------------------- //
 #define MAX_CMD_LENGTH 512
-
-static int is_ipv6_address(const char* ip_cidr)
-{
-        return (strchr(ip_cidr, ':') != NULL);
-}
-
-static int parse_ip_cidr(const char* ip_cidr, char* ip_addr, char* cidr)
-{
-        const char* slash = strchr(ip_cidr, '/');
-        if (!slash)
-        {
-                return -1;
-        }
-
-        size_t ip_len = slash - ip_cidr;
-        strncpy(ip_addr, ip_cidr, ip_len);
-        ip_addr[ip_len] = '\0';
-
-        strncpy(cidr, slash + 1, 3);
-        cidr[3] = '\0';
-
-        return 0;
-}
 
 int prepare_all_interfaces(HardwareConfiguration hw_config[], int num_configs)
 {
@@ -447,15 +366,15 @@ int prepare_all_interfaces(HardwareConfiguration hw_config[], int num_configs)
         // Process each interface configuration
         for (int i = 0; i < num_configs; i++)
         {
-                if (parse_ip_cidr(hw_config[i].ip_cidr, ip_addr, cidr) != 0)
+                if (parse_ip_cidr(hw_config[i].ip_cidr, ip_addr, INET6_ADDRSTRLEN, cidr, 4) != 0)
                 {
                         failures++;
                         continue;
                 }
 
-                int is_ipv6 = is_ipv6_address(hw_config[i].ip_cidr);
+                bool is_v6 = is_ipv6(ip_addr);
 
-                if (add_ip_address(hw_config[i].device, ip_addr, cidr, is_ipv6) < 0)
+                if (add_ip_address(hw_config[i].device, ip_addr, cidr, is_v6) < 0)
                 {
                         failures++;
                 }

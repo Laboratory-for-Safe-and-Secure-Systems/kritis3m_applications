@@ -1,13 +1,15 @@
-#include "kritis3m_configuration.h" // Assuming this is the header file containing the struct definitions
-#include "cJSON.h"
-#include "configuration_parser.h"
-#include "errno.h"
-#include "logging.h"
-#include "utils.h"
+#include <arpa/inet.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+
+#include "cJSON.h"
+#include "configuration_parser.h"
+#include "errno.h"
+#include "kritis3m_configuration.h" // Assuming this is the header file containing the struct definitions
+#include "logging.h"
+#include "networking.h"
 LOG_MODULE_CREATE(kritis3m_configuration);
 
 // Function prototypes
@@ -23,17 +25,19 @@ int get_Kritis3mNodeConfiguration(char* filename, Kritis3mNodeConfiguration* con
 {
         int ret = 0;
         uint8_t* json_buffer = NULL;
-        int file_size = -1;
+        int file_size = 0;
 
         if ((filename == NULL) || (config == NULL))
                 goto error_occured;
 
-        ret = read_file(filename, &json_buffer, &file_size);
-        if ((ret < 0) || (file_size <= 0))
+        ret = readFile(filename, &json_buffer, file_size);
+        if (ret < 0)
         {
                 LOG_ERROR("can't read node configuration file");
                 goto error_occured;
         }
+        file_size += ret;
+
         ret = parse_buffer_to_Config(json_buffer, file_size, config);
         if (ret < 0)
         {
@@ -63,23 +67,19 @@ ManagementReturncode get_systemconfig(char* filename,
         int ret = 0;
         ManagementReturncode retval = MGMT_OK;
         uint8_t* json_buffer = NULL;
-        int file_size = -1;
+        int file_size = 0;
 
         if ((filename == NULL) || (systemconfig == NULL))
                 goto error_occured;
 
-        ret = read_file(filename, &json_buffer, &file_size);
+        ret = readFile(filename, &json_buffer, file_size);
         if ((ret < 0))
         {
                 retval = MGMT_ERR;
                 LOG_ERROR("can't read systemconfiguration file");
                 goto error_occured;
         }
-        else if (file_size <= 1)
-        {
-                retval = MGMT_EMPTY_OBJECT_ERROR;
-                goto error_occured;
-        }
+        file_size += ret;
 
         retval = parse_buffer_to_SystemConfiguration(json_buffer,
                                                      file_size,
@@ -201,20 +201,6 @@ error_occured:
         return ret;
 }
 
-int write_SystemConfig_toflash(SystemConfiguration* sys_cfg, char* filepath, int filepath_size)
-{
-        memset(filepath, 0, sizeof(filepath));
-        // SystemConfig to json String
-        // reads and parses data from filepath to sys_config object
-        char* buffer;
-        int buffer_size;
-        int ret = write_file(filepath, buffer, buffer_size);
-        return ret;
-error_occured:
-        if (ret > -1)
-                ret = -1;
-}
-
 Kritis3mApplications* find_application_by_application_id(Kritis3mApplications* appls,
                                                          int number_appls,
                                                          int appl_id)
@@ -251,6 +237,100 @@ int get_identity_folder_path(char* out_path, size_t size, const char* base_path,
         return 0;
 }
 
+int load_certificates(crypto_identity* identity)
+{
+        int ret = 0;
+        char filepath[MAX_FILEPATH_SIZE];
+        if (!identity || !identity->filepath)
+                return -1;
+
+        memset(filepath, 0, MAX_FILEPATH_SIZE);
+        snprintf(filepath, sizeof(filepath), "%s/cert.pem", identity->filepath);
+        identity->certificates.root_path = duplicate_string(filepath);
+
+        memset(filepath, 0, MAX_FILEPATH_SIZE);
+        snprintf(filepath, sizeof(filepath), "%s/privateKey.pem", identity->filepath);
+        identity->certificates.private_key_path = duplicate_string(filepath);
+
+        memset(filepath, 0, MAX_FILEPATH_SIZE);
+        snprintf(filepath, sizeof(filepath), "%s/chain.pem", identity->filepath);
+        identity->certificates.certificate_path = duplicate_string(filepath);
+
+        memset(filepath, 0, MAX_FILEPATH_SIZE);
+        snprintf(filepath, sizeof(filepath), "%s/additional_key.pem", identity->filepath);
+        identity->certificates.chain_buffer = duplicate_string(filepath);
+
+        memset(filepath, 0, MAX_FILEPATH_SIZE);
+        snprintf(filepath, sizeof(filepath), "%s/additional_key.pem", identity->filepath);
+        if (file_exists(filepath))
+        {
+                identity->certificates.additional_key_path = duplicate_string(filepath);
+        }
+
+        memset(filepath, 0, MAX_FILEPATH_SIZE);
+        snprintf(filepath, sizeof(filepath), "%s/intermediate.pem", identity->filepath);
+        if (file_exists(filepath))
+        {
+                identity->certificates.intermediate_path = duplicate_string(filepath);
+        }
+
+        if ((ret = read_certificates(&identity->certificates)) < 0)
+        {
+                LOG_ERROR("can't read certificates");
+                cleanup_certificates(&identity->certificates);
+                return -1;
+        }
+        return 0;
+}
+
+int create_endpoint_config(crypto_identity* crypto_id,
+                           CryptoProfile* crypto_profile,
+                           asl_endpoint_configuration* ep_cfg)
+{
+
+        int ret = 0;
+        if ((crypto_id == NULL) || (crypto_profile == NULL) || (ep_cfg == NULL))
+                goto error_occured;
+
+        if (!crypto_id->certificates_available)
+        {
+
+                ret = load_certificates(crypto_id);
+                if (ret < 0)
+                        goto error_occured;
+                crypto_id->certificates_available = true;
+        }
+        ep_cfg->pkcs11.module_path = crypto_profile->secure_middleware_path;
+        ep_cfg->pkcs11.module_pin = crypto_profile->pin;
+
+        ep_cfg->hybrid_signature_mode = crypto_profile->HybridSignatureMode;
+        ep_cfg->key_exchange_method = crypto_profile->ASLKeyExchangeMethod;
+        ep_cfg->mutual_authentication = crypto_profile->MutualAuthentication;
+        ep_cfg->no_encryption = crypto_profile->NoEncryption;
+
+        ep_cfg->device_certificate_chain.buffer = crypto_id->certificates.chain_buffer;
+        ep_cfg->device_certificate_chain.size = crypto_id->certificates.chain_buffer_size;
+
+        ep_cfg->root_certificate.buffer = crypto_id->certificates.root_buffer;
+        ep_cfg->root_certificate.size = crypto_id->certificates.root_buffer_size;
+
+        ep_cfg->private_key.buffer = crypto_id->certificates.key_buffer;
+        ep_cfg->private_key.size = crypto_id->certificates.key_buffer_size;
+
+        ep_cfg->private_key.additional_key_buffer = crypto_id->certificates.additional_key_buffer;
+        ep_cfg->private_key.additional_key_size = crypto_id->certificates.additional_key_buffer_size;
+        ep_cfg->private_key.size = crypto_id->certificates.key_buffer_size;
+
+        return ret;
+
+error_occured:
+        if (ret > 0)
+                ret = -1;
+        LOG_ERROR("can't create asl_endpoint_configuration");
+
+        return ret;
+}
+
 void free_ManagementConfiguration(Kritis3mManagemntConfiguration* config)
 {
         memset(config->serial_number, 0, SERIAL_NUMBER_SIZE);
@@ -276,36 +356,16 @@ void free_CryptoIdentity(crypto_identity* identity)
 {
         if (identity == NULL)
                 return;
-        identity->filepath_size = 0;
-        identity->server_url_size = 0;
-        identity->revocation_list_url_size = 0;
-        identity->certificates.additional_key_buffer_size = 0;
-        identity->certificates.root_buffer_size = 0;
-        identity->certificates.key_buffer_size = 0;
-        identity->certificates.chain_buffer_size = 0;
-        if (identity != NULL)
-        {
-                if (identity->filepath != NULL)
-                        free(identity->filepath);
+        if (identity->filepath != NULL)
+                free(identity->filepath);
 
-                if (identity->server_url != NULL)
-                        free(identity->server_url);
+        if (identity->server_url != NULL)
+                free(identity->server_url);
 
-                if (identity->revocation_list_url != NULL)
-                        free(identity->revocation_list_url);
+        if (identity->revocation_list_url != NULL)
+                free(identity->revocation_list_url);
 
-                if (identity->certificates.additional_key_buffer != NULL)
-                        free(identity->certificates.additional_key_buffer);
-
-                if (identity->certificates.key_buffer != NULL)
-                        free(identity->certificates.key_buffer);
-
-                if (identity->certificates.chain_buffer != NULL)
-                        free(identity->certificates.chain_buffer);
-
-                if (identity->certificates.root_buffer != NULL)
-                        free(identity->certificates.root_buffer);
-        }
+        cleanup_certificates(&identity->certificates);
 }
 
 void free_NodeConfig(Kritis3mNodeConfiguration* config)
@@ -399,10 +459,18 @@ void cleanup_Systemconfiguration(SystemConfiguration* systemconfiguration)
                 appl->log_level = 0;
                 appl->state = false;
                 appl->type = UNDEFINED;
-                memset(appl->client_endpoint_addr.address, 0, ENDPOINT_LEN);
+                if (appl->client_endpoint_addr.address != NULL)
+                {
+                        free(appl->client_endpoint_addr.address);
+                        appl->client_endpoint_addr.address = NULL;
+                }
                 appl->client_endpoint_addr.port = 0;
 
-                memset(appl->server_endpoint_addr.address, 0, ENDPOINT_LEN);
+                if (appl->server_endpoint_addr.address != NULL)
+                {
+                        free(appl->server_endpoint_addr.address);
+                        appl->server_endpoint_addr.address = NULL;
+                }
                 appl->server_endpoint_addr.port = 0;
         }
 
@@ -411,7 +479,12 @@ void cleanup_Systemconfiguration(SystemConfiguration* systemconfiguration)
         {
                 crypto_identity* cr_identity = &systemconfiguration->application_config.crypto_identity[i];
                 cr_identity->identity = MANAGEMENT_SERVICE;
-                memset(cr_identity->server_endpoint_addr.address, 0, ENDPOINT_LEN);
+
+                if (cr_identity->server_endpoint_addr.address != NULL)
+                {
+                        free(cr_identity->server_endpoint_addr.address);
+                        cr_identity->server_endpoint_addr.address = NULL;
+                }
                 cr_identity->server_endpoint_addr.port = 0;
                 free_CryptoIdentity(cr_identity);
         }
@@ -469,4 +542,49 @@ char* applicationManagerStatusToJson(const ApplicationManagerStatus* status,
         cJSON_Delete(json_obj);
 
         return json_buffer;
+}
+
+// !not working with url
+int parse_addr_toKritis3maddr(char* ip_port, Kritis3mSockaddr* dst)
+{
+        uint16_t port = 0;
+        char* ip;
+        int proto_family = -1;
+        int ret = 0;
+
+        // Validate input
+        if (ip_port == NULL)
+        {
+                goto error_occured;
+        }
+
+        ret = parse_ip_address(ip_port, &ip, &port);
+        if (ret < 0)
+                goto error_occured;
+
+        if (inet_pton(AF_INET, ip, &dst->sockaddr_in.sin_addr) == 1)
+        {
+                dst->sockaddr_in.sin_family = AF_INET;
+                dst->sockaddr_in.sin_port = htons(port);
+        }
+        else if (inet_pton(AF_INET6, ip, &dst->sockaddr_in6.sin6_addr) == 1)
+        {
+                dst->sockaddr_in6.sin6_family = AF_INET6;
+                dst->sockaddr_in6.sin6_port = htons(port);
+        }
+        else
+        {
+                goto error_occured;
+        }
+
+        if (!ip)
+                free(ip);
+
+        return 0;
+
+error_occured:
+        if (!ip)
+                free(ip);
+        LOG_ERROR("can't parse json ip format to KRITIS3MSocket");
+        return -1;
 }
