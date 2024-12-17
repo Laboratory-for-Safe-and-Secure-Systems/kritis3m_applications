@@ -25,18 +25,17 @@ int get_Kritis3mNodeConfiguration(char* filename, Kritis3mNodeConfiguration* con
 {
         int ret = 0;
         uint8_t* json_buffer = NULL;
-        int file_size = 0;
+        size_t file_size = 0;
 
         if ((filename == NULL) || (config == NULL))
                 goto error_occured;
 
-        ret = readFile(filename, &json_buffer, file_size);
+        ret = read_file(filename, &json_buffer, &file_size);
         if (ret < 0)
         {
                 LOG_ERROR("can't read node configuration file");
                 goto error_occured;
         }
-        file_size += ret;
 
         ret = parse_buffer_to_Config(json_buffer, file_size, config);
         if (ret < 0)
@@ -67,19 +66,18 @@ ManagementReturncode get_systemconfig(char* filename,
         int ret = 0;
         ManagementReturncode retval = MGMT_OK;
         uint8_t* json_buffer = NULL;
-        int file_size = 0;
+        size_t file_size = 0;
 
         if ((filename == NULL) || (systemconfig == NULL))
                 goto error_occured;
 
-        ret = readFile(filename, &json_buffer, file_size);
+        ret = read_file(filename, &json_buffer, &file_size);
         if ((ret < 0))
         {
                 retval = MGMT_ERR;
                 LOG_ERROR("can't read systemconfiguration file");
                 goto error_occured;
         }
-        file_size += ret;
 
         retval = parse_buffer_to_SystemConfiguration(json_buffer,
                                                      file_size,

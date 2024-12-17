@@ -12,10 +12,10 @@ LOG_MODULE_CREATE(networking);
 #define PKCS11_LABEL_IDENTIFIER "pkcs11:"
 #define PKCS11_LABEL_IDENTIFIER_LEN 7
 
-int readFile(const char* filePath, uint8_t** buffer, size_t bufferSize)
+int read_file(const char* filePath, uint8_t** buffer, size_t* bytesInBuffer)
 {
         uint8_t* destination = NULL;
-        if (!buffer || filePath)
+        if (!buffer || !filePath || !bytesInBuffer)
                 return -1;
 
         /* Open the file */
@@ -33,15 +33,21 @@ int readFile(const char* filePath, uint8_t** buffer, size_t bufferSize)
         rewind(file);
 
         /* Allocate buffer for file content */
-        if (*buffer == NULL && bufferSize == 0)
+        if ((*buffer == NULL) && (*bytesInBuffer == 0))
         {
                 *buffer = (uint8_t*) malloc(fileSize);
                 destination = *buffer;
         }
-        else if (*buffer != NULL && bufferSize > 0)
+        else if ((*buffer != NULL) && (*bytesInBuffer > 0))
         {
-                *buffer = (uint8_t*) realloc(*buffer, bufferSize + fileSize);
-                destination = *buffer + bufferSize;
+                *buffer = (uint8_t*) realloc(*buffer, *bytesInBuffer + fileSize);
+                destination = *buffer + *bytesInBuffer;
+        }
+        else
+        {
+                LOG_ERROR("invalid file read setup from %s", filePath);
+                fclose(file);
+                return -1;
         }
 
         if (*buffer == NULL)
@@ -64,6 +70,8 @@ int readFile(const char* filePath, uint8_t** buffer, size_t bufferSize)
                 }
                 bytesRead += read;
         }
+
+        *bytesInBuffer += bytesRead;
 
         fclose(file);
 
@@ -99,31 +107,30 @@ char* duplicate_string(char const* source)
  * Returns 0 on success, -1 on failure (error is printed on console). */
 int read_certificates(struct certificates* certs)
 {
+        int ret = 0;
+
         /* Read certificate chain */
         if (certs->certificate_path != NULL)
         {
-                int cert_size = readFile(certs->certificate_path, &certs->chain_buffer, 0);
-                if (cert_size < 0)
+                certs->chain_buffer_size = 0;
+                ret = read_file(certs->certificate_path, &certs->chain_buffer, &certs->chain_buffer_size);
+                if (ret < 0)
                 {
                         LOG_ERROR("unable to read certificate from file %s", certs->certificate_path);
                         goto error;
                 }
 
-                certs->chain_buffer_size = cert_size;
-
                 if (certs->intermediate_path != NULL)
                 {
-                        int inter_size = readFile(certs->intermediate_path,
-                                                  &certs->chain_buffer,
-                                                  cert_size);
-                        if (inter_size < 0)
+                        ret = read_file(certs->intermediate_path,
+                                        &certs->chain_buffer,
+                                        &certs->chain_buffer_size);
+                        if (ret < 0)
                         {
                                 LOG_ERROR("unable to read intermediate certificate from file %s",
                                           certs->intermediate_path);
                                 goto error;
                         }
-
-                        certs->chain_buffer_size += inter_size;
                 }
         }
 
@@ -144,15 +151,16 @@ int read_certificates(struct certificates* certs)
                 }
                 else
                 {
-                        int key_size = readFile(certs->private_key_path, &certs->key_buffer, 0);
-                        if (key_size < 0)
+                        certs->key_buffer_size = 0;
+                        ret = read_file(certs->private_key_path,
+                                        &certs->key_buffer,
+                                        &certs->key_buffer_size);
+                        if (ret < 0)
                         {
                                 LOG_ERROR("unable to read private key from file %s",
                                           certs->private_key_path);
                                 goto error;
                         }
-
-                        certs->key_buffer_size = key_size;
                 }
         }
 
@@ -174,31 +182,29 @@ int read_certificates(struct certificates* certs)
                 }
                 else
                 {
-                        int key_size = readFile(certs->additional_key_path,
-                                                &certs->additional_key_buffer,
-                                                0);
-                        if (key_size < 0)
+                        certs->additional_key_buffer_size = 0;
+                        ret = read_file(certs->additional_key_path,
+                                        &certs->additional_key_buffer,
+                                        &certs->additional_key_buffer_size);
+                        if (ret < 0)
                         {
                                 LOG_ERROR("unable to read private key from file %s",
                                           certs->additional_key_path);
                                 goto error;
                         }
-
-                        certs->additional_key_buffer_size = key_size;
                 }
         }
 
         /* Read root certificate */
         if (certs->root_path != 0)
         {
-                int root_size = readFile(certs->root_path, &certs->root_buffer, 0);
-                if (root_size < 0)
+                certs->root_buffer_size = 0;
+                ret = read_file(certs->root_path, &certs->root_buffer, &certs->root_buffer_size);
+                if (ret < 0)
                 {
                         LOG_ERROR("unable to read root certificate from file %s", certs->root_path);
                         goto error;
                 }
-
-                certs->root_buffer_size = root_size;
         }
         else
         {
@@ -212,6 +218,7 @@ error:
         cleanup_certificates(certs);
         return -1;
 }
+
 void cleanup_certificates(struct certificates* certs)
 {
         if (certs == NULL)
@@ -293,35 +300,42 @@ int file_exists(const char* filepath)
         }
 }
 
-int write_file(const char* file_path, char* buffer, int buffer_size)
+int write_file(const char* file_path, uint8_t const* buffer, size_t buffer_size, bool append)
 {
-        int ret = 0;
         FILE* file = NULL;
 
         if (!file_path || !buffer || (buffer_size == 0))
         {
                 LOG_ERROR("file_path, buffer or buffer_size is 0 or NULL");
+                goto error_occured;
         }
 
-        file = fopen(file_path, "w");
+        file = fopen(file_path, append ? "ab" : "wb");
         if (!file)
         {
                 LOG_ERROR("Error opening file: %s\n", file_path);
-                ret = -1;
                 goto error_occured;
         }
 
-        size_t written = fwrite(buffer, sizeof(char), buffer_size, file);
-        if (written != buffer_size)
+        /* Write buffer to file */
+        size_t bytesWriten = 0;
+        uint8_t const* ptr = buffer;
+        while (bytesWriten < buffer_size)
         {
-                LOG_ERROR("Error writing buffer to file: %s\n", file_path);
-                ret = -1;
-                goto error_occured;
+                int written = fwrite(ptr, sizeof(uint8_t), buffer_size - bytesWriten, file);
+                if (written < 0)
+                {
+                        LOG_ERROR("Error writing buffer to file: %s\n", file_path);
+                        goto error_occured;
+                }
+                bytesWriten += written;
+                ptr += written;
         }
-        if (file != NULL)
-                fclose(file);
 
-        return ret;
+        fclose(file);
+
+        return 0;
+
 error_occured:
         if (file != NULL)
                 fclose(file);

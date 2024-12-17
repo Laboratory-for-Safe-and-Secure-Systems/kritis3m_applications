@@ -23,10 +23,8 @@ LOG_MODULE_CREATE(kritis3m_service);
 #define POLICY_RESP_BUFFER_SIZE 1000
 #define HEARTBEAT_REQ_BUFFER_SIZE 1000
 
-
-
-//main kritis3m_service module type
-// Variable static struct kritis3m_service svc = {0}, single instance used by the kritis3m_service module
+// main kritis3m_service module type
+//  Variable static struct kritis3m_service svc = {0}, single instance used by the kritis3m_service module
 struct kritis3m_service
 {
         bool initialized;
@@ -40,7 +38,7 @@ struct kritis3m_service
         asl_endpoint* client_endpoint;
 };
 
-//ipc services
+// ipc services
 enum service_message_type
 {
         SVC_MSG_INITIAL_POLICY_REQ_RSP,
@@ -51,7 +49,7 @@ enum service_message_type
 };
 
 /**
- * @brief Represents a message used for IPC communication between internal threads 
+ * @brief Represents a message used for IPC communication between internal threads
  *        of the `kritis3m_scale_service` module.
  */
 typedef struct service_message
@@ -67,28 +65,25 @@ typedef struct service_message
         } payload;
 } service_message;
 
-
 /*------------------------ FORWARD DECLARATION --------------------------------*/
-//ipc
+// ipc
 enum MSG_RESPONSE_CODE svc_request_helper(int socket, service_message* msg);
 static int send_svc_message(int socket, service_message* msg);
 static int read_svc_message(int socket, service_message* msg);
 int respond_with(int socket, enum MSG_RESPONSE_CODE response_code);
 ManagementReturncode handle_svc_message(int socket, service_message* msg, int cfg_id, int version_number);
-//init
+// init
 void* kritis3m_service_main_thread(void* arg);
 void init_configuration_manager(ConfigurationManager* manager, Kritis3mNodeConfiguration* node_config);
 int prepare_all_interfaces(HardwareConfiguration hw_config[], int num_configs);
-//http
+// http
 int initial_policy_request_cb(struct response response);
 void cleanup_kritis3m_service();
-
 
 /* ----------------------- MAIN kritis3m_service module -------------------------*/
 static struct kritis3m_service svc = {0};
 
-
-//reset svc
+// reset svc
 void set_kritis3m_serivce_defaults(struct kritis3m_service* svc)
 {
         if (svc == NULL)
@@ -104,15 +99,15 @@ void set_kritis3m_serivce_defaults(struct kritis3m_service* svc)
 
 /**
  * @brief Starts the `kritis3m_service` module.
- * 
+ *
  * This function initializes and starts the `kritis3m_service` module using the provided configuration file.
  * The config file is then used to obtain the Kritis3mNodeConfiguration, which contains the initial startup configuration
- * 
+ *
  * @param[in] config_file Path to the configuration file in json format
  * @param[in] log_level The log level to set for the service (e.g., DEBUG, INFO, ERROR).
- * 
+ *
  * @return Returns 0 if the service is successfully started, otherwise returns a non-zero error code.
- * 
+ *
  * @note This function assumes that the necessary dependencies and environment are already in place
  * for the service to be initialized and run.
  */
@@ -691,7 +686,10 @@ int initial_policy_request_cb(struct response response)
                         LOG_ERROR("No config activated ");
                         goto error_occured;
                 }
-                ret = write_file(policy_filepath, response.buffer_frag_start, response.bytes_received);
+                ret = write_file(policy_filepath,
+                                 response.buffer_frag_start,
+                                 response.bytes_received,
+                                 false);
         }
         if (ret < 0)
         {
