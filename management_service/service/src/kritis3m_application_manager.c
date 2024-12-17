@@ -12,10 +12,10 @@
 #include "kritis3m_application_manager.h"
 #include "kritis3m_scale_service.h"
 #include "networking.h"
+#include "poll_set.h"
 #include "tcp_client_stdin_bridge.h"
 #include "tls_proxy.h"
 
-// end kritis3m applications
 
 #include "logging.h"
 LOG_MODULE_CREATE(application_log_module);
@@ -59,6 +59,21 @@ typedef struct client_connection_request
         int application_id;
 } client_connection_request;
 
+/*--------------------------- IPC ----------------------------------*/
+enum application_management_message_type
+{
+        APPLICATION_START_REQUEST,
+        APPLICATION_STATUS_REQUEST,
+        APPLICATION_STOP_REQUEST,
+
+        APPLICATION_SERVICE_START_REQUEST,
+        APPLICATION_SERVICE_STOP_REQUEST,
+        APPLICATION_SERVICE_STATUS_REQUEST,
+
+        APPLICATION_CONNECTION_REQUEST,
+        MSG_RESPONSE,
+};
+
 typedef struct application_message
 {
         enum application_management_message_type msg_type;
@@ -81,15 +96,14 @@ struct application_manager
         bool initialized;
         int management_pair[2];
         ApplicationConfiguration* configuration;
-
         pthread_t thread;
         pthread_attr_t thread_attr;
-
         sem_t thread_setup_sem;
-
         poll_set notifier;
 };
 
+
+//main application manager instance used by the main thread
 static struct application_manager manager = {
         .initialized = false,
         .management_pair[THREAD_INT] = -1,
@@ -98,83 +112,215 @@ static struct application_manager manager = {
         .notifier = {0},
 };
 
-void* application_service_main_thread(void* arg);
-enum MSG_RESPONSE_CODE management_request_helper(int socket, application_message* msg);
-int get_endpoint_configuration(int ep_1id, asl_endpoint_configuration* ep);
-static int read_management_message(int socket, application_message* msg);
-static int send_management_message(int socket, application_message* msg);
-int create_proxy_config(Kritis3mApplications* appl, proxy_config* config);
-int stop_application(Kritis3mApplications* appl);
-int stop_application_service(struct application_manager* application_manager);
 
+/*-------------------------------  FORWARD DECLARATIONS---------------------------------*/
+//mainthread
+void* application_service_main_thread(void* arg);
+//ipc
 enum MSG_RESPONSE_CODE management_request_helper(int socket, application_message* msg);
 int respond_with(int socket, enum MSG_RESPONSE_CODE response_code);
-
+static int read_management_message(int socket, application_message* msg);
+static int send_management_message(int socket, application_message* msg);
+enum MSG_RESPONSE_CODE management_request_helper(int socket, application_message* msg);
+ManagementReturncode handle_management_message(int fd, struct application_manager* appl_manager);
+//services
+bool is_client_supported(client_connection_request con_req);
+int stop_application(Kritis3mApplications* appl);
+int stop_application_service(struct application_manager* application_manager);
+int start_application(Kritis3mApplications* appl);
+int client_matches_trusted_client(TrustedClients* trusted_client, struct sockaddr* connecting_client);
+//helper functions
 int create_echo_config(Kritis3mApplications* appl, echo_server_config* config);
-// int create_network_tester_config(Kritis3mApplications *appl, network_tester_config *config);
 int create_tcp_stdin_bridge_config(Kritis3mApplications* appl, tcp_client_stdin_bridge_config* config);
+int create_proxy_config(Kritis3mApplications* appl, proxy_config* config);
+int get_endpoint_configuration(int ep_1id, asl_endpoint_configuration* ep);
 
-int client_matches_trusted_client(TrustedClients* trusted_client, struct sockaddr* connecting_client)
+void cleanup_application_manager(void);
+
+
+//initialize application manager
+void init_application_manager(void)
 {
-
-        // Check IP address and port
-        Kritis3mSockaddr* trusted_addr = &trusted_client->trusted_client;
-        struct sockaddr* trusted_sockaddr = &trusted_addr->sockaddr;
-
-        // If trusted IP is INADDR_ANY or IN6ADDR_ANY_INIT, all IPs are allowed
-        if (trusted_sockaddr->sa_family == AF_INET)
-        {
-                struct sockaddr_in* trusted_in = &trusted_addr->sockaddr_in;
-                struct sockaddr_in* conn_in = (struct sockaddr_in*) connecting_client;
-
-                if (trusted_in->sin_addr.s_addr == INADDR_ANY)
-                {
-                        // If port is 0, all ports are allowed
-                        if (trusted_in->sin_port == 0 || trusted_in->sin_port == conn_in->sin_port)
-                        {
-                                return 0;
-                        }
-                }
-                else
-                {
-                        // Check both IP and port
-                        if (trusted_in->sin_addr.s_addr == conn_in->sin_addr.s_addr &&
-                            (trusted_in->sin_port == 0 || trusted_in->sin_port == conn_in->sin_port))
-                        {
-                                return 0;
-                        }
-                }
-        }
-        else if (trusted_sockaddr->sa_family == AF_INET6)
-        {
-                struct sockaddr_in6* trusted_in6 = &trusted_addr->sockaddr_in6;
-                struct sockaddr_in6* conn_in6 = (struct sockaddr_in6*) connecting_client;
-
-                // Check for IN6ADDR_ANY_INIT
-                if (memcmp(&trusted_in6->sin6_addr, &in6addr_any, sizeof(struct in6_addr)) == 0)
-                {
-                        // If port is 0, all ports are allowed
-                        if (trusted_in6->sin6_port == 0 || trusted_in6->sin6_port == conn_in6->sin6_port)
-                        {
-                                return 0;
-                        }
-                }
-                else
-                {
-                        // Check both IP and port
-                        if (memcmp(&trusted_in6->sin6_addr,
-                                   &conn_in6->sin6_addr,
-                                   sizeof(struct in6_addr)) == 0 &&
-                            (trusted_in6->sin6_port == 0 ||
-                             trusted_in6->sin6_port == conn_in6->sin6_port))
-                        {
-                                return 0;
-                        }
-                }
-        }
-        return -1;
+        int ret = 0;
+        manager.initialized = false;
+        if (manager.configuration != NULL)
+                manager.configuration = NULL;
+        manager.management_pair[THREAD_EXT] = -1;
+        manager.management_pair[THREAD_INT] = -1;
+        poll_set_init(&manager.notifier);
+        pthread_attr_init(&manager.thread_attr);
+        pthread_attr_setdetachstate(&manager.thread_attr, PTHREAD_CREATE_JOINABLE);
+        sem_init(&manager.thread_setup_sem, 0, 0);
 }
 
+//start application manager
+int start_application_manager(ApplicationConfiguration* configuration)
+{
+
+        int ret = -1;
+        bool application_service_initialized = false;
+        application_message request = {0};
+        application_message response = {0};
+
+        if (configuration == NULL)
+                goto error_occured;
+
+        //------------------------ set log level ------------------------------------------//
+        LOG_LVL_SET(configuration->log_level);
+        LOG_LVL_SET(LOG_LVL_DEBUG);
+
+        //------------------------ init environment --------------------------------------//
+        proxy_backend_config backend_config = tls_proxy_backend_default_config();
+        ret = tls_proxy_backend_run(&backend_config);
+        if (ret < 0)
+                goto error_occured;
+
+        ret = create_socketpair(manager.management_pair);
+        if (ret < 0)
+                LOG_ERROR("Error creating socket pair for management: %d (%s)", errno, strerror(errno));
+
+        /* Init main backend */
+        ret = pthread_create(&manager.thread,
+                             &manager.thread_attr,
+                             application_service_main_thread,
+                             &manager);
+        if (ret != 0)
+                LOG_ERROR("Error starting TCP echo server thread: %s", strerror(ret));
+        // wait until service is initialized
+
+        sem_wait(&manager.thread_setup_sem);
+
+        enum MSG_RESPONSE_CODE initialized = MSG_BUSY;
+        request.msg_type = APPLICATION_SERVICE_START_REQUEST, request.payload.config = configuration;
+        enum MSG_RESPONSE_CODE initialzed = management_request_helper(manager.management_pair[THREAD_EXT],
+                                                                      &request);
+        if (initialized < 0)
+                goto error_occured;
+        return 0;
+
+error_occured:
+        LOG_ERROR("error initializing application manager");
+        return ret;
+}
+
+//application manager main thread
+void* application_service_main_thread(void* arg)
+{
+        /*------------------------------------------ INITIALIZATION ------------------------------------------ */
+        int ret = -1;
+        bool shutodwn = true;
+        int management_socket = -1;
+        struct application_manager* appl_manager = (struct application_manager*) arg;
+
+        // check if service is correctly initialized:
+        if ((appl_manager == NULL) || (appl_manager->management_pair[THREAD_INT] < 0))
+        {
+                LOG_ERROR("application manager can't be started correctly. Either management pair "
+                          "or appl_manager is NULL");
+                goto cleanup_application_service;
+        }
+
+        // signalize application manager is running
+        manager.initialized = true;
+        LOG_INFO("application manager started");
+
+        // update pollset
+        poll_set_add_fd(&appl_manager->notifier,
+                        appl_manager->management_pair[THREAD_INT],
+                        POLLIN | POLLERR | POLLHUP);
+
+        // signalize caller, that mainthread is started
+        sem_post(&manager.thread_setup_sem);
+
+        while (shutdown)
+        {
+                // await events
+                int number_events = poll(appl_manager->notifier.fds, appl_manager->notifier.num_fds, -1);
+
+                if (number_events == -1)
+                {
+                        LOG_ERROR("poll error: %d", errno);
+                        continue;
+                }
+
+                for (int i = 0; i < appl_manager->notifier.num_fds; i++)
+                {
+
+                        int fd = appl_manager->notifier.fds[i].fd;
+                        short event = appl_manager->notifier.fds[i].revents;
+
+                        // no event occured
+                        if (event == 0)
+                                continue;
+
+                        // Internal thread
+                        if (fd == appl_manager->management_pair[THREAD_INT])
+                        {
+                                // Internal thread, data available
+                                if (event & POLLIN)
+                                {
+                                        ManagementReturncode returncode = handle_management_message(fd,
+                                                                                                    appl_manager);
+                                        if (returncode == MGMT_THREAD_STOP)
+                                        {
+                                                goto cleanup_application_service;
+                                        }
+                                        else if (returncode < 0)
+                                        {
+                                                LOG_ERROR("error occured");
+                                                if (appl_manager->management_pair[THREAD_EXT] > 0)
+                                                {
+                                                        closesocket(
+                                                                appl_manager->management_pair[THREAD_EXT]);
+                                                        appl_manager->management_pair[THREAD_EXT] = -1;
+                                                }
+
+                                                if (appl_manager->management_pair[THREAD_INT] > 0)
+                                                {
+                                                        closesocket(
+                                                                appl_manager->management_pair[THREAD_INT]);
+                                                        appl_manager->management_pair[THREAD_INT] = -1;
+                                                }
+                                                goto cleanup_application_service;
+                                        }
+                                }
+                                else if ((event & POLLERR) || (event & POLLHUP))
+                                {
+                                        LOG_ERROR("error occured");
+
+                                        poll_set_remove_fd(&appl_manager->notifier,
+                                                           appl_manager->management_pair[THREAD_INT]);
+                                        if (appl_manager->management_pair[THREAD_EXT] > 0)
+                                        {
+                                                closesocket(appl_manager->management_pair[THREAD_EXT]);
+                                                appl_manager->management_pair[THREAD_EXT] = -1;
+                                        }
+
+                                        if (appl_manager->management_pair[THREAD_INT] > 0)
+                                        {
+                                                closesocket(appl_manager->management_pair[THREAD_INT]);
+                                                appl_manager->management_pair[THREAD_INT] = -1;
+                                        }
+                                        break;
+                                }
+                                else
+                                {
+                                        LOG_ERROR("unsupported event %d ", event);
+                                        continue;
+                                }
+                        }
+                }
+        }
+cleanup_application_service:
+        LOG_INFO("exiting kritis3m_applicaiton");
+        tls_proxy_backend_terminate();
+        cleanup_application_manager();
+        pthread_detach(pthread_self());
+        return NULL;
+}
+
+
+//returns if application_manager is running
 bool is_running()
 {
         if ((!manager.initialized) || (manager.management_pair[THREAD_EXT] < 0) ||
@@ -184,6 +330,74 @@ bool is_running()
         }
         return true;
 }
+
+/*------------------------------------------ IPC functions ------------------------------------------------------*/
+//send management message
+static int send_management_message(int socket, application_message* msg)
+{
+        int ret = 0;
+        static const int max_retries = 5;
+        int retries = 0;
+
+        while ((ret <= 0) && (retries < max_retries))
+        {
+                ret = send(socket, (char*) msg, sizeof(application_message), 0);
+                if (ret < 0)
+                {
+                        if (errno != EAGAIN)
+                        {
+                                LOG_ERROR("Error sending message: %d (%s)", errno, strerror(errno));
+                                return -1;
+                        }
+                        usleep(10 * 1000);
+                }
+                else if (ret != sizeof(application_message))
+                {
+                        LOG_ERROR("Sent invalid message");
+                        return -1;
+                }
+
+                retries++;
+        }
+
+        if (retries >= max_retries)
+        {
+                LOG_ERROR("Failed to send message after %d retries", max_retries);
+                return -1;
+        }
+
+        return 0;
+}
+//read management message
+static int read_management_message(int socket, application_message* msg)
+{
+        int ret = recv(socket, (char*) msg, sizeof(application_message), 0);
+        if (ret < 0)
+        {
+                LOG_ERROR("Error receiving message: %d (%s)", errno, strerror(errno));
+                return -1;
+        }
+        else if (ret != sizeof(application_message))
+        {
+                LOG_ERROR("Received invalid response (ret=%d; expected=%lu)",
+                          ret,
+                          sizeof(application_message));
+                return -1;
+        }
+
+        return 0;
+}
+
+//respond with a MSG_RESPONSE_CODE to a management request
+int respond_with(int socket, enum MSG_RESPONSE_CODE response_code)
+{
+        application_message response = {0};
+        response.msg_type = MSG_RESPONSE;
+        response.payload.return_code = response_code;
+        return send_management_message(socket, &response);
+}
+
+//send APPLICATION_CONNECTION_REQUEST to main thread
 bool confirm_client(int application_id, struct sockaddr* connecting_client)
 {
         application_message request = {0};
@@ -234,63 +448,7 @@ error_occured:
         return ret;
 }
 
-bool is_client_supported(client_connection_request con_req)
-{
-        ApplicationConfiguration* appl_config = manager.configuration;
-        bool ret = false;
-
-        if ((!manager.initialized) || (appl_config == NULL) || (con_req.client == NULL))
-                return false;
-        // check each entry in trusted clients
-        for (int i = 0; i < appl_config->whitelist.number_trusted_clients; i++)
-        {
-                TrustedClients t_client = appl_config->whitelist.TrustedClients[i];
-                // is this connection forseen for application ?
-                int number_trusted_application = t_client.number_trusted_applications;
-                for (int j = 0; j < number_trusted_application; j++)
-                {
-                        if (t_client.trusted_applications_id[j] == con_req.application_id)
-                        {
-                                int client_matches = client_matches_trusted_client(&t_client,
-                                                                                   con_req.client);
-                                if (client_matches == 0)
-                                {
-                                        LOG_INFO("client is trusted");
-                                        return true;
-                                }
-                        }
-                }
-        }
-        return ret;
-}
-
-void init_application_manager(void)
-{
-        int ret = 0;
-        manager.initialized = false;
-        if (manager.configuration != NULL)
-                manager.configuration = NULL;
-        manager.management_pair[THREAD_EXT] = -1;
-        manager.management_pair[THREAD_INT] = -1;
-        poll_set_init(&manager.notifier);
-        pthread_attr_init(&manager.thread_attr);
-        pthread_attr_setdetachstate(&manager.thread_attr, PTHREAD_CREATE_JOINABLE);
-        sem_init(&manager.thread_setup_sem, 0, 0);
-}
-
-void cleanup_application_manager(void)
-{
-        int ret = 0;
-        manager.initialized = false;
-        if (manager.configuration != NULL)
-                manager.configuration = NULL;
-        manager.management_pair[THREAD_EXT] = -1;
-        manager.management_pair[THREAD_INT] = -1;
-        poll_set_init(&manager.notifier);
-        pthread_attr_destroy(&manager.thread_attr);
-        sem_destroy(&manager.thread_setup_sem);
-}
-
+//sends management request and awaits response
 enum MSG_RESPONSE_CODE management_request_helper(int socket, application_message* msg)
 {
         int ret;
@@ -316,175 +474,48 @@ error_occured:
         return retval;
 }
 
-int start_application_manager(ApplicationConfiguration* configuration)
+//send APPLICATION_SERVICE_STOP_REQUEST to main thread
+int stop_application_manager()
 {
-
-        int ret = -1;
-        bool application_service_initialized = false;
-        application_message request = {0};
-        application_message response = {0};
-
-        if (configuration == NULL)
-                goto error_occured;
-
-        //------------------------ set log level ------------------------------------------//
-        LOG_LVL_SET(configuration->log_level);
-        LOG_LVL_SET(LOG_LVL_DEBUG);
-
-        //------------------------ init environment --------------------------------------//
-        proxy_backend_config backend_config = tls_proxy_backend_default_config();
-        ret = tls_proxy_backend_run(&backend_config);
-        if (ret < 0)
-                goto error_occured;
-
-        ret = create_socketpair(manager.management_pair);
-        if (ret < 0)
-                LOG_ERROR("Error creating socket pair for management: %d (%s)", errno, strerror(errno));
-
-        /* Init main backend */
-        ret = pthread_create(&manager.thread,
-                             &manager.thread_attr,
-                             application_service_main_thread,
-                             &manager);
-        if (ret != 0)
-                LOG_ERROR("Error starting TCP echo server thread: %s", strerror(ret));
-        // wait until service is initialized
-
-        sem_wait(&manager.thread_setup_sem);
-
-        enum MSG_RESPONSE_CODE initialized = MSG_BUSY;
-        request.msg_type = APPLICATION_SERVICE_START_REQUEST, request.payload.config = configuration;
-        enum MSG_RESPONSE_CODE initialzed = management_request_helper(manager.management_pair[THREAD_EXT],
-                                                                      &request);
-        if (initialized < 0)
-                goto error_occured;
-        return 0;
-
-error_occured:
-        LOG_ERROR("error initializing application manager");
-        return ret;
-}
-
-int start_application(Kritis3mApplications* appl)
-{
+        int socket = -1;
         int ret = 0;
-        int appl_id = -1;
-
-        if (appl == NULL)
-                goto error_occured;
-
-        Kritis3mApplicationtype type = appl->type;
-        appl_id = appl->id;
-
-        switch (type)
+        application_message request = {0};
+        if (!manager.initialized || (manager.management_pair[THREAD_EXT] < 0))
         {
-        case UNDEFINED:
-                {
-                        goto error_occured;
-                        break;
-                }
-        case TLS_FORWARD_PROXY:
-                {
-                        proxy_config config = {0};
-                        ret = create_proxy_config(appl, &config);
-                        if (ret < 0)
-                        {
-                                LOG_ERROR("can't init proxy config");
-                                goto error_occured;
-                        }
-                        ret = tls_forward_proxy_start(&config);
-                        if (ret < 0)
-                        {
-                                LOG_ERROR("can't start tls forward proxy");
-                                goto error_occured;
-                        }
-                        break;
-                }
-        case TLS_REVERSE_PROXY:
-                {
-                        proxy_config config = {0};
-                        ret = create_proxy_config(appl, &config);
-                        if (ret < 0)
-                        {
-                                LOG_ERROR("can't init proxy config");
-                                goto error_occured;
-                        }
-                        ret = tls_reverse_proxy_start(&config);
-                        if (ret < 0)
-                        {
-                                LOG_ERROR("can't start tls reverse proxy");
-                                goto error_occured;
-                        }
-                        break;
-                }
-        case TLS_TLS_PROXY:
-                {
-                        LOG_INFO("tls proxy with 2 seperate tls endpoints not implemented yet");
-                        break;
-                }
-        case ECHO_SERVER:
-                {
-                        echo_server_config config = {0};
-                        ret = create_echo_config(appl, &config);
-                        if (ret < 0)
-                        {
-                                LOG_ERROR("can't init echo server config");
-                                goto error_occured;
-                        }
-                        ret = echo_server_run(&config);
-                        if (ret < 0)
-                        {
-                                LOG_ERROR("can't start echo server");
-                                goto error_occured;
-                        }
-                        break;
-                }
-        case TCP_CLIENT_STDIN_BRIDGE:
-                {
-
-                        tcp_client_stdin_bridge_config config = {0};
-                        ret = create_tcp_stdin_bridge_config(appl, &config);
-                        if (ret < 0)
-                        {
-                                LOG_ERROR("can't init tcp client stdin bridge config");
-                                goto error_occured;
-                        }
-                        ret = tcp_client_stdin_bridge_run(&config);
-                        if (ret < 0)
-                        {
-                                LOG_ERROR("can't start tcp client stdin bridge ");
-                                goto error_occured;
-                        }
-                        break;
-                }
-        case L2_BRIDGE:
-                {
-                        LOG_INFO("l2 bridge support not implemented yet");
-                        break;
-                }
-        default:
-                LOG_ERROR("unknown application");
-                goto error_occured;
-                break;
+                LOG_INFO("application manager is already stopped");
+                return ret;
         }
 
-        return ret;
-error_occured:
-        ret = -1;
-        LOG_ERROR("error occured starting application");
+        socket = manager.management_pair[THREAD_EXT];
+        request.msg_type = APPLICATION_SERVICE_STOP_REQUEST;
+
+        enum MSG_RESPONSE_CODE retval = management_request_helper(socket, &request);
+        if (retval != MSG_OK)
+        {
+                ret = -1;
+                LOG_ERROR("error occured in application service");
+        }
+        else
+        {
+                LOG_INFO("closed application_manager succesfully");
+        }
+
+        if (manager.management_pair[THREAD_EXT] > 0)
+        {
+                closesocket(manager.management_pair[THREAD_EXT]);
+                manager.management_pair[THREAD_EXT] = -1;
+        }
+
+        if (manager.management_pair[THREAD_INT] > 0)
+        {
+                closesocket(manager.management_pair[THREAD_INT]);
+                manager.management_pair[THREAD_INT] = -1;
+        }
+        pthread_join(manager.thread, NULL);
         return ret;
 }
 
-/**
- * @brief handles management request for the application manager
- * @param fd: unix socket with data ready to receive
- * @param appl_manager application manager
- *
- * @note running requests:
- *  - stop request
- *  - service start request
- *  - whitelist service
- */
+//handle management request
 ManagementReturncode handle_management_message(int fd, struct application_manager* appl_manager)
 {
         application_message msg = {0};
@@ -672,176 +703,151 @@ error_occured:
         return retval;
 }
 
-void* application_service_main_thread(void* arg)
+/*-------------------------------- Services ------------------------------------------*/
+
+//whitelist lookup if client is supported or not
+bool is_client_supported(client_connection_request con_req)
 {
-        /*------------------------------------------ INITIALIZATION ------------------------------------------ */
-        int ret = -1;
-        bool shutodwn = true;
-        int management_socket = -1;
-        struct application_manager* appl_manager = (struct application_manager*) arg;
+        ApplicationConfiguration* appl_config = manager.configuration;
+        bool ret = false;
 
-        // check if service is correctly initialized:
-        if ((appl_manager == NULL) || (appl_manager->management_pair[THREAD_INT] < 0))
+        if ((!manager.initialized) || (appl_config == NULL) || (con_req.client == NULL))
+                return false;
+        // check each entry in trusted clients
+        for (int i = 0; i < appl_config->whitelist.number_trusted_clients; i++)
         {
-                LOG_ERROR("application manager can't be started correctly. Either management pair "
-                          "or appl_manager is NULL");
-                goto cleanup_application_service;
-        }
-
-        // signalize application manager is running
-        manager.initialized = true;
-        LOG_INFO("application manager started");
-
-        // update pollset
-        poll_set_add_fd(&appl_manager->notifier,
-                        appl_manager->management_pair[THREAD_INT],
-                        POLLIN | POLLERR | POLLHUP);
-
-        // signalize caller, that mainthread is started
-        sem_post(&manager.thread_setup_sem);
-
-        while (shutdown)
-        {
-                // await events
-                int number_events = poll(appl_manager->notifier.fds, appl_manager->notifier.num_fds, -1);
-
-                if (number_events == -1)
+                TrustedClients t_client = appl_config->whitelist.TrustedClients[i];
+                // is this connection forseen for application ?
+                int number_trusted_application = t_client.number_trusted_applications;
+                for (int j = 0; j < number_trusted_application; j++)
                 {
-                        LOG_ERROR("poll error: %d", errno);
-                        continue;
-                }
-
-                for (int i = 0; i < appl_manager->notifier.num_fds; i++)
-                {
-
-                        int fd = appl_manager->notifier.fds[i].fd;
-                        short event = appl_manager->notifier.fds[i].revents;
-
-                        // no event occured
-                        if (event == 0)
-                                continue;
-
-                        // Internal thread
-                        if (fd == appl_manager->management_pair[THREAD_INT])
+                        if (t_client.trusted_applications_id[j] == con_req.application_id)
                         {
-                                // Internal thread, data available
-                                if (event & POLLIN)
+                                int client_matches = client_matches_trusted_client(&t_client,
+                                                                                   con_req.client);
+                                if (client_matches == 0)
                                 {
-                                        ManagementReturncode returncode = handle_management_message(fd,
-                                                                                                    appl_manager);
-                                        if (returncode == MGMT_THREAD_STOP)
-                                        {
-                                                goto cleanup_application_service;
-                                        }
-                                        else if (returncode < 0)
-                                        {
-                                                LOG_ERROR("error occured");
-                                                if (appl_manager->management_pair[THREAD_EXT] > 0)
-                                                {
-                                                        closesocket(
-                                                                appl_manager->management_pair[THREAD_EXT]);
-                                                        appl_manager->management_pair[THREAD_EXT] = -1;
-                                                }
-
-                                                if (appl_manager->management_pair[THREAD_INT] > 0)
-                                                {
-                                                        closesocket(
-                                                                appl_manager->management_pair[THREAD_INT]);
-                                                        appl_manager->management_pair[THREAD_INT] = -1;
-                                                }
-                                                goto cleanup_application_service;
-                                        }
-                                }
-                                else if ((event & POLLERR) || (event & POLLHUP))
-                                {
-                                        LOG_ERROR("error occured");
-
-                                        poll_set_remove_fd(&appl_manager->notifier,
-                                                           appl_manager->management_pair[THREAD_INT]);
-                                        if (appl_manager->management_pair[THREAD_EXT] > 0)
-                                        {
-                                                closesocket(appl_manager->management_pair[THREAD_EXT]);
-                                                appl_manager->management_pair[THREAD_EXT] = -1;
-                                        }
-
-                                        if (appl_manager->management_pair[THREAD_INT] > 0)
-                                        {
-                                                closesocket(appl_manager->management_pair[THREAD_INT]);
-                                                appl_manager->management_pair[THREAD_INT] = -1;
-                                        }
-                                        break;
-                                }
-                                else
-                                {
-                                        LOG_ERROR("unsupported event %d ", event);
-                                        continue;
+                                        LOG_INFO("client is trusted");
+                                        return true;
                                 }
                         }
                 }
         }
-cleanup_application_service:
-        LOG_INFO("exiting kritis3m_applicaiton");
-        tls_proxy_backend_terminate();
-        cleanup_application_manager();
-        pthread_detach(pthread_self());
-        return NULL;
+        return ret;
 }
 
-static int send_management_message(int socket, application_message* msg)
+//start application manager 
+int start_application(Kritis3mApplications* appl)
 {
         int ret = 0;
-        static const int max_retries = 5;
-        int retries = 0;
+        int appl_id = -1;
 
-        while ((ret <= 0) && (retries < max_retries))
+        if (appl == NULL)
+                goto error_occured;
+
+        Kritis3mApplicationtype type = appl->type;
+        appl_id = appl->id;
+
+        switch (type)
         {
-                ret = send(socket, (char*) msg, sizeof(application_message), 0);
-                if (ret < 0)
+        case UNDEFINED:
                 {
-                        if (errno != EAGAIN)
+                        goto error_occured;
+                        break;
+                }
+        case TLS_FORWARD_PROXY:
+                {
+                        proxy_config config = {0};
+                        ret = create_proxy_config(appl, &config);
+                        if (ret < 0)
                         {
-                                LOG_ERROR("Error sending message: %d (%s)", errno, strerror(errno));
-                                return -1;
+                                LOG_ERROR("can't init proxy config");
+                                goto error_occured;
                         }
-                        usleep(10 * 1000);
+                        ret = tls_forward_proxy_start(&config);
+                        if (ret < 0)
+                        {
+                                LOG_ERROR("can't start tls forward proxy");
+                                goto error_occured;
+                        }
+                        break;
                 }
-                else if (ret != sizeof(application_message))
+        case TLS_REVERSE_PROXY:
                 {
-                        LOG_ERROR("Sent invalid message");
-                        return -1;
+                        proxy_config config = {0};
+                        ret = create_proxy_config(appl, &config);
+                        if (ret < 0)
+                        {
+                                LOG_ERROR("can't init proxy config");
+                                goto error_occured;
+                        }
+                        ret = tls_reverse_proxy_start(&config);
+                        if (ret < 0)
+                        {
+                                LOG_ERROR("can't start tls reverse proxy");
+                                goto error_occured;
+                        }
+                        break;
                 }
+        case TLS_TLS_PROXY:
+                {
+                        LOG_INFO("tls proxy with 2 seperate tls endpoints not implemented yet");
+                        break;
+                }
+        case ECHO_SERVER:
+                {
+                        echo_server_config config = {0};
+                        ret = create_echo_config(appl, &config);
+                        if (ret < 0)
+                        {
+                                LOG_ERROR("can't init echo server config");
+                                goto error_occured;
+                        }
+                        ret = echo_server_run(&config);
+                        if (ret < 0)
+                        {
+                                LOG_ERROR("can't start echo server");
+                                goto error_occured;
+                        }
+                        break;
+                }
+        case TCP_CLIENT_STDIN_BRIDGE:
+                {
 
-                retries++;
+                        tcp_client_stdin_bridge_config config = {0};
+                        ret = create_tcp_stdin_bridge_config(appl, &config);
+                        if (ret < 0)
+                        {
+                                LOG_ERROR("can't init tcp client stdin bridge config");
+                                goto error_occured;
+                        }
+                        ret = tcp_client_stdin_bridge_run(&config);
+                        if (ret < 0)
+                        {
+                                LOG_ERROR("can't start tcp client stdin bridge ");
+                                goto error_occured;
+                        }
+                        break;
+                }
+        case L2_BRIDGE:
+                {
+                        LOG_INFO("l2 bridge support not implemented yet");
+                        break;
+                }
+        default:
+                LOG_ERROR("unknown application");
+                goto error_occured;
+                break;
         }
 
-        if (retries >= max_retries)
-        {
-                LOG_ERROR("Failed to send message after %d retries", max_retries);
-                return -1;
-        }
-
-        return 0;
+        return ret;
+error_occured:
+        ret = -1;
+        LOG_ERROR("error occured starting application");
+        return ret;
 }
 
-static int read_management_message(int socket, application_message* msg)
-{
-        int ret = recv(socket, (char*) msg, sizeof(application_message), 0);
-        if (ret < 0)
-        {
-                LOG_ERROR("Error receiving message: %d (%s)", errno, strerror(errno));
-                return -1;
-        }
-        else if (ret != sizeof(application_message))
-        {
-                LOG_ERROR("Received invalid response (ret=%d; expected=%lu)",
-                          ret,
-                          sizeof(application_message));
-                return -1;
-        }
-
-        return 0;
-}
-
+/*------------------------------ Helper methods ---------------------------------------*/
 int create_proxy_config(Kritis3mApplications* appl, proxy_config* config)
 {
         if (appl == NULL || config == NULL)
@@ -973,13 +979,6 @@ int get_endpoint_configuration(int ep_id, asl_endpoint_configuration* ep)
         return -1;
 }
 
-int respond_with(int socket, enum MSG_RESPONSE_CODE response_code)
-{
-        application_message response = {0};
-        response.msg_type = MSG_RESPONSE;
-        response.payload.return_code = response_code;
-        return send_management_message(socket, &response);
-}
 
 int stop_application(Kritis3mApplications* appl)
 {
@@ -1066,6 +1065,68 @@ error_occured:
         return ret;
 }
 
+//whitelist lookup if client is trusworthy
+int client_matches_trusted_client(TrustedClients* trusted_client, struct sockaddr* connecting_client)
+{
+
+        // Check IP address and port
+        Kritis3mSockaddr* trusted_addr = &trusted_client->trusted_client;
+        struct sockaddr* trusted_sockaddr = &trusted_addr->sockaddr;
+
+        // If trusted IP is INADDR_ANY or IN6ADDR_ANY_INIT, all IPs are allowed
+        if (trusted_sockaddr->sa_family == AF_INET)
+        {
+                struct sockaddr_in* trusted_in = &trusted_addr->sockaddr_in;
+                struct sockaddr_in* conn_in = (struct sockaddr_in*) connecting_client;
+
+                if (trusted_in->sin_addr.s_addr == INADDR_ANY)
+                {
+                        // If port is 0, all ports are allowed
+                        if (trusted_in->sin_port == 0 || trusted_in->sin_port == conn_in->sin_port)
+                        {
+                                return 0;
+                        }
+                }
+                else
+                {
+                        // Check both IP and port
+                        if (trusted_in->sin_addr.s_addr == conn_in->sin_addr.s_addr &&
+                            (trusted_in->sin_port == 0 || trusted_in->sin_port == conn_in->sin_port))
+                        {
+                                return 0;
+                        }
+                }
+        }
+        else if (trusted_sockaddr->sa_family == AF_INET6)
+        {
+                struct sockaddr_in6* trusted_in6 = &trusted_addr->sockaddr_in6;
+                struct sockaddr_in6* conn_in6 = (struct sockaddr_in6*) connecting_client;
+
+                // Check for IN6ADDR_ANY_INIT
+                if (memcmp(&trusted_in6->sin6_addr, &in6addr_any, sizeof(struct in6_addr)) == 0)
+                {
+                        // If port is 0, all ports are allowed
+                        if (trusted_in6->sin6_port == 0 || trusted_in6->sin6_port == conn_in6->sin6_port)
+                        {
+                                return 0;
+                        }
+                }
+                else
+                {
+                        // Check both IP and port
+                        if (memcmp(&trusted_in6->sin6_addr,
+                                   &conn_in6->sin6_addr,
+                                   sizeof(struct in6_addr)) == 0 &&
+                            (trusted_in6->sin6_port == 0 ||
+                             trusted_in6->sin6_port == conn_in6->sin6_port))
+                        {
+                                return 0;
+                        }
+                }
+        }
+        return -1;
+}
+
 int stop_application_service(struct application_manager* application_manager)
 {
 
@@ -1093,42 +1154,15 @@ int stop_application_service(struct application_manager* application_manager)
         return ret;
 }
 
-int stop_application_manager()
+//cleanup function
+void cleanup_application_manager(void)
 {
-        int socket = -1;
         int ret = 0;
-        application_message request = {0};
-        if (!manager.initialized || (manager.management_pair[THREAD_EXT] < 0))
-        {
-                LOG_INFO("application manager is already stopped");
-                return ret;
-        }
-
-        socket = manager.management_pair[THREAD_EXT];
-        request.msg_type = APPLICATION_SERVICE_STOP_REQUEST;
-
-        enum MSG_RESPONSE_CODE retval = management_request_helper(socket, &request);
-        if (retval != MSG_OK)
-        {
-                ret = -1;
-                LOG_ERROR("error occured in application service");
-        }
-        else
-        {
-                LOG_INFO("closed application_manager succesfully");
-        }
-
-        if (manager.management_pair[THREAD_EXT] > 0)
-        {
-                closesocket(manager.management_pair[THREAD_EXT]);
-                manager.management_pair[THREAD_EXT] = -1;
-        }
-
-        if (manager.management_pair[THREAD_INT] > 0)
-        {
-                closesocket(manager.management_pair[THREAD_INT]);
-                manager.management_pair[THREAD_INT] = -1;
-        }
-        pthread_join(manager.thread, NULL);
-        return ret;
+        manager.initialized = false;
+        if (manager.configuration != NULL)
+                manager.configuration = NULL;
+        manager.management_pair[THREAD_EXT] = -1;
+        manager.management_pair[THREAD_INT] = -1;
+        poll_set_init(&manager.notifier);
+        pthread_attr_destroy(&manager.thread_attr);
 }
