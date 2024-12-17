@@ -3,9 +3,10 @@
 
 #include "kritis3m_configuration.h"
 
+//parse json to Kritis3mNodeConfiguration, which stores the startup information
 int parse_buffer_to_Config(char* json_buffer, int json_buffer_size, Kritis3mNodeConfiguration* config);
 
-// please pass an empty pointer
+//Parses a json structure to the Systemconfiguration structure
 ManagementReturncode parse_buffer_to_SystemConfiguration(char* json_buffer,
                                                          int json_buffer_size,
                                                          SystemConfiguration* config,

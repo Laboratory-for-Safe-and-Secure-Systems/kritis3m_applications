@@ -6,6 +6,7 @@
 #include "http_service.h"
 #include "logging.h"
 #include "networking.h"
+#include "poll_set.h"
 // #include "sys/timerfd.h"
 
 #include "cJSON.h"
@@ -424,7 +425,7 @@ int req_send_status_report(ApplicationManagerStatus manager_status)
         return retval;
 }
 
-// initiates cleanup and appl_manager termination
+
 int stop_kritis3m_service()
 {
 

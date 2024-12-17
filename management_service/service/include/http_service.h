@@ -24,16 +24,15 @@ struct response
 
 typedef int (*t_http_get_cb)(struct response response);
 
-// http put
-// payload as json
+//configuration request to the control server
 int initial_call_controller(t_http_get_cb response_callback);
-// http_get
+//send status to server. This function is invoked as soon as the configuration manager tries to take over a configuration
 int send_statusto_server(t_http_get_cb response_callback,
                          int version_number,
                          int cfg_id,
                          char* payload,
                          int payload_size);
-
+//setup http service
 int init_http_service(Kritis3mManagemntConfiguration* config,
                       asl_endpoint_configuration* mgmt_endpoint_config
 #ifdef PKI_READY
