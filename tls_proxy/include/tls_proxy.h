@@ -6,7 +6,7 @@
 
 #include "asl.h"
 
-#define USE_MANAGEMENT
+#include "kritis3m_application_config.h"
 
 enum tls_proxy_direction
 {

@@ -13,6 +13,8 @@
 
 #endif
 
+#ifndef __ZEPHYR__
+
 typedef struct certificates
 {
         char const* certificate_path;
@@ -33,6 +35,8 @@ typedef struct certificates
         uint8_t* root_buffer;
         size_t root_buffer_size;
 } certificates;
+
+#endif
 
 /**
  * @brief Reads the contents of a file into a buffer. If the buffer is already allocated and filled
@@ -69,11 +73,19 @@ int write_file(const char* filename, uint8_t const* buffer, size_t buffer_size, 
  */
 char* duplicate_string(char const* source);
 
-// reads certificates from filesystem into struct certs
+#ifndef __ZEPHYR__
+
+/* Read all certificate and key files from the paths provided in the `certs`
+ * structure and store the data in the buffers. Memory is allocated internally
+ * and must be freed by the user.
+ *
+ * Returns 0 on success, -1 on failure (error is printed on console). */
 int read_certificates(struct certificates* certs);
 
 // free mem
 void cleanup_certificates(struct certificates* certs);
+
+#endif
 
 // check if file estists
 int file_exists(const char* filepath);

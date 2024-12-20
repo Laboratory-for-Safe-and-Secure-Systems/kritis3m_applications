@@ -8,12 +8,12 @@
 
 #if defined(_WIN32)
 
-        #include <winsock2.h>
+#include <winsock2.h>
 
 #else
 
-        #include <netinet/tcp.h>
-        #include <sys/socket.h>
+#include <netinet/tcp.h>
+#include <sys/socket.h>
 
 #endif
 
@@ -23,12 +23,17 @@
 #include "proxy_connection.h"
 #include "proxy_management.h"
 
-#include "kritis3m_application_manager.h"
 #include "logging.h"
 #include "networking.h"
 #include "poll_set.h"
 
 #include "asl.h"
+
+#ifdef USE_MANAGEMENT
+
+#include "kritis3m_application_manager.h"
+
+#endif
 
 LOG_MODULE_CREATE(proxy_backend);
 
@@ -51,7 +56,7 @@ static proxy proxy_pool[MAX_PROXYS];
 
 #if defined(__ZEPHYR__)
 
-        #define BACKEND_STACK_SIZE (32 * 1024)
+#define BACKEND_STACK_SIZE (32 * 1024)
 Z_KERNEL_STACK_DEFINE_IN(backend_stack,
                          BACKEND_STACK_SIZE,
                          __attribute__((section(CONFIG_RAM_SECTION_STACKS_2))));
@@ -284,9 +289,7 @@ static proxy* find_proxy_by_mgmt_id(int mgmt_id)
 
         for (int i = 0; i < MAX_PROXYS; i++)
         {
-                if (proxy_pool[i].in_use = false)
-                        return NULL;
-                if (proxy_pool[i].application_id = mgmt_id)
+                if (proxy_pool[i].application_id == mgmt_id)
                 {
                         return &proxy_pool[i];
                 }
@@ -523,6 +526,7 @@ static int handle_management_message(proxy_backend* backend,
                         ret = send_management_message(socket, &response);
                         break;
                 }
+#ifdef USE_MANAGEMENT
         case PROXY_STOP_REQUEST_MGMT:
                 {
                         /* Kill the proxy */
@@ -543,6 +547,7 @@ static int handle_management_message(proxy_backend* backend,
                         ret = send_management_message(socket, &response);
                         break;
                 }
+#endif
         case BACKEND_STOP_REQUEST:
                 {
                         /* Kill all proxies */

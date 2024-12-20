@@ -4,6 +4,7 @@
 
 #if defined(__ZEPHYR__)
 
+#include <ctype.h>
 #include <sys/socket.h>
 #include <zephyr/net/net_l2.h>
 #include <zephyr/posix/fcntl.h>
@@ -442,38 +443,6 @@ int initialize_network_interfaces(int32_t log_level)
         return 0;
 }
 
-/* Add an ip address to a network interface */
-int add_ipv4_address(void* iface, struct in_addr ipv4_addr)
-{
-        int ret = -EINVAL;
-
-        if (IS_ENABLED(CONFIG_NET_IPV4) && net_if_flag_is_set((struct net_if*) iface, NET_IF_IPV4))
-        {
-                struct net_if_addr* ifaddr = net_if_ipv4_addr_add((struct net_if*) iface,
-                                                                  &ipv4_addr,
-                                                                  NET_ADDR_MANUAL,
-                                                                  0);
-
-                if (ifaddr)
-                {
-                        ret = 0;
-                }
-        }
-
-        return ret;
-}
-
-/* Remove an ip address from a network interface */
-int remove_ipv4_address(void* iface, struct in_addr ipv4_addr)
-{
-        if (IS_ENABLED(CONFIG_NET_IPV4) && net_if_flag_is_set((struct net_if*) iface, NET_IF_IPV4))
-        {
-                net_if_ipv4_addr_rm((struct net_if*) iface, &ipv4_addr);
-        }
-
-        return 0;
-}
-
 #elif defined(_WIN32)
 
 #include <stdio.h>
@@ -511,6 +480,102 @@ int initialize_network_interfaces(int32_t log_level)
 }
 
 #endif
+
+#ifdef __ZEPHYR__
+
+/* Add an ip address to a network interface */
+int add_ip_address(const void* iface, const char* ip_addr, const char* cidr, bool is_ipv6)
+{
+        int ret = -EINVAL;
+
+        if (is_ipv6 && IS_ENABLED(CONFIG_NET_IPV6) &&
+            net_if_flag_is_set((struct net_if*) iface, NET_IF_IPV6))
+        {
+                struct in6_addr helper_addr;
+
+                /* Convert ip string */
+                ret = net_addr_pton(AF_INET6, ip_addr, &helper_addr);
+                if (ret != 0)
+                {
+                        LOG_ERROR("Invalid IP address \"%s\": error %d", ip_addr, ret);
+                        return ret;
+                }
+
+                struct net_if_addr* ifaddr = net_if_ipv6_addr_add((struct net_if*) iface,
+                                                                  &helper_addr,
+                                                                  NET_ADDR_MANUAL,
+                                                                  0);
+                if (ifaddr)
+                        ret = 0;
+
+                /* ToDo: Parse CIDR to properly set Netmask */
+        }
+        else if (IS_ENABLED(CONFIG_NET_IPV4) && net_if_flag_is_set((struct net_if*) iface, NET_IF_IPV4))
+        {
+                struct in_addr helper_addr;
+
+                /* Convert ip string */
+                ret = net_addr_pton(AF_INET, ip_addr, &helper_addr);
+                if (ret != 0)
+                {
+                        LOG_ERROR("Invalid IP address \"%s\": error %d", ip_addr, ret);
+                        return ret;
+                }
+
+                struct net_if_addr* ifaddr = net_if_ipv4_addr_add((struct net_if*) iface,
+                                                                  &helper_addr,
+                                                                  NET_ADDR_MANUAL,
+                                                                  0);
+                if (ifaddr)
+                        ret = 0;
+
+                /* ToDo: Parse CIDR to properly set Netmask */
+        }
+
+        return ret;
+}
+
+/* Remove an ip address from a network interface */
+int remove_ipv4_address(const void* iface, const char* ip_addr, const char* cidr, bool is_ipv6)
+{
+        int ret = -EINVAL;
+
+        if (is_ipv6 && IS_ENABLED(CONFIG_NET_IPV6) &&
+            net_if_flag_is_set((struct net_if*) iface, NET_IF_IPV6))
+        {
+                struct in6_addr helper_addr;
+
+                /* Convert ip string */
+                ret = net_addr_pton(AF_INET6, ip_addr, &helper_addr);
+                if (ret != 0)
+                {
+                        LOG_ERROR("Invalid IP address \"%s\": error %d", ip_addr, ret);
+                        return ret;
+                }
+
+                if (net_if_ipv6_addr_rm((struct net_if*) iface, &helper_addr))
+                        ret = 0;
+        }
+        else if (IS_ENABLED(CONFIG_NET_IPV4) && net_if_flag_is_set((struct net_if*) iface, NET_IF_IPV4))
+        {
+                struct in_addr helper_addr;
+
+                /* Convert ip string */
+                ret = net_addr_pton(AF_INET, ip_addr, &helper_addr);
+                if (ret != 0)
+                {
+                        LOG_ERROR("Invalid IP address \"%s\": error %d", ip_addr, ret);
+                        return ret;
+                }
+
+                if (net_if_ipv4_addr_rm((struct net_if*) iface, &helper_addr))
+                        ret = 0;
+        }
+
+        return ret;
+}
+
+#else /* _WIN32 and Linux */
 
 int run_shell_cmd(char const* command, char** output)
 {
@@ -651,6 +716,8 @@ int remove_ip_address(const void* iface, const char* ip_addr, const char* cidr, 
 
         return ret;
 }
+
+#endif /* __ZEPHYR__ */
 
 /* Get a const pointer to the initialized structure containing the network interfaces */
 struct network_interfaces const* network_interfaces(void)

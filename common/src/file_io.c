@@ -6,7 +6,7 @@
 #include "file_io.h"
 #include "logging.h"
 
-LOG_MODULE_CREATE(networking);
+LOG_MODULE_CREATE(file_io);
 
 // asl defines
 #define PKCS11_LABEL_IDENTIFIER "pkcs11:"
@@ -14,6 +14,7 @@ LOG_MODULE_CREATE(networking);
 
 int read_file(const char* filePath, uint8_t** buffer, size_t* bytesInBuffer)
 {
+#ifndef __ZEPHYR__
         uint8_t* destination = NULL;
         if (!buffer || !filePath || !bytesInBuffer)
                 return -1;
@@ -76,6 +77,10 @@ int read_file(const char* filePath, uint8_t** buffer, size_t* bytesInBuffer)
         fclose(file);
 
         return bytesRead;
+#else
+        LOG_ERROR("File I/O not supported on Zephyr");
+        return -1;
+#endif
 }
 
 /**
@@ -99,6 +104,8 @@ char* duplicate_string(char const* source)
 
         return dest;
 }
+
+#ifndef __ZEPHYR__
 
 /* Read all certificate and key files from the paths provided in the `certs`
  * structure and store the data in the buffers. Memory is allocated internally
@@ -286,22 +293,26 @@ void cleanup_certificates(struct certificates* certs)
         }
 }
 
+#endif
+
 int file_exists(const char* filepath)
 {
+#ifndef __ZEPHYR__
         // Use the access() system call to check file existence
         // F_OK flag checks for file existence
         if (access(filepath, F_OK) == 0)
-        {
                 return 1; // File exists
-        }
         else
-        {
                 return 0; // File does not exist
-        }
+#else
+        LOG_ERROR("File I/O not supported on Zephyr");
+        return -1;
+#endif
 }
 
 int write_file(const char* file_path, uint8_t const* buffer, size_t buffer_size, bool append)
 {
+#ifndef __ZEPHYR__
         FILE* file = NULL;
 
         if (!file_path || !buffer || (buffer_size == 0))
@@ -340,4 +351,8 @@ error_occured:
         if (file != NULL)
                 fclose(file);
         return -1;
+#else
+        LOG_ERROR("File I/O not supported on Zephyr");
+        return -1;
+#endif
 }

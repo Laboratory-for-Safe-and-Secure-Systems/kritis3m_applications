@@ -5,9 +5,19 @@ option(ENABLE_TLS_PROXY "Enable TLS proxy" ON)
 option(ENABLE_NETWORK_TESTER "Enable network tester" ON)
 option(ENABLE_MANAGEMENT "Enable Scale management" ON)
 
+
+# Generate the configuration file
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/kritis3m_application_config.h.in kritis3m_application_config.h)
+
+
 # Common files
 add_subdirectory(common)
 
+# Each consumer of any applications must link against this common library. Hence,
+# we can add the include directory for the created config file via this target.
+target_include_directories(kritis3m_applications_common PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
+)
 
 # Echo server application
 if (ENABLE_ECHO_SERVER)
