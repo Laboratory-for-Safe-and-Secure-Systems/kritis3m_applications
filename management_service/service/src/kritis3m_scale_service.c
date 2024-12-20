@@ -119,7 +119,6 @@ int start_kritis3m_service(char* config_file, int log_level)
 
         CryptoProfile default_profile = {
                 .ASLKeyExchangeMethod = ASL_KEX_DEFAULT,
-                .HybridSignatureMode = ASL_HYBRID_SIGNATURE_MODE_DEFAULT,
                 .MutualAuthentication = true,
                 .Name = "default",
                 .NoEncryption = false,
@@ -424,7 +423,6 @@ int req_send_status_report(ApplicationManagerStatus manager_status)
         }
         return retval;
 }
-
 
 int stop_kritis3m_service()
 {

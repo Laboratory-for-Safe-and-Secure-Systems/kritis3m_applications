@@ -301,7 +301,6 @@ int create_endpoint_config(crypto_identity* crypto_id,
         ep_cfg->pkcs11.module_path = crypto_profile->secure_middleware_path;
         ep_cfg->pkcs11.module_pin = crypto_profile->pin;
 
-        ep_cfg->hybrid_signature_mode = crypto_profile->HybridSignatureMode;
         ep_cfg->key_exchange_method = crypto_profile->ASLKeyExchangeMethod;
         ep_cfg->mutual_authentication = crypto_profile->MutualAuthentication;
         ep_cfg->no_encryption = crypto_profile->NoEncryption;
@@ -437,9 +436,7 @@ void cleanup_Systemconfiguration(SystemConfiguration* systemconfiguration)
         {
                 CryptoProfile* profile = &systemconfiguration->application_config.crypto_profile[i];
                 profile->id = 0;
-                profile->ASLKeyExchangeMethod = ASL_KEX_DEFAULT,
-                profile->HybridSignatureMode = ASL_HYBRID_SIGNATURE_MODE_DEFAULT;
-                profile->crypto_identity_id = 0;
+                profile->ASLKeyExchangeMethod = ASL_KEX_DEFAULT, profile->crypto_identity_id = 0;
                 profile->Keylog = false;
                 profile->NoEncryption = false;
                 profile->UseSecureElement = false;

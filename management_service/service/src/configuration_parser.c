@@ -13,11 +13,16 @@ LOG_MODULE_CREATE(kritis3m_config_paser);
 
 /*--------------------- FORWARD DECLARATION ------------------------------------*/
 int parse_whitelist(cJSON* json_obj, Whitelist* whitelist);
-int parse_crypo_config(cJSON* json_obj, CryptoProfile* CryptoProfile, char* secure_middleware_path, char* pin);
+int parse_crypo_config(cJSON* json_obj,
+                       CryptoProfile* CryptoProfile,
+                       char* secure_middleware_path,
+                       char* pin);
 int parse_crypo_identity(cJSON* json_obj, crypto_identity* crypto_identity, char* crypto_identity_path);
 int parse_application(cJSON* json_obj, Kritis3mApplications* application);
 
-int parse_json_to_ManagementConfig(cJSON* json_management_service, Kritis3mManagemntConfiguration* config, char* identity_path)
+int parse_json_to_ManagementConfig(cJSON* json_management_service,
+                                   Kritis3mManagemntConfiguration* config,
+                                   char* identity_path)
 {
         int ret = 0;
 
@@ -454,7 +459,7 @@ error_occured:
 /**
  * @brief Initializes a Whitelist from a JSON object.
  *
- * This function parses the provided JSON object to populate the 
+ * This function parses the provided JSON object to populate the
  * Whitelist structure with the corresponding whitelist data.
  *
  * @param json_obj Pointer to the cJSON object containing the whitelist data.
@@ -514,7 +519,7 @@ error_occured:
 /**
  * @brief Initializes a Kritis3mApplication from a JSON object.
  *
- * This function parses the provided JSON object to populate the 
+ * This function parses the provided JSON object to populate the
  * Kritis3mApplications structure with the corresponding application data.
  *
  * @param[in] json_obj Pointer to the cJSON object containing the application data.
@@ -583,7 +588,7 @@ error_occured:
  * @brief Parses a JSON object to initialize a crypto identity.
  *
  * This function extracts the crypto identity information from the provided JSON object,
- * retrieves certificates from the specified crypto identity path, and initializes 
+ * retrieves certificates from the specified crypto identity path, and initializes
  * the crypto_identity structure with the parsed data.
  *
  * @param json_obj Pointer to the cJSON object containing the crypto identity data.
@@ -655,7 +660,7 @@ error_occured:
  * @brief Parses a JSON object to initialize a cryptographic configuration.
  *
  * This function extracts cryptographic configuration details from the given JSON object to initialize the Cryptoprofile
- * structure. The secure middleware path and PIN are 
+ * structure. The secure middleware path and PIN are
  * obtained from the Kritis3mNodeConfiguration.
  *
  * @param[in] json_obj Pointer to the cJSON object containing the cryptographic configuration.
@@ -705,11 +710,6 @@ ManagementReturncode parse_crypo_config(cJSON* json_obj,
         if (item == NULL)
                 goto error_occured;
         profile->UseSecureElement = cJSON_IsTrue(item);
-
-        item = cJSON_GetObjectItem(json_obj, "signature_mode");
-        if (item == NULL)
-                goto error_occured;
-        profile->HybridSignatureMode = item->valueint;
 
         item = cJSON_GetObjectItem(json_obj, "keylog");
         if (item == NULL)

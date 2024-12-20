@@ -164,7 +164,6 @@ struct CryptoProfile
         bool NoEncryption;
         enum asl_key_exchange_method ASLKeyExchangeMethod;
         bool UseSecureElement;
-        enum asl_hybrid_signature_mode HybridSignatureMode;
         bool Keylog;
         int32_t crypto_identity_id;
         char* secure_middleware_path;
