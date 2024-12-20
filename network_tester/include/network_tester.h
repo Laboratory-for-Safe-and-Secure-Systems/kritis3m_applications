@@ -37,7 +37,8 @@ typedef struct network_tester_config
 typedef struct network_tester_status
 {
         bool is_running;
-        uint32_t progress_percent;
+        int32_t progress_percent;
+        int return_code;
 } network_tester_status;
 
 /* Create the default config for the network_tester */

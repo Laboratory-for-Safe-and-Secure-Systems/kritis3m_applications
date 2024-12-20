@@ -12,12 +12,12 @@
 #include <unistd.h>
 
 #if defined(_WIN32)
-        #include <winsock2.h>
+#include <winsock2.h>
 #else
-        #include <arpa/inet.h>
-        #include <netinet/in.h>
-        #include <netinet/tcp.h>
-        #include <sys/socket.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <sys/socket.h>
 #endif
 
 #include "logging.h"
@@ -37,7 +37,7 @@ LOG_MODULE_CREATE(network_tester);
 
 #if defined(__ZEPHYR__)
 
-        #define TESTER_STACK_SIZE (32 * 1024)
+#define TESTER_STACK_SIZE (32 * 1024)
 Z_KERNEL_STACK_DEFINE_IN(tester_stack,
                          TESTER_STACK_SIZE,
                          __attribute__((section(CONFIG_RAM_SECTION_STACKS_2))));
@@ -67,6 +67,7 @@ typedef struct network_tester_management_message
 typedef struct network_tester
 {
         bool running;
+        int return_code;
         int progress_percent;
         int total_iterations;
         int tcp_socket;
@@ -86,6 +87,7 @@ typedef struct network_tester
 /* File global variables */
 static network_tester the_tester = {
         .running = false,
+        .return_code = 0,
         .progress_percent = -1,
         .total_iterations = 0,
         .tcp_socket = -1,
@@ -306,6 +308,7 @@ static void* network_tester_main_thread(void* ptr)
         int ret = 0;
 
         tester->running = true;
+        tester->return_code = 0;
 
         /* Read the START message with the configuration */
         network_tester_management_message start_msg = {0};
@@ -565,6 +568,8 @@ static void* network_tester_main_thread(void* ptr)
                 ERROR_OUT("Error writing results to file");
 
 cleanup:
+        tester->return_code = -ret;
+
         /* Cleanup */
         tester_cleanup(tester);
 
@@ -669,6 +674,7 @@ static int handle_management_message(network_tester* tester, int socket)
                         /* Fill status object */
                         network_tester_status* status = msg.payload.status_ptr;
                         status->is_running = tester->running;
+                        status->return_code = tester->return_code;
                         status->progress_percent = tester->progress_percent;
 
                         /* Send response */
@@ -851,9 +857,13 @@ cleanup:
  */
 int network_tester_get_status(network_tester_status* status)
 {
-        if ((the_tester.management_socket_pair[0] < 0) || (the_tester.management_socket_pair[0] < 0))
+        if ((the_tester.management_socket_pair[0] < 0) ||
+            (the_tester.management_socket_pair[0] < 0) || (the_tester.running == false))
         {
                 LOG_DEBUG("Tester thread not running");
+                status->is_running = false;
+                status->return_code = the_tester.return_code;
+                status->progress_percent = the_tester.progress_percent;
                 return -1;
         }
 
