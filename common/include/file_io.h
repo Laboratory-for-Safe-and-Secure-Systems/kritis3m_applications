@@ -75,15 +75,18 @@ char* duplicate_string(char const* source);
 
 #ifndef __ZEPHYR__
 
+/* Get a properly initialized, empty certificates object */
+certificates get_empty_certificates(void);
+
 /* Read all certificate and key files from the paths provided in the `certs`
  * structure and store the data in the buffers. Memory is allocated internally
  * and must be freed by the user.
  *
  * Returns 0 on success, -1 on failure (error is printed on console). */
-int read_certificates(struct certificates* certs);
+int read_certificates(certificates* certs);
 
 // free mem
-void cleanup_certificates(struct certificates* certs);
+void cleanup_certificates(certificates* certs);
 
 #endif
 

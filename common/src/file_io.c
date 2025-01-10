@@ -107,6 +107,32 @@ char* duplicate_string(char const* source)
 
 #ifndef __ZEPHYR__
 
+/* Get a properly initialized, empty certificates object */
+certificates get_empty_certificates(void)
+{
+        certificates certs;
+
+        certs.certificate_path = NULL;
+        certs.private_key_path = NULL;
+        certs.additional_key_path = NULL;
+        certs.intermediate_path = NULL;
+        certs.root_path = NULL;
+
+        certs.chain_buffer = NULL;
+        certs.chain_buffer_size = 0;
+
+        certs.key_buffer = NULL;
+        certs.key_buffer_size = 0;
+
+        certs.additional_key_buffer = NULL;
+        certs.additional_key_buffer_size = 0;
+
+        certs.root_buffer = NULL;
+        certs.root_buffer_size = 0;
+
+        return certs;
+}
+
 /* Read all certificate and key files from the paths provided in the `certs`
  * structure and store the data in the buffers. Memory is allocated internally
  * and must be freed by the user.
@@ -142,7 +168,7 @@ int read_certificates(struct certificates* certs)
         }
 
         /* Read private key */
-        if (certs->private_key_path != 0)
+        if (certs->private_key_path != NULL)
         {
                 if (strncmp(certs->private_key_path,
                             PKCS11_LABEL_IDENTIFIER,
@@ -172,7 +198,7 @@ int read_certificates(struct certificates* certs)
         }
 
         /* Read addtional private key */
-        if (certs->additional_key_path != 0)
+        if (certs->additional_key_path != NULL)
         {
                 if (strncmp(certs->additional_key_path,
                             PKCS11_LABEL_IDENTIFIER,
@@ -203,7 +229,7 @@ int read_certificates(struct certificates* certs)
         }
 
         /* Read root certificate */
-        if (certs->root_path != 0)
+        if (certs->root_path != NULL)
         {
                 certs->root_buffer_size = 0;
                 ret = read_file(certs->root_path, &certs->root_buffer, &certs->root_buffer_size);
@@ -212,11 +238,6 @@ int read_certificates(struct certificates* certs)
                         LOG_ERROR("unable to read root certificate from file %s", certs->root_path);
                         goto error;
                 }
-        }
-        else
-        {
-                LOG_ERROR("no root certificate file specified");
-                goto error;
         }
 
         return 0;
