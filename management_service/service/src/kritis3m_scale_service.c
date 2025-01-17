@@ -126,8 +126,6 @@ int start_kritis3m_service(char* config_file, int log_level)
                 .Keylog = false,
         };
         /** -------------- set log level ----------------------------- */
-        asl_enable_logging(true);
-        asl_set_log_level(log_level);
         LOG_LVL_SET(log_level);
 
         // get global node config
