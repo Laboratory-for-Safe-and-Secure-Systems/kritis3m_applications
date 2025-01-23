@@ -6,10 +6,10 @@
 #include <unistd.h>
 
 #if defined(_WIN32)
-        #include <winsock2.h>
+#include <winsock2.h>
 #else
-        #include <netinet/tcp.h>
-        #include <sys/socket.h>
+#include <netinet/tcp.h>
+#include <sys/socket.h>
 #endif
 
 #include "proxy_backend.h"
@@ -39,7 +39,7 @@
 static proxy_connection proxy_connection_pool[MAX_CONNECTIONS_PER_PROXY]
         __attribute__((section(CONFIG_RAM_SECTION_STACKS_2)));
 
-        #define CONNECTION_HANDLER_STACK_SIZE (8 * 1024)
+#define CONNECTION_HANDLER_STACK_SIZE (8 * 1024)
 Z_KERNEL_STACK_ARRAY_DEFINE_IN(connection_handler_stack_pool,
                                MAX_CONNECTIONS_PER_PROXY,
                                CONNECTION_HANDLER_STACK_SIZE,
@@ -65,6 +65,7 @@ void init_proxy_connection_pool(void)
                 proxy_connection_pool[i].direction = REVERSE_PROXY;
                 proxy_connection_pool[i].tunnel_sock = -1;
                 proxy_connection_pool[i].asset_sock = -1;
+                proxy_connection_pool[i].target_addr = NULL;
                 proxy_connection_pool[i].tls_session = NULL;
                 proxy_connection_pool[i].log_module = NULL;
                 proxy_connection_pool[i].proxy = NULL;
@@ -121,6 +122,7 @@ proxy_connection* add_new_connection_to_proxy(proxy* proxy,
         connection->in_use = true;
         connection->direction = proxy->direction;
         connection->slot = freeSlotConnectionPool;
+        connection->target_addr = proxy->target_addr;
         connection->log_module = &proxy->log_module;
         connection->proxy = proxy;
 
@@ -128,8 +130,10 @@ proxy_connection* add_new_connection_to_proxy(proxy* proxy,
         {
                 connection->asset_sock = client_socket;
 
-                /* Create the socket for the tunnel  */
-                connection->tunnel_sock = socket(proxy->target_addr->ai_family, SOCK_STREAM, IPPROTO_TCP);
+                /* Create the socket for the tunnel */
+                connection->tunnel_sock = socket(connection->target_addr->ai_family,
+                                                 SOCK_STREAM,
+                                                 IPPROTO_TCP);
                 if (connection->tunnel_sock == -1)
                         ERROR_OUT_EX(proxy->log_module, "Error creating tunnel socket, errno: %d", errno);
         }
@@ -138,7 +142,9 @@ proxy_connection* add_new_connection_to_proxy(proxy* proxy,
                 connection->tunnel_sock = client_socket;
 
                 /* Create the socket for the asset connection */
-                connection->asset_sock = socket(proxy->target_addr->ai_family, SOCK_STREAM, IPPROTO_TCP);
+                connection->asset_sock = socket(connection->target_addr->ai_family,
+                                                SOCK_STREAM,
+                                                IPPROTO_TCP);
                 if (connection->asset_sock == -1)
                         ERROR_OUT_EX(proxy->log_module, "Error creating asset socket, errno: %d", errno);
         }
@@ -176,8 +182,8 @@ proxy_connection* add_new_connection_to_proxy(proxy* proxy,
 
                 /* Connect to the peer */
                 ret = connect(connection->tunnel_sock,
-                              (struct sockaddr*) proxy->target_addr->ai_addr,
-                              proxy->target_addr->ai_addrlen);
+                              (struct sockaddr*) connection->target_addr->ai_addr,
+                              connection->target_addr->ai_addrlen);
         }
         else if (connection->direction == REVERSE_PROXY)
         {
@@ -195,8 +201,8 @@ proxy_connection* add_new_connection_to_proxy(proxy* proxy,
 
                 /* Connect to the peer */
                 ret = connect(connection->asset_sock,
-                              (struct sockaddr*) proxy->target_addr->ai_addr,
-                              proxy->target_addr->ai_addrlen);
+                              (struct sockaddr*) connection->target_addr->ai_addr,
+                              connection->target_addr->ai_addrlen);
         }
         if ((ret != 0) &&
 #if defined(_WIN32)
@@ -254,6 +260,119 @@ proxy_connection* find_proxy_connection_by_fd(int fd)
         }
 
         return NULL;
+}
+
+int proxy_connection_try_next_target(proxy_connection* connection)
+{
+        int ret = 0;
+        if (connection->target_addr->ai_next == NULL)
+        {
+                LOG_DEBUG_EX(*connection->log_module, "No more target addresses to try");
+                return -1;
+        }
+
+        connection->target_addr = connection->target_addr->ai_next;
+
+        /* Close the current connection depending on the role */
+        if (connection->direction == REVERSE_PROXY && connection->asset_sock >= 0)
+        {
+                /* Close current socket */
+                closesocket(connection->asset_sock);
+
+                /* Create the new socket for the asset connection */
+                connection->asset_sock = socket(connection->target_addr->ai_family,
+                                                SOCK_STREAM,
+                                                IPPROTO_TCP);
+                if (connection->asset_sock == -1)
+                        ERROR_OUT_EX(*connection->log_module,
+                                     "Error creating asset socket, errno: %d",
+                                     errno);
+
+                setblocking(connection->asset_sock, false);
+
+                /* Set TCP_NODELAY option to disable Nagle algorithm */
+                if (setsockopt(connection->asset_sock,
+                               IPPROTO_TCP,
+                               TCP_NODELAY,
+                               (char*) &(int) {1},
+                               sizeof(int)) < 0)
+                        ERROR_OUT_EX(*connection->log_module,
+                                     "setsockopt(TCP_NODELAY) asset_sock failed: error %d",
+                                     errno);
+
+#if !defined(__ZEPHYR__) && !defined(_WIN32)
+                /* Set retry count to send a total of 3 SYN packets => Timeout ~7s */
+                if (setsockopt(connection->asset_sock,
+                               IPPROTO_TCP,
+                               TCP_SYNCNT,
+                               (char*) &(int) {2},
+                               sizeof(int)) < 0)
+                        ERROR_OUT_EX(*connection->log_module,
+                                     "setsockopt(TCP_SYNCNT) asset_sock failed: error %d",
+                                     errno);
+#endif
+                /* Connect to the peer */
+                ret = connect(connection->asset_sock,
+                              (struct sockaddr*) connection->target_addr->ai_addr,
+                              connection->target_addr->ai_addrlen);
+        }
+        else if (connection->direction == FORWARD_PROXY && connection->tunnel_sock >= 0)
+        {
+                closesocket(connection->tunnel_sock);
+
+                /* Create the new socket for the tunnel */
+                connection->tunnel_sock = socket(connection->target_addr->ai_family,
+                                                 SOCK_STREAM,
+                                                 IPPROTO_TCP);
+                if (connection->tunnel_sock == -1)
+                        ERROR_OUT_EX(*connection->log_module,
+                                     "Error creating tunnel socket, errno: %d",
+                                     errno);
+
+                setblocking(connection->tunnel_sock, false);
+
+                /* Set TCP_NODELAY option to disable Nagle algorithm */
+                if (setsockopt(connection->tunnel_sock,
+                               IPPROTO_TCP,
+                               TCP_NODELAY,
+                               (char*) &(int) {1},
+                               sizeof(int)) < 0)
+                        ERROR_OUT_EX(*connection->log_module,
+                                     "setsockopt(TCP_NODELAY) tunnel_sock failed: error %d",
+                                     errno);
+
+#if !defined(__ZEPHYR__) && !defined(_WIN32)
+                /* Set retry count to send a total of 3 SYN packets => Timeout ~7s */
+                if (setsockopt(connection->tunnel_sock,
+                               IPPROTO_TCP,
+                               TCP_SYNCNT,
+                               (char*) &(int) {2},
+                               sizeof(int)) < 0)
+                        ERROR_OUT_EX(*connection->log_module,
+                                     "setsockopt(TCP_SYNCNT) tunnel_sock failed: error %d",
+                                     errno);
+#endif
+                /* Connect to the peer */
+                ret = connect(connection->tunnel_sock,
+                              (struct sockaddr*) connection->target_addr->ai_addr,
+                              connection->target_addr->ai_addrlen);
+        }
+
+        if ((ret != 0) &&
+#if defined(_WIN32)
+            (WSAGetLastError() != WSAEWOULDBLOCK))
+#else
+            (errno != EINPROGRESS))
+#endif
+                ERROR_OUT_EX(*connection->log_module,
+                             "Unable to connect to target peer, errno: %d",
+                             errno);
+
+        return 0;
+
+cleanup:
+        proxy_connection_cleanup(connection);
+        return -1;
 }
 
 int proxy_connection_detach_handling(proxy_connection* connection)
@@ -396,6 +515,7 @@ void proxy_connection_cleanup(proxy_connection* connection)
 
         connection->num_of_bytes_in_tun2ass_buffer = 0;
         connection->num_of_bytes_in_ass2tun_buffer = 0;
+        connection->target_addr = NULL;
         connection->log_module = NULL;
         connection->slot = -1;
         connection->proxy = NULL;

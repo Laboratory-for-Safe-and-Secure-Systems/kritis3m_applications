@@ -778,9 +778,15 @@ void* proxy_backend_thread(void* ptr)
                         {
                                 if ((event & POLLERR) || (event & POLLHUP))
                                 {
-                                        LOG_INFO("Client connection closed");
-                                        poll_set_remove_fd(&backend->poll_set, fd);
-                                        proxy_connection_cleanup(proxy_connection);
+                                        /* If we have an additional target, try that first */
+                                        if (proxy_connection_try_next_target(proxy_connection) < 0)
+                                        {
+                                                LOG_INFO("Client connection closed");
+                                                poll_set_remove_fd(&backend->poll_set, fd);
+                                                proxy_connection_cleanup(proxy_connection);
+                                                continue;
+                                        }
+
                                         continue;
                                 }
                                 if ((event & POLLIN) || (event & POLLOUT))

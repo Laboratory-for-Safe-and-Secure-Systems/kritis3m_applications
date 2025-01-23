@@ -72,6 +72,7 @@ typedef struct network_tester
         int total_iterations;
         int tcp_socket;
         struct addrinfo* target_addr;
+        struct addrinfo* current_target;
         network_tester_config* config;
         asl_endpoint* tls_endpoint;
         asl_session* tls_session;
@@ -92,6 +93,7 @@ static network_tester the_tester = {
         .total_iterations = 0,
         .tcp_socket = -1,
         .target_addr = NULL,
+        .current_target = NULL,
         .config = NULL,
         .tls_endpoint = NULL,
         .tls_session = NULL,
@@ -196,6 +198,8 @@ static int network_init(network_tester* tester)
                                   &tester->target_addr) < 0)
                 ERROR_OUT("Error looking up target IP address");
 
+        tester->current_target = tester->target_addr;
+
         /* Configure TLS endpoint */
         if (tester->config->use_tls == true)
         {
@@ -214,8 +218,11 @@ static int connection_setup(network_tester* tester)
 {
         int ret = 0;
 
+        if (tester->tcp_socket > 0)
+                closesocket(tester->tcp_socket);
+
         /* Create the TCP socket for the outgoing connection */
-        tester->tcp_socket = socket(tester->target_addr->ai_family, SOCK_STREAM, IPPROTO_TCP);
+        tester->tcp_socket = socket(tester->current_target->ai_family, SOCK_STREAM, IPPROTO_TCP);
         if (tester->tcp_socket == -1)
                 ERROR_OUT("Error creating TCP socket");
 
@@ -230,7 +237,7 @@ static int connection_setup(network_tester* tester)
 #endif
 
         /* Create the TLS session */
-        if (tester->config->use_tls == true)
+        if (tester->config->use_tls == true && tester->tls_session == NULL)
         {
                 LOG_DEBUG("Creating TLS session");
 
@@ -355,6 +362,9 @@ static void* network_tester_main_thread(void* ptr)
                 tester->total_iterations = tester->config->handshake_test.iterations *
                                            tester->config->message_latency_test.iterations;
 
+        if (tester->total_iterations == 0)
+                ERROR_OUT("No measurements to take");
+
         /* Create the timing metrics for the handshake measurements */
         if (tester->config->handshake_test.iterations > 0)
         {
@@ -410,26 +420,38 @@ static void* network_tester_main_thread(void* ptr)
         int handshake_count = 0;
         do
         {
-                /* Setup the connection */
-                ret = connection_setup(tester);
-                if (ret < 0)
-                        ERROR_OUT("Error setting up connection");
+                bool tcp_connected = false;
+                do
+                {
+                        /* Setup the connection */
+                        ret = connection_setup(tester);
+                        if (ret < 0)
+                                ERROR_OUT("Error setting up connection");
 
-                /* Start the measurement of the handshake time */
-                timing_metrics_start_measurement(tester->handshake_times);
+                        /* Start the measurement of the handshake time */
+                        timing_metrics_start_measurement(tester->handshake_times);
 
-                /* Connect to the peer */
-                LOG_DEBUG("Establishing TCP connection");
-                ret = connect(tester->tcp_socket,
-                              (struct sockaddr*) tester->target_addr->ai_addr,
-                              tester->target_addr->ai_addrlen);
-                if ((ret != 0) &&
-#if defined(_WIN32)
-                    (WSAGetLastError() != WSAEWOULDBLOCK))
-#else
-                    (errno != EINPROGRESS))
-#endif
-                        ERROR_OUT("Error establishing TCP connection to target peer");
+                        /* Connect to the peer */
+                        LOG_DEBUG("Establishing TCP connection");
+                        ret = connect(tester->tcp_socket,
+                                      (struct sockaddr*) tester->current_target->ai_addr,
+                                      tester->current_target->ai_addrlen);
+
+                        if (ret != 0)
+                        {
+                                if ((errno == ECONNREFUSED) && (tester->current_target->ai_next != NULL))
+                                {
+                                        tester->current_target = tester->current_target->ai_next;
+                                        LOG_DEBUG("Connection refused by target peer, try "
+                                                  "next target address");
+                                }
+                                else
+                                        ERROR_OUT("Error connecting to target peer: %d", errno);
+                        }
+                        else
+                                tcp_connected = true;
+                }
+                while (tcp_connected == false);
 
                 /* Do TLS handshake */
                 if (tester->config->use_tls == true)
