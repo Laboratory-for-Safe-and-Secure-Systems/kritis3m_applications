@@ -55,6 +55,8 @@ static proxy_connection proxy_connection_pool[MAX_CONNECTIONS_PER_PROXY];
 static int handle_management_message(proxy_connection* connection,
                                      int socket,
                                      proxy_management_message const* msg);
+static bool handle_tunnel_to_asset(proxy_connection* connection, short event, poll_set* poll_set);
+static bool handle_asset_to_tunnel(proxy_connection* connection, short event, poll_set* poll_set);
 static void* connection_handler_thread(void* ptr);
 
 void init_proxy_connection_pool(void)
@@ -560,6 +562,259 @@ static int handle_management_message(proxy_connection* connection,
         return ret;
 }
 
+static bool handle_tunnel_to_asset(proxy_connection* connection, short event, poll_set* poll_set)
+{
+        int ret = 0;
+        bool shutdown = false;
+
+        if (event & POLLIN)
+        {
+                ret = 1;
+                while (ret > 0)
+                {
+                        /* Data received from the tunnel */
+                        ret = asl_receive(connection->tls_session,
+                                          connection->tun2ass_buffer,
+                                          sizeof(connection->tun2ass_buffer));
+
+                        if (ret > 0)
+                        {
+                                connection->num_of_bytes_in_tun2ass_buffer = ret;
+
+                                /* Send received data to the asset */
+                                ret = send(connection->asset_sock,
+                                           connection->tun2ass_buffer,
+                                           connection->num_of_bytes_in_tun2ass_buffer,
+                                           0);
+
+                                if (ret == -1)
+                                {
+#if defined(_WIN32)
+                                        if (WSAGetLastError() == WSAEWOULDBLOCK)
+#else
+                                        if ((errno == EAGAIN) || (errno == EWOULDBLOCK))
+#endif
+                                        {
+                                                /* We have to wait for the asset socket to be writable.
+                                                 * Until we can send the data, we also mustn't receive
+                                                 * more data on the tunnel socket. */
+                                                poll_set_add_events(poll_set,
+                                                                    connection->asset_sock,
+                                                                    POLLOUT);
+                                                poll_set_remove_events(poll_set,
+                                                                       connection->tunnel_sock,
+                                                                       POLLIN);
+                                                ret = 0;
+                                        }
+                                        else
+                                        {
+                                                if (errno == ECONNRESET)
+                                                {
+                                                        LOG_INFO_EX(*connection->log_module,
+                                                                    "Asset connection closed");
+                                                }
+                                                else
+                                                {
+                                                        LOG_ERROR_EX(*connection->log_module,
+                                                                     "Error sending data to asset: "
+                                                                     "%d (%s)",
+                                                                     errno,
+                                                                     strerror(errno));
+                                                }
+                                                shutdown = true;
+                                                break;
+                                        }
+                                }
+                                else if ((size_t) ret == connection->num_of_bytes_in_tun2ass_buffer)
+                                {
+                                        if (connection->num_of_bytes_in_tun2ass_buffer <
+                                            sizeof(connection->tun2ass_buffer))
+                                        {
+                                                /* We read the maximum amount of data from the
+                                                 * tunnel connection. This could be an indication
+                                                 * that there is more data to be read. Hence, we
+                                                 * trigger another read here. */
+                                                ret = 0;
+                                        }
+
+                                        connection->num_of_bytes_in_tun2ass_buffer = 0;
+                                }
+                                else
+                                {
+                                        connection->num_of_bytes_in_tun2ass_buffer -= ret;
+                                        memmove(connection->tun2ass_buffer,
+                                                connection->tun2ass_buffer + ret,
+                                                connection->num_of_bytes_in_tun2ass_buffer);
+                                        poll_set_update_events(poll_set, connection->asset_sock, POLLOUT);
+                                        // Do we need have to remove POLLIN
+                                        // from tunnel_sock here?
+                                        // LOG_WARN_EX(*connection->log_module, "Not all data sent to asset");
+                                        ret = 0;
+                                }
+                        }
+                        else if (ret == ASL_WANT_READ)
+                        {
+                                /* We have to wait for more data from the
+                                 * peer to read data (not a full record has
+                                 * been received).
+                                 */
+                                ret = 0;
+                        }
+                        else if (ret < 0)
+                        {
+                                /* Connection closed */
+                                ret = -1;
+                        }
+                }
+        }
+        if (event & POLLOUT)
+        {
+                /* We can send data on the tunnel connection now. Send
+                 * remaining data from the asset. */
+                ret = asl_send(connection->tls_session,
+                               connection->ass2tun_buffer,
+                               connection->num_of_bytes_in_ass2tun_buffer);
+
+                if (ret == ASL_SUCCESS)
+                {
+                        /* Wait again for incoming data on the asset socket and remove
+                         * the writable indication from the tunnel socket. */
+                        poll_set_remove_events(poll_set, connection->tunnel_sock, POLLOUT);
+                        poll_set_add_events(poll_set, connection->asset_sock, POLLIN);
+                        connection->num_of_bytes_in_ass2tun_buffer = 0;
+                }
+                else if (ret == ASL_WANT_WRITE)
+                {
+                        /* We still have to wait until we can send data, just wait. Hence,
+                         * we have to clear the error condition */
+                        ret = 0;
+                }
+        }
+        if (event & POLLERR)
+        {
+                LOG_INFO_EX(*connection->log_module, "Tunnel connection closed");
+                shutdown = true;
+        }
+
+        if (ret < 0)
+        {
+                shutdown = true;
+        }
+
+        return shutdown;
+}
+
+static bool handle_asset_to_tunnel(proxy_connection* connection, short event, poll_set* poll_set)
+{
+        int ret = 0;
+        bool shutdown = false;
+
+        if (event & POLLIN)
+        {
+                /* Data received from the asset connection */
+                ret = recv(connection->asset_sock,
+                           connection->ass2tun_buffer,
+                           sizeof(connection->ass2tun_buffer),
+                           0);
+
+                if (ret > 0)
+                {
+                        connection->num_of_bytes_in_ass2tun_buffer = ret;
+
+                        /* Send received data to the other socket */
+                        ret = asl_send(connection->tls_session,
+                                       connection->ass2tun_buffer,
+                                       connection->num_of_bytes_in_ass2tun_buffer);
+
+                        if (ret == ASL_WANT_WRITE)
+                        {
+                                /* We have to wait for the tunnel socket to be writable. Until we can send
+                                 * the data, we also mustn't receive more data on the asset socket. */
+                                poll_set_add_events(poll_set, connection->tunnel_sock, POLLOUT);
+                                poll_set_remove_events(poll_set, connection->asset_sock, POLLIN);
+                                ret = 0;
+                        }
+                        else
+                        {
+                                connection->num_of_bytes_in_ass2tun_buffer = 0;
+                        }
+                }
+                else if (ret == 0)
+                {
+                        /* Connection closed */
+                        ret = -1;
+                }
+                else
+                {
+                        ret = -1;
+                }
+        }
+        if (event & POLLOUT)
+        {
+                /* We can send data on the asset connection now. Send
+                 * remaining tunnel data. */
+                ret = send(connection->asset_sock,
+                           connection->tun2ass_buffer,
+                           connection->num_of_bytes_in_tun2ass_buffer,
+                           0);
+
+                if (ret == -1)
+                {
+#if defined(_WIN32)
+                        if (WSAGetLastError() == WSAEWOULDBLOCK)
+#else
+                        if ((errno == EAGAIN) || (errno == EWOULDBLOCK))
+#endif
+                        {
+                                ret = 0;
+                        }
+                        else
+                        {
+                                if (errno == ECONNRESET)
+                                {
+                                        LOG_INFO_EX(*connection->log_module, "Asset connection closed");
+                                }
+                                else
+                                {
+                                        LOG_ERROR_EX(*connection->log_module,
+                                                     "Error sending data to asset: %d (%s)",
+                                                     errno,
+                                                     strerror(errno));
+                                }
+                                shutdown = true;
+                        }
+                }
+                else if ((size_t) ret == connection->num_of_bytes_in_tun2ass_buffer)
+                {
+                        /* Wait again for incoming data on the tunnel socket and remove
+                         * the writable indication from the asset socket. */
+                        poll_set_remove_events(poll_set, connection->asset_sock, POLLOUT);
+                        poll_set_add_events(poll_set, connection->tunnel_sock, POLLIN);
+                        connection->num_of_bytes_in_tun2ass_buffer = 0;
+                }
+                else
+                {
+                        connection->num_of_bytes_in_tun2ass_buffer -= ret;
+                        memmove(connection->tun2ass_buffer,
+                                connection->tun2ass_buffer + ret,
+                                connection->num_of_bytes_in_tun2ass_buffer);
+                        // LOG_WARN_EX(*connection->log_module, "Not all data sent to asset");
+                }
+        }
+        if (event & POLLERR)
+        {
+                LOG_INFO_EX(*connection->log_module, "Asset connection closed");
+                shutdown = true;
+        }
+
+        if (ret < 0)
+        {
+                shutdown = true;
+        }
+
+        return shutdown;
+}
+
 static void* connection_handler_thread(void* ptr)
 {
         proxy_connection* connection = (proxy_connection*) ptr;
@@ -626,249 +881,11 @@ static void* connection_handler_thread(void* ptr)
                         }
                         else if (fd == connection->tunnel_sock)
                         {
-                                if (event & POLLIN)
-                                {
-                                        ret = 1;
-                                        while (ret > 0)
-                                        {
-                                                /* Data received from the tunnel */
-                                                ret = asl_receive(connection->tls_session,
-                                                                  connection->tun2ass_buffer,
-                                                                  sizeof(connection->tun2ass_buffer));
-
-                                                if (ret > 0)
-                                                {
-                                                        connection->num_of_bytes_in_tun2ass_buffer = ret;
-
-                                                        /* Send received data to the asset */
-                                                        ret = send(connection->asset_sock,
-                                                                   connection->tun2ass_buffer,
-                                                                   connection->num_of_bytes_in_tun2ass_buffer,
-                                                                   0);
-
-                                                        if (ret == -1)
-                                                        {
-#if defined(_WIN32)
-                                                                if (WSAGetLastError() == WSAEWOULDBLOCK)
-#else
-                                                                if ((errno == EAGAIN) ||
-                                                                    (errno == EWOULDBLOCK))
-#endif
-                                                                {
-                                                                        /* We have to wait for the asset socket to be writable. Until we can send
-                                                                         * the data, we also mustn't receive more data on the tunnel socket. */
-                                                                        poll_set_add_events(&poll_set,
-                                                                                            connection
-                                                                                                    ->asset_sock,
-                                                                                            POLLOUT);
-                                                                        poll_set_remove_events(&poll_set,
-                                                                                               connection
-                                                                                                       ->tunnel_sock,
-                                                                                               POLLIN);
-                                                                        ret = 0;
-                                                                }
-                                                                else
-                                                                {
-                                                                        LOG_ERROR_EX(*connection->log_module, "Error sending data to asset: %d (%s)", errno, strerror(errno));
-                                                                        shutdown = true;
-                                                                        break;
-                                                                }
-                                                        }
-                                                        else if ((size_t) ret ==
-                                                                 connection->num_of_bytes_in_tun2ass_buffer)
-                                                        {
-                                                                if (connection->num_of_bytes_in_tun2ass_buffer <
-                                                                    sizeof(connection->tun2ass_buffer))
-                                                                {
-                                                                        /* We read the maximum amount of data from the tunnel connection. This
-                                                                         * could be an indication that there is more data to be read. Hence, we
-                                                                         * trigger another read here. */
-                                                                        ret = 0;
-                                                                }
-
-                                                                connection->num_of_bytes_in_tun2ass_buffer = 0;
-                                                        }
-                                                        else
-                                                        {
-                                                                connection->num_of_bytes_in_tun2ass_buffer -= ret;
-                                                                memmove(connection->tun2ass_buffer,
-                                                                        connection->tun2ass_buffer + ret,
-                                                                        connection->num_of_bytes_in_tun2ass_buffer);
-                                                                poll_set_update_events(&poll_set,
-                                                                                       connection->asset_sock,
-                                                                                       POLLOUT);
-                                                                // Do we need have to remove POLLIN
-                                                                // from tunnel_sock here? LOG_WARN_EX(*connection->log_module,
-                                                                // "Not all data sent to asset");
-                                                                ret = 0;
-                                                        }
-                                                }
-                                                else if (ret == ASL_WANT_READ)
-                                                {
-                                                        /* We have to wait for more data from the
-                                                         * peer to read data (not a full record has
-                                                         * been received).
-                                                         */
-                                                        ret = 0;
-                                                }
-                                                else if (ret < 0)
-                                                {
-                                                        /* Connection closed */
-                                                        ret = -1;
-                                                }
-                                        }
-                                }
-                                if (event & POLLOUT)
-                                {
-                                        /* We can send data on the tunnel connection now. Send
-                                         * remaining data from the asset. */
-                                        ret = asl_send(connection->tls_session,
-                                                       connection->ass2tun_buffer,
-                                                       connection->num_of_bytes_in_ass2tun_buffer);
-
-                                        if (ret == ASL_SUCCESS)
-                                        {
-                                                /* Wait again for incoming data on the asset socket and remove
-                                                 * the writable indication from the tunnel socket. */
-                                                poll_set_remove_events(&poll_set,
-                                                                       connection->tunnel_sock,
-                                                                       POLLOUT);
-                                                poll_set_add_events(&poll_set,
-                                                                    connection->asset_sock,
-                                                                    POLLIN);
-                                                connection->num_of_bytes_in_ass2tun_buffer = 0;
-                                        }
-                                        else if (ret == ASL_WANT_WRITE)
-                                        {
-                                                /* We still have to wait until we can send data, just wait. Hence,
-                                                 * we have to clear the error condition */
-                                                ret = 0;
-                                        }
-                                }
-                                if (event & POLLERR)
-                                {
-                                        LOG_INFO_EX(*connection->log_module,
-                                                    "Tunnel connection closed");
-                                        shutdown = true;
-                                        break;
-                                }
-
-                                if (ret < 0)
-                                {
-                                        shutdown = true;
-                                        break;
-                                }
+                                shutdown = handle_tunnel_to_asset(connection, event, &poll_set);
                         }
                         else if (fd == connection->asset_sock)
                         {
-                                if (event & POLLIN)
-                                {
-                                        /* Data received from the asset connection */
-                                        ret = recv(connection->asset_sock,
-                                                   connection->ass2tun_buffer,
-                                                   sizeof(connection->ass2tun_buffer),
-                                                   0);
-
-                                        if (ret > 0)
-                                        {
-                                                connection->num_of_bytes_in_ass2tun_buffer = ret;
-
-                                                /* Send received data to the other socket */
-                                                ret = asl_send(connection->tls_session,
-                                                               connection->ass2tun_buffer,
-                                                               connection->num_of_bytes_in_ass2tun_buffer);
-
-                                                if (ret == ASL_WANT_WRITE)
-                                                {
-                                                        /* We have to wait for the tunnel socket to be writable. Until we can send
-                                                         * the data, we also mustn't receive more data on the asset socket. */
-                                                        poll_set_add_events(&poll_set,
-                                                                            connection->tunnel_sock,
-                                                                            POLLOUT);
-                                                        poll_set_remove_events(&poll_set,
-                                                                               connection->asset_sock,
-                                                                               POLLIN);
-                                                        ret = 0;
-                                                }
-                                                else
-                                                {
-                                                        connection->num_of_bytes_in_ass2tun_buffer = 0;
-                                                }
-                                        }
-                                        else if (ret == 0)
-                                        {
-                                                /* Connection closed */
-                                                ret = -1;
-                                        }
-                                        else
-                                        {
-                                                ret = -1;
-                                        }
-                                }
-                                if (event & POLLOUT)
-                                {
-                                        /* We can send data on the asset connection now. Send
-                                         * remaining tunnel data. */
-                                        ret = send(connection->asset_sock,
-                                                   connection->tun2ass_buffer,
-                                                   connection->num_of_bytes_in_tun2ass_buffer,
-                                                   0);
-
-                                        if (ret == -1)
-                                        {
-#if defined(_WIN32)
-                                                if (WSAGetLastError() == WSAEWOULDBLOCK)
-#else
-                                                if ((errno == EAGAIN) || (errno == EWOULDBLOCK))
-#endif
-                                                {
-                                                        ret = 0;
-                                                }
-                                                else
-                                                {
-                                                        LOG_ERROR_EX(*connection->log_module,
-                                                                     "Error sending data to asset: "
-                                                                     "%d (%s)",
-                                                                     errno,
-                                                                     strerror(errno));
-                                                        shutdown = true;
-                                                        break;
-                                                }
-                                        }
-                                        else if ((size_t) ret ==
-                                                 connection->num_of_bytes_in_tun2ass_buffer)
-                                        {
-                                                /* Wait again for incoming data on the tunnel socket and remove
-                                                 * the writable indication from the asset socket. */
-                                                poll_set_remove_events(&poll_set,
-                                                                       connection->asset_sock,
-                                                                       POLLOUT);
-                                                poll_set_add_events(&poll_set,
-                                                                    connection->tunnel_sock,
-                                                                    POLLIN);
-                                                connection->num_of_bytes_in_tun2ass_buffer = 0;
-                                        }
-                                        else
-                                        {
-                                                connection->num_of_bytes_in_tun2ass_buffer -= ret;
-                                                memmove(connection->tun2ass_buffer,
-                                                        connection->tun2ass_buffer + ret,
-                                                        connection->num_of_bytes_in_tun2ass_buffer);
-                                                // LOG_WARN_EX(*connection->log_module, "Not all data sent to asset");
-                                        }
-                                }
-                                if (event & POLLERR)
-                                {
-                                        LOG_INFO_EX(*connection->log_module, "Asset connection closed");
-                                        shutdown = true;
-                                        break;
-                                }
-
-                                if (ret < 0)
-                                {
-                                        shutdown = true;
-                                        break;
-                                }
+                                shutdown = handle_asset_to_tunnel(connection, event, &poll_set);
                         }
                 }
         }
