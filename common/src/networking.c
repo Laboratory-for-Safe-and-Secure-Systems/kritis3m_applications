@@ -865,11 +865,18 @@ static int address_lookup_internal(char const* dest, uint16_t port, struct addri
                                  .ai_socktype = SOCK_STREAM,
                                  .ai_protocol = IPPROTO_TCP,
                                  .ai_flags = flags};
-
         char port_str[6];
-        snprintf(port_str, sizeof(port_str), "%d", port);
+        char* port_str_ptr = port_str;
 
-        int ret = getaddrinfo(dest, port_str, &hints, addr);
+#if defined(__ZEPHYR__)
+        if (port == 0)
+                /* To select a random port in Zephyr, we have to pass NULL as `service` to getaddrinfo()*/
+                port_str_ptr = NULL;
+        else
+#endif
+                snprintf(port_str, sizeof(port_str), "%d", port);
+
+        int ret = getaddrinfo(dest, port_str_ptr, &hints, addr);
         if (ret != 0)
         {
                 if (dest)

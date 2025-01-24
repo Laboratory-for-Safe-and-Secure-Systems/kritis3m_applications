@@ -44,14 +44,15 @@ proxy_config tls_proxy_default_config(void)
  */
 int tls_proxy_backend_run(proxy_backend_config const* config)
 {
+        /* Set the log level. We do that before checking if the backend is
+         * already running to make sure the log level is updated. */
+        LOG_LVL_SET(config->log_level);
+
         if (the_backend.running)
         {
                 LOG_DEBUG("Proxy backend already running");
                 return 0;
         }
-
-        /* Set the log level */
-        LOG_LVL_SET(config->log_level);
 
         /* Init connection pool */
         init_proxy_connection_pool();
