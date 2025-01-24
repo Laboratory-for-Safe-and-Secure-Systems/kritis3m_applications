@@ -608,7 +608,7 @@ static bool handle_tunnel_to_asset(proxy_connection* connection, short event, po
                                         }
                                         else
                                         {
-                                                if (errno == ECONNRESET)
+                                                if ((errno == ECONNRESET) || (errno == EPIPE))
                                                 {
                                                         LOG_INFO_EX(*connection->log_module,
                                                                     "Asset connection closed");
@@ -770,7 +770,7 @@ static bool handle_asset_to_tunnel(proxy_connection* connection, short event, po
                         }
                         else
                         {
-                                if (errno == ECONNRESET)
+                                if ((errno == ECONNRESET) || (errno == EPIPE))
                                 {
                                         LOG_INFO_EX(*connection->log_module, "Asset connection closed");
                                 }
