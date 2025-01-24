@@ -729,9 +729,9 @@ void* proxy_backend_thread(void* ptr)
                                         }
 
 #ifdef USE_MANAGEMENT
-                                        if (confirm_client(proxy->application_id,
-                                                           (struct sockaddr*) &client_addr) == false)
-                                                LOG_WARN("client is not trusted");
+                                        // if (confirm_client(proxy->application_id,
+                                        //                    (struct sockaddr*) &client_addr) == false)
+                                        //         LOG_WARN("client is not trusted");
 #endif
 
                                         /* Handle new client */
