@@ -145,24 +145,43 @@ int read_certificates(struct certificates* certs)
         /* Read certificate chain */
         if (certs->certificate_path != NULL)
         {
-                certs->chain_buffer_size = 0;
-                ret = read_file(certs->certificate_path, &certs->chain_buffer, &certs->chain_buffer_size);
-                if (ret < 0)
+                if (strncmp(certs->certificate_path,
+                            PKCS11_LABEL_IDENTIFIER,
+                            PKCS11_LABEL_IDENTIFIER_LEN) == 0)
                 {
-                        LOG_ERROR("unable to read certificate from file %s", certs->certificate_path);
-                        goto error;
+                        certs->chain_buffer = (uint8_t*) duplicate_string(certs->certificate_path);
+                        if (certs->chain_buffer == NULL)
+                        {
+                                LOG_ERROR("unable to allocate memory for certificate chain label");
+                                goto error;
+                        }
+                        certs->chain_buffer_size = strlen(certs->certificate_path) + 1;
                 }
-
-                if (certs->intermediate_path != NULL)
+                else
                 {
-                        ret = read_file(certs->intermediate_path,
+                        certs->chain_buffer_size = 0;
+                        ret = read_file(certs->certificate_path,
                                         &certs->chain_buffer,
                                         &certs->chain_buffer_size);
                         if (ret < 0)
                         {
-                                LOG_ERROR("unable to read intermediate certificate from file %s",
-                                          certs->intermediate_path);
+                                LOG_ERROR("unable to read certificate from file %s",
+                                          certs->certificate_path);
                                 goto error;
+                        }
+
+                        if (certs->intermediate_path != NULL)
+                        {
+                                ret = read_file(certs->intermediate_path,
+                                                &certs->chain_buffer,
+                                                &certs->chain_buffer_size);
+                                if (ret < 0)
+                                {
+                                        LOG_ERROR("unable to read intermediate certificate from "
+                                                  "file %s",
+                                                  certs->intermediate_path);
+                                        goto error;
+                                }
                         }
                 }
         }
