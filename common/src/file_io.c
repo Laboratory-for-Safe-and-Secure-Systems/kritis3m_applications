@@ -33,15 +33,17 @@ int read_file(const char* filePath, uint8_t** buffer, size_t* bytesInBuffer)
         long fileSize = ftell(file);
         rewind(file);
 
-        /* Allocate buffer for file content */
+        /* Allocate buffer for file content. We allocate one byte more to store a NULL
+         * byte after the read file content. This makes sure that in case we read an
+         * ASCII string from the file, the string is properly null-terminated. */
         if ((*buffer == NULL) && (*bytesInBuffer == 0))
         {
-                *buffer = (uint8_t*) malloc(fileSize);
+                *buffer = (uint8_t*) malloc(fileSize + 1);
                 destination = *buffer;
         }
         else if ((*buffer != NULL) && (*bytesInBuffer > 0))
         {
-                *buffer = (uint8_t*) realloc(*buffer, *bytesInBuffer + fileSize);
+                *buffer = (uint8_t*) realloc(*buffer, *bytesInBuffer + fileSize + 1);
                 destination = *buffer + *bytesInBuffer;
         }
         else
@@ -71,6 +73,9 @@ int read_file(const char* filePath, uint8_t** buffer, size_t* bytesInBuffer)
                 }
                 bytesRead += read;
         }
+
+        /* Write the NULL byte to terminate a potential ASCII string */
+        destination[bytesRead] = '\0';
 
         *bytesInBuffer += bytesRead;
 
