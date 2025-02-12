@@ -40,6 +40,7 @@ if (ENABLE_NETWORK_TESTER)
         add_subdirectory(network_tester)
 endif()
 
+# HTTP(S) Library
 if(ENABLE_HTTP_LIBS)
         add_subdirectory(kritis3m_http_lib)
 endif()
