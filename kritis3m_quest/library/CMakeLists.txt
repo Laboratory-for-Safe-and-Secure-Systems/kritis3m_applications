@@ -3,7 +3,7 @@ include_directories(
 )
 
 # Add the library sources
-add_library(kritis3m-quest
+add_library(kritis3m-quest STATIC
   src/kritis3m_http_request.c 
   src/quest.c
 )
