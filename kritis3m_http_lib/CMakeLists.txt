@@ -1,6 +1,6 @@
 
 # Enable HTTPS functionality. This requires to link against the kritis3m_asl library!
-option(ENABLE_HTTPS "Enables Certificat Verification in HTTP(S) requests" OFF)
+option(ENABLE_HTTPS "Enables Certificat Verification in HTTP(S) requests" ON)
 
 # Make sure all libraries are installed in the lib directory (not lib64)
 set(CMAKE_INSTALL_LIBDIR "lib")
