@@ -3,7 +3,9 @@ option(ENABLE_ECHO_SERVER "Enable echo server" ON)
 option(ENABLE_TCP_CLIENT_STDIN_BRIDGE "Enable TCP client stdin bridge" ON)
 option(ENABLE_TLS_PROXY "Enable TLS proxy" ON)
 option(ENABLE_NETWORK_TESTER "Enable network tester" ON)
+option(ENABLE_HTTP_LIBS "Enable HTTP(S) libraries" ON) # required for Scale Service and QUEST lib
 option(ENABLE_MANAGEMENT "Enable Scale management" ON)
+option(ENABLE_QUEST_LIB "Enable QUEST lib" ON)
 
 
 # Generate the configuration file
@@ -38,7 +40,16 @@ if (ENABLE_NETWORK_TESTER)
         add_subdirectory(network_tester)
 endif()
 
+if(ENABLE_HTTP_LIBS)
+        add_subdirectory(kritis3m_http_lib)
+endif()
+
 # Scale management
 if (ENABLE_MANAGEMENT)
         add_subdirectory(management_service)
+endif()
+
+# KRITIS3M QUEST lib
+if (ENABLE_QUEST_LIB)
+        add_subdirectory(kritis3m_quest)
 endif()
