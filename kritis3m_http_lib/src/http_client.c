@@ -23,18 +23,18 @@
  * 			    ZEPHYR				  	    *
  * *****************************************/
 #if defined(__ZEPYHR__)
-        #include <zephyr/kernel.h>
+#include <zephyr/kernel.h>
 #else
-        #include <limits.h>
-        // #include <linux/kernel.h> // for offset of and other kernel utilities
-        #include <stdio.h>
+#include <limits.h>
+// #include <linux/kernel.h> // for offset of and other kernel utilities
+#include <stdio.h>
 
-        #define CONTAINER_OF(ptr, type, member)                                                    \
-                ({                                                                                 \
-                        const typeof(((type*) 0)->member)* __mptr = (ptr);                         \
-                        (type*) ((char*) __mptr - offsetof(type, member));                         \
-                })
-        #define snprintk snprintf
+#define CONTAINER_OF(ptr, type, member)                                                            \
+        ({                                                                                         \
+                const typeof(((type*) 0)->member)* __mptr = (ptr);                                 \
+                (type*) ((char*) __mptr - offsetof(type, member));                                 \
+        })
+#define snprintk snprintf
 
 #endif
 
@@ -42,9 +42,9 @@
 // #include <poll.h>
 // #include <sys/socket.h>
 
+#include "http_client.h"
 #include "logging.h"
 #include "networking.h"
-#include "http_client.h"
 
 LOG_MODULE_CREATE(http);
 
@@ -52,7 +52,11 @@ LOG_MODULE_CREATE(http);
 #define MAX_SEND_BUF_LEN 192
 
 #ifdef ENABLE_HTTPS
-static int https_send_data(asl_session* session, char* send_buf, size_t send_buf_max_len, size_t* send_buf_pos, ...)
+static int https_send_data(asl_session* session,
+                           char* send_buf,
+                           size_t send_buf_max_len,
+                           size_t* send_buf_pos,
+                           ...)
 {
         const char* data;
         va_list va;

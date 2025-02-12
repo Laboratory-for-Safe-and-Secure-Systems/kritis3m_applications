@@ -30,13 +30,13 @@
  * 			    ZEPHYR				  	    *
  * *****************************************/
 #if defined(__ZEPHYR__)
-        #include <zephyr/kernel.h>
-        #include <zephyr/net/net_ip.h>
+#include <zephyr/kernel.h>
+#include <zephyr/net/net_ip.h>
 k_timeout_t
-        #define AT_LEAST MIN
+#define AT_LEAST MIN
 #else
-        #define AT_LEAST(a, b) (((a) < (b)) ? (a) : (b))
-        #include "linux_comp.h"
+#define AT_LEAST(a, b) (((a) < (b)) ? (a) : (b))
+#include "linux_comp.h"
 #endif // __ZEPHYR__
 
 #ifdef ENABLE_HTTPS
@@ -53,11 +53,11 @@ k_timeout_t
         /** @cond INTERNAL_HIDDEN */
 
 #if !defined(HTTP_CRLF)
-        #define HTTP_CRLF "\r\n"
+#define HTTP_CRLF "\r\n"
 #endif
 
 #if !defined(HTTP_STATUS_STR_SIZE)
-        #define HTTP_STATUS_STR_SIZE 32
+#define HTTP_STATUS_STR_SIZE 32
 #endif
 
         /** @endcond */
@@ -112,7 +112,7 @@ k_timeout_t
          *        is there still more data to come.
          * @param user_data User specified data specified in http_client_req()
          */
-        typedef void (*http_response_cb_t)(struct http_response * rsp,
+        typedef void (*http_response_cb_t)(struct http_response* rsp,
                                            enum http_final_call final_data,
                                            void* user_data);
 
@@ -349,8 +349,12 @@ k_timeout_t
          */
         int http_client_req(int sock, struct http_request* req, duration timeout, void* user_data);
 
-#ifdef ENABLE_HTTPS 
-        int https_client_req(int sock, asl_session* session, struct http_request* req, duration timeout, void* user_data);
+#ifdef ENABLE_HTTPS
+        int https_client_req(int sock,
+                             asl_session* session,
+                             struct http_request* req,
+                             duration timeout,
+                             void* user_data);
 #endif
 
 #ifdef __cplusplus

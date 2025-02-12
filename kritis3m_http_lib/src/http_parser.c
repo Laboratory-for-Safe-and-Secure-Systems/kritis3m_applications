@@ -30,11 +30,11 @@
 #include <stdlib.h>
 #include <string.h>
 #if defined(__ZEPHYR__)
-        #include <zephyr/sys/__assert.h>
-        #include <zephyr/toolchain.h>
+#include <zephyr/sys/__assert.h>
+#include <zephyr/toolchain.h>
 #else
-        #include <assert.h>
-        #define __ASSERT_NO_MSG(a) assert(a)
+#include <assert.h>
+#define __ASSERT_NO_MSG(a) assert(a)
 #endif
 
 #include "http_parser.h"
@@ -43,24 +43,24 @@
 #define __fallthrough __attribute__((fallthrough))
 
 #ifndef ULLONG_MAX
-        #define ULLONG_MAX ((uint64_t) -1) /* 2^64-1 */
+#define ULLONG_MAX ((uint64_t) -1) /* 2^64-1 */
 #endif
 
 #ifndef AT_LEAST
-        #define AT_LEAST(a, b) ((a) < (b) ? (a) : (b))
+#define AT_LEAST(a, b) ((a) < (b) ? (a) : (b))
 #endif
 
 #ifndef ARRAY_SIZE
-        #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
+#define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 #endif
 
 #ifndef BIT_AT
-        #define BIT_AT(a, i)                                                                       \
-                (!!((unsigned int) (a)[(unsigned int) (i) >> 3] & (1 << ((unsigned int) (i) & 7))))
+#define BIT_AT(a, i)                                                                               \
+        (!!((unsigned int) (a)[(unsigned int) (i) >> 3] & (1 << ((unsigned int) (i) & 7))))
 #endif
 
 #ifndef ELEM_AT
-        #define ELEM_AT(a, i, v) ((unsigned int) (i) < ARRAY_SIZE(a) ? (a)[(i)] : (v))
+#define ELEM_AT(a, i, v) ((unsigned int) (i) < ARRAY_SIZE(a) ? (a)[(i)] : (v))
 #endif
 
 #define SET_ERRNO(e) (parser->http_errno = (e))
@@ -68,11 +68,11 @@
 #define UPDATE_STATE(V) (p_state = (enum state)(V))
 
 #ifdef __GNUC__
-        #define LIKELY(X) __builtin_expect(!!(X), 1)
-        #define UNLIKELY(X) __builtin_expect(!!(X), 0)
+#define LIKELY(X) __builtin_expect(!!(X), 1)
+#define UNLIKELY(X) __builtin_expect(!!(X), 0)
 #else
-        #define LIKELY(X) (X)
-        #define UNLIKELY(X) (X)
+#define LIKELY(X) (X)
+#define UNLIKELY(X) (X)
 #endif
 
 /* Set the mark FOR; non-destructive if mark is already set */
@@ -410,11 +410,11 @@ lb_end:
 #define STRICT_TOKEN(c) (tokens[(unsigned char) c])
 
 #ifdef HTTP_PARSER_STRICT
-        #define TOKEN(c) (tokens[(unsigned char) c])
-        #define IS_HOST_CHAR(c) (IS_ALPHANUM(c) || (c) == '.' || (c) == '-')
+#define TOKEN(c) (tokens[(unsigned char) c])
+#define IS_HOST_CHAR(c) (IS_ALPHANUM(c) || (c) == '.' || (c) == '-')
 #else
-        #define TOKEN(c) ((c == ' ') ? ' ' : tokens[(unsigned char) c])
-        #define IS_HOST_CHAR(c) (IS_ALPHANUM(c) || (c) == '.' || (c) == '-' || (c) == '_')
+#define TOKEN(c) ((c == ' ') ? ' ' : tokens[(unsigned char) c])
+#define IS_HOST_CHAR(c) (IS_ALPHANUM(c) || (c) == '.' || (c) == '-' || (c) == '_')
 #endif
 
 /**
@@ -437,7 +437,7 @@ static inline int strict_check(struct http_parser* parser, int c)
         return 0;
 }
 
-        #define NEW_MESSAGE() (http_should_keep_alive(parser) ? start_state : s_dead)
+#define NEW_MESSAGE() (http_should_keep_alive(parser) ? start_state : s_dead)
 #else
 static inline int strict_check(struct http_parser* parser, int c)
 {
@@ -445,7 +445,7 @@ static inline int strict_check(struct http_parser* parser, int c)
         (void) c;
         return 0;
 }
-        #define NEW_MESSAGE() start_state
+#define NEW_MESSAGE() start_state
 #endif
 
 static struct
