@@ -18,6 +18,8 @@ Using the following CMake variables, individual applications can be disabled (al
 * `ENABLE_TCP_CLIENT_STDIN_BRIDGE`
 * `ENABLE_TLS_PROXY`
 * `ENABLE_NETWORK_TESTER`
+* `ENABLE_HTTP_LIBS`
 * `ENABLE_MANAGEMENT`
+* `ENABLE_QUEST_LIB`
 
 Common code is always enabled.

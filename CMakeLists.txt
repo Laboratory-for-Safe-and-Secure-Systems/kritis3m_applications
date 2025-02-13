@@ -42,7 +42,7 @@ endif()
 
 # HTTP(S) Library
 if(ENABLE_HTTP_LIBS)
-        add_subdirectory(kritis3m_http_lib)
+        add_subdirectory(http_lib)
 endif()
 
 # Scale management
@@ -52,5 +52,5 @@ endif()
 
 # KRITIS3M QUEST lib
 if (ENABLE_QUEST_LIB)
-        add_subdirectory(kritis3m_quest)
+        add_subdirectory(quest_lib)
 endif()
