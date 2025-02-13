@@ -1,6 +1,6 @@
 
 # Enable HTTPS functionality. This requires to link against the kritis3m_asl library!
-option(ENABLE_HTTPS "Enables Certificat Verification in HTTP(S) requests" ON)
+option(ENABLE_HTTPS "Enables Certificate Verification in HTTP(S) requests" ON)
 
 # Library Sources of kritis3m_http_libs
 add_library(kritis3m-http-libs STATIC
