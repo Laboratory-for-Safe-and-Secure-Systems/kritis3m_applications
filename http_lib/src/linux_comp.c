@@ -4,11 +4,11 @@
 
 #else
 
-        #include <errno.h>
-        #include <stdbool.h>
-        #include <stdint.h>
-        #include <sys/time.h>
-        #include <time.h>
+#include <errno.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <sys/time.h>
+#include <time.h>
 
 // Convert milliseconds to duration
 duration ms_toduration(int ms)

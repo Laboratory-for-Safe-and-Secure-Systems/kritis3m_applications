@@ -31,18 +31,18 @@
 // #include <zephyr/net/http/parser_url.h>
 
 #if defined(__ZEPHYR__)
-        #include <zephyr/sys/__assert.h>
+#include <zephyr/sys/__assert.h>
 #else
-        #include <assert.h>
-        #define __fallthrough __attribute__((fallthrough))
-        #define __ASSERT_NO_MSG(u) assert(u)
+#include <assert.h>
+#define __fallthrough __attribute__((fallthrough))
+#define __ASSERT_NO_MSG(u) assert(u)
 #endif
 
 #include "http_parser_url.h"
 
 #ifndef BIT_AT
-        #define BIT_AT(a, i)                                                                       \
-                (!!((unsigned int) (a)[(unsigned int) (i) >> 3] & (1 << ((unsigned int) (i) & 7))))
+#define BIT_AT(a, i)                                                                               \
+        (!!((unsigned int) (a)[(unsigned int) (i) >> 3] & (1 << ((unsigned int) (i) & 7))))
 #endif
 
 /* Set the mark FOR; non-destructive if mark is already set */
@@ -57,9 +57,9 @@
         while (false)
 
 #ifdef HTTP_PARSER_STRICT
-        #define T(v) 0
+#define T(v) 0
 #else
-        #define T(v) v
+#define T(v) v
 #endif
 
 static const uint8_t normal_url_char[32] = {
@@ -131,11 +131,11 @@ enum http_host_state
          (c) == '=' || (c) == '+' || (c) == '$' || (c) == ',')
 
 #ifdef HTTP_PARSER_STRICT
-        #define IS_URL_CHAR(c) (BIT_AT(normal_url_char, (unsigned char) c))
-        #define IS_HOST_CHAR(c) (IS_ALPHANUM(c) || (c) == '.' || (c) == '-')
+#define IS_URL_CHAR(c) (BIT_AT(normal_url_char, (unsigned char) c))
+#define IS_HOST_CHAR(c) (IS_ALPHANUM(c) || (c) == '.' || (c) == '-')
 #else
-        #define IS_URL_CHAR(c) (BIT_AT(normal_url_char, (unsigned char) c) || ((c) & 0x80))
-        #define IS_HOST_CHAR(c) (IS_ALPHANUM(c) || (c) == '.' || (c) == '-' || (c) == '_')
+#define IS_URL_CHAR(c) (BIT_AT(normal_url_char, (unsigned char) c) || ((c) & 0x80))
+#define IS_HOST_CHAR(c) (IS_ALPHANUM(c) || (c) == '.' || (c) == '-' || (c) == '_')
 #endif
 
 /* Our URL parser.

@@ -960,3 +960,47 @@ cleanup:
 
         return -1;
 }
+
+/* Create a new client socket for given type and address.
+ *
+ * Return value is the socket file descriptor or -1 in case of an error
+ */
+int create_client_socket(int type, struct sockaddr* addr, socklen_t addr_len)
+{
+        int sock = -1;
+        int status;
+        char ip_str[INET6_ADDRSTRLEN];
+
+        /* Expected type either AF_INET or AF_INET6 */
+        if (type == AF_INET)
+                net_addr_ntop(type, &((struct sockaddr_in*) addr)->sin_addr, ip_str, sizeof(ip_str));
+        else if (type == AF_INET6)
+                net_addr_ntop(type, &((struct sockaddr_in6*) addr)->sin6_addr, ip_str, sizeof(ip_str));
+
+        /* Prepare the socket */
+        sock = socket(type, SOCK_STREAM, IPPROTO_TCP);
+
+        if (sock == -1)
+                ERROR_OUT("Error creating client TCP socket");
+
+        /* If AF_INET6 set IP-protcol to IPv6 only */
+        if (type == AF_INET6)
+        {
+                if (setsockopt(sock, IPPROTO_IPV6, IPV6_V6ONLY, (char*) &(int) {1}, sizeof(int)) < 0)
+                        ERROR_OUT("setsockopt(IPV6_V6ONLY) failed: error %d\n", errno);
+        }
+
+        status = connect(sock, addr, addr_len);
+        if (status < 0)
+        {
+                ERROR_OUT("connection failed, error code: %d\n", errno);
+        }
+
+        return sock;
+
+cleanup:
+        if (sock != -1)
+                closesocket(sock);
+
+        return -1;
+}

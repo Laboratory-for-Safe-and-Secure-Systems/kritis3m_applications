@@ -35,7 +35,7 @@
  * 			    ZEPHYR				  	    *
  * *****************************************/
 #if defined(__ZEPYHR__)
-        #include <zephyr/types.h>
+#include <zephyr/types.h>
 #endif
 
 #include "http_parser_state.h"

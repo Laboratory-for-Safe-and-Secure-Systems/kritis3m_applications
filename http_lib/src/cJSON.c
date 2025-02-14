@@ -25,16 +25,16 @@
 
 /* disable warnings about old C89 functions in MSVC */
 #if !defined(_CRT_SECURE_NO_DEPRECATE) && defined(_MSC_VER)
-        #define _CRT_SECURE_NO_DEPRECATE
+#define _CRT_SECURE_NO_DEPRECATE
 #endif
 
 #ifdef __GNUC__
-        #pragma GCC visibility push(default)
+#pragma GCC visibility push(default)
 #endif
 #if defined(_MSC_VER)
-        #pragma warning(push)
-        /* disable warning about single line comments in system headers */
-        #pragma warning(disable : 4001)
+#pragma warning(push)
+/* disable warning about single line comments in system headers */
+#pragma warning(disable : 4001)
 #endif
 
 #include <ctype.h>
@@ -46,43 +46,43 @@
 #include <string.h>
 
 #ifdef ENABLE_LOCALES
-        #include <locale.h>
+#include <locale.h>
 #endif
 
 #if defined(_MSC_VER)
-        #pragma warning(pop)
+#pragma warning(pop)
 #endif
 #ifdef __GNUC__
-        #pragma GCC visibility pop
+#pragma GCC visibility pop
 #endif
 
 #include "cJSON.h"
 
 /* define our own boolean type */
 #ifdef true
-        #undef true
+#undef true
 #endif
 #define true ((cJSON_bool) 1)
 
 #ifdef false
-        #undef false
+#undef false
 #endif
 #define false ((cJSON_bool) 0)
 
 /* define isnan and isinf for ANSI C, if in C99 or above, isnan and isinf has been defined in math.h */
 #ifndef isinf
-        #define isinf(d) (isnan((d - d)) && !isnan(d))
+#define isinf(d) (isnan((d - d)) && !isnan(d))
 #endif
 #ifndef isnan
-        #define isnan(d) (d != d)
+#define isnan(d) (d != d)
 #endif
 
 #ifndef NAN
-        #ifdef _WIN32
-                #define NAN sqrt(-1.0)
-        #else
-                #define NAN 0.0 / 0.0
-        #endif
+#ifdef _WIN32
+#define NAN sqrt(-1.0)
+#else
+#define NAN 0.0 / 0.0
+#endif
 #endif
 
 typedef struct
@@ -119,7 +119,7 @@ CJSON_PUBLIC(double) cJSON_GetNumberValue(const cJSON* const item)
 
 /* This is a safeguard to prevent copy-pasters from using incompatible C and header files */
 #if (CJSON_VERSION_MAJOR != 1) || (CJSON_VERSION_MINOR != 7) || (CJSON_VERSION_PATCH != 18)
-        #error cJSON.h and cJSON.c have different versions. Make sure that both have the same.
+#error cJSON.h and cJSON.c have different versions. Make sure that both have the same.
 #endif
 
 CJSON_PUBLIC(const char*) cJSON_Version(void)
@@ -176,9 +176,9 @@ static void* CJSON_CDECL internal_realloc(void* pointer, size_t size)
         return realloc(pointer, size);
 }
 #else
-        #define internal_malloc malloc
-        #define internal_free free
-        #define internal_realloc realloc
+#define internal_malloc malloc
+#define internal_free free
+#define internal_realloc realloc
 #endif
 
 /* strlen of character literals resolved at compile time */
@@ -2047,10 +2047,10 @@ CJSON_PUBLIC(cJSON_bool) cJSON_AddItemToArray(cJSON* array, cJSON* item)
 
 #if defined(__clang__) ||                                                                          \
         (defined(__GNUC__) && ((__GNUC__ > 4) || ((__GNUC__ == 4) && (__GNUC_MINOR__ > 5))))
-        #pragma GCC diagnostic push
+#pragma GCC diagnostic push
 #endif
 #ifdef __GNUC__
-        #pragma GCC diagnostic ignored "-Wcast-qual"
+#pragma GCC diagnostic ignored "-Wcast-qual"
 #endif
 /* helper function to cast away const */
 static void* cast_away_const(const void* string)
@@ -2059,7 +2059,7 @@ static void* cast_away_const(const void* string)
 }
 #if defined(__clang__) ||                                                                          \
         (defined(__GNUC__) && ((__GNUC__ > 4) || ((__GNUC__ == 4) && (__GNUC_MINOR__ > 5))))
-        #pragma GCC diagnostic pop
+#pragma GCC diagnostic pop
 #endif
 
 static cJSON_bool add_item_to_object(cJSON* const object,

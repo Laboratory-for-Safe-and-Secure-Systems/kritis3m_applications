@@ -23,18 +23,18 @@
  * 			    ZEPHYR				  	    *
  * *****************************************/
 #if defined(__ZEPYHR__)
-        #include <zephyr/kernel.h>
+#include <zephyr/kernel.h>
 #else
-        #include <limits.h>
-        // #include <linux/kernel.h> // for offset of and other kernel utilities
-        #include <stdio.h>
+#include <limits.h>
+// #include <linux/kernel.h> // for offset of and other kernel utilities
+#include <stdio.h>
 
-        #define CONTAINER_OF(ptr, type, member)                                                    \
-                ({                                                                                 \
-                        const typeof(((type*) 0)->member)* __mptr = (ptr);                         \
-                        (type*) ((char*) __mptr - offsetof(type, member));                         \
-                })
-        #define snprintk snprintf
+#define CONTAINER_OF(ptr, type, member)                                                            \
+        ({                                                                                         \
+                const typeof(((type*) 0)->member)* __mptr = (ptr);                                 \
+                (type*) ((char*) __mptr - offsetof(type, member));                                 \
+        })
+#define snprintk snprintf
 
 #endif
 
@@ -42,15 +42,16 @@
 // #include <poll.h>
 // #include <sys/socket.h>
 
-#include "networking.h"
 #include "http_client.h"
 #include "logging.h"
+#include "networking.h"
 
 LOG_MODULE_CREATE(http);
 
 #define HTTP_CONTENT_LEN_SIZE 11
 #define MAX_SEND_BUF_LEN 192
 
+#ifdef ENABLE_HTTPS
 static int https_send_data(asl_session* session,
                            char* send_buf,
                            size_t send_buf_max_len,
@@ -127,7 +128,7 @@ err:
 
         return ret;
 }
-
+#endif
 /***
  * This function can be used to send data (http fraction or full http request) to an endpoint
  * @param req_end_timepoint - is the timeout value in ms used in poll()
@@ -253,6 +254,7 @@ err:
         return ret;
 }
 
+#ifdef ENABLE_HTTPS
 static int https_flush_data(asl_session* session, const char* send_buf, size_t send_buf_len)
 {
         int ret;
@@ -267,6 +269,7 @@ static int https_flush_data(asl_session* session, const char* send_buf, size_t s
 
         return (int) send_buf_len;
 }
+#endif
 
 static int http_flush_data(int sock, const char* send_buf, size_t send_buf_len, timepoint timepoinit)
 {
@@ -582,6 +585,8 @@ static void http_report_progress(struct http_request* req)
                                           req->internal.user_data);
         }
 }
+
+#ifdef ENABLE_HTTPS
 static int https_wait_data(int sock, asl_session* session, struct http_request* req, timepoint endtimeout)
 {
         int total_received = 0;
@@ -704,6 +709,7 @@ error:
         LOG_DEBUG("Connection error (%d)", ret);
         return ret;
 }
+#endif
 
 static int http_wait_data(int sock, struct http_request* req, const timepoint req_end_timepoint)
 {
@@ -1118,6 +1124,7 @@ out:
         return ret;
 }
 
+#ifdef ENABLE_HTTPS
 int https_client_req(int sock, asl_session* session, struct http_request* req, duration timeout, void* user_data)
 {
         /* Utilize the network usage by sending data in bigger blocks */
@@ -1410,3 +1417,4 @@ int https_client_req(int sock, asl_session* session, struct http_request* req, d
 out:
         return ret;
 }
+#endif

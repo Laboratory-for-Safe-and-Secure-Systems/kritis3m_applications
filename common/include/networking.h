@@ -2,35 +2,35 @@
 #define NETWORKING_H
 
 #if defined(__ZEPHYR__)
-        #include <zephyr/net/net_if.h>
-        #include <zephyr/net/socket.h>
+#include <zephyr/net/net_if.h>
+#include <zephyr/net/socket.h>
 
-        #define closesocket close
-        #define addrinfo zsock_addrinfo
+#define closesocket close
+#define addrinfo zsock_addrinfo
 #elif defined(_WIN32)
-        #include <winsock2.h>
-        #include <ws2tcpip.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
 
-        #include <netioapi.h>
+#include <netioapi.h>
 
-        #define poll WSAPoll
+#define poll WSAPoll
 
-        #define net_addr_ntop inet_ntop
-        #define net_addr_pton inet_pton
+#define net_addr_ntop inet_ntop
+#define net_addr_pton inet_pton
 #else
-        #include <arpa/inet.h>
-        #include <net/if.h>
-        #include <netinet/in.h>
+#include <arpa/inet.h>
+#include <net/if.h>
+#include <netinet/in.h>
 
-        #include <netdb.h>
-        #include <sys/socket.h>
-        #include <sys/types.h>
-        #include <sys/poll.h>
+#include <netdb.h>
+#include <sys/poll.h>
+#include <sys/socket.h>
+#include <sys/types.h>
 
-        #define closesocket close
+#define closesocket close
 
-        #define net_addr_ntop inet_ntop
-        #define net_addr_pton inet_pton
+#define net_addr_ntop inet_ntop
+#define net_addr_pton inet_pton
 #endif
 
 #include <stdbool.h>
@@ -72,6 +72,12 @@ int address_lookup_server(char const* dest, uint16_t port, struct addrinfo** add
  * Return value is the socket file descriptor or -1 in case of an error.
  */
 int create_listening_socket(int type, struct sockaddr* addr, socklen_t addr_len);
+
+/* Create a new client socket for given type and address.
+ *
+ * Return value is the socket file descriptor or -1 in case of an error
+ */
+int create_client_socket(int type, struct sockaddr* addr, socklen_t addr_len);
 
 /**
  * @brief Parses an input string to extract an IP address and port number.

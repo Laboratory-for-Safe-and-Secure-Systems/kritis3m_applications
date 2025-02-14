@@ -22,16 +22,16 @@
 
 /* disable warnings about old C89 functions in MSVC */
 #if !defined(_CRT_SECURE_NO_DEPRECATE) && defined(_MSC_VER)
-        #define _CRT_SECURE_NO_DEPRECATE
+#define _CRT_SECURE_NO_DEPRECATE
 #endif
 
 #ifdef __GNUCC__
-        #pragma GCC visibility push(default)
+#pragma GCC visibility push(default)
 #endif
 #if defined(_MSC_VER)
-        #pragma warning(push)
-        /* disable warning about single line comments in system headers */
-        #pragma warning(disable : 4001)
+#pragma warning(push)
+/* disable warning about single line comments in system headers */
+#pragma warning(disable : 4001)
 #endif
 
 #include <ctype.h>
@@ -43,22 +43,22 @@
 #include <string.h>
 
 #if defined(_MSC_VER)
-        #pragma warning(pop)
+#pragma warning(pop)
 #endif
 #ifdef __GNUCC__
-        #pragma GCC visibility pop
+#pragma GCC visibility pop
 #endif
 
 #include "cJSON_Utils.h"
 
 /* define our own boolean type */
 #ifdef true
-        #undef true
+#undef true
 #endif
 #define true ((cJSON_bool) 1)
 
 #ifdef false
-        #undef false
+#undef false
 #endif
 #define false ((cJSON_bool) 0)
 

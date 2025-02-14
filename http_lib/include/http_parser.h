@@ -40,7 +40,7 @@
  * 			    ZEPHYR				  	    *
  * *****************************************/
 #if defined(__ZEPHYR__)
-        #include <zephyr/types.h>
+#include <zephyr/types.h>
 #endif //__ZEPHYR__
 
 #include "http_method.h"
@@ -60,7 +60,7 @@ extern "C"
  * to a very large number (e.g. -DHTTP_MAX_HEADER_SIZE=0x7fffffff)
  */
 #ifndef HTTP_MAX_HEADER_SIZE
-        #define HTTP_MAX_HEADER_SIZE (80 * 1024)
+#define HTTP_MAX_HEADER_SIZE (80 * 1024)
 #endif
 
 struct http_parser;
