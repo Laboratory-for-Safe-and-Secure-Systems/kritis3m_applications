@@ -1,46 +1,43 @@
 #include "quest.h"
+#include "logging.h"
+#include "networking.h"
 
 #define TIMEOUT_DURATION 5000
+
+LOG_MODULE_CREATE(quest_lib);
 
 /*------------------------------ private functions -------------------------------*/
 static enum kritis3m_status_info establish_host_connection(struct quest_configuration* config)
 {
-        int sock = -1;
-        struct addrinfo hints;
-        struct addrinfo* res;
-
-        // Initialize the hints struct
-        memset(&hints, 0, sizeof(hints));
-        hints.ai_family = AF_INET; // Use AF_INET for IPv4 or AF_INET6 for IPv6
-        hints.ai_socktype = SOCK_STREAM;
-
-        // Get address information
         int status;
-        if ((status = getaddrinfo(config->connection_info.hostname, NULL, &hints, &res)) != 0)
+        int sock = -1;
+        struct addrinfo* bind_addr = NULL;
+
+        /* Look-up IP address from hostname and hostport */
+        if ((status = address_lookup_client(config->connection_info.hostname,
+                                            (uint16_t) strtol(config->connection_info.hostport, NULL, 10),
+                                            &bind_addr)) != 0)
         {
-                printf("[ QUEST ][ FATAL ERROR ] getaddrinfo error: %s\n", gai_strerror(status));
+                LOG_ERROR("error looking up server IP address, error code %d", status);
                 return ADDR_ERR;
         }
 
-        // Convert the IP to a string and print it
-        memcpy(&config->connection_info.IP_v4, res->ai_addr, sizeof(res->ai_addr));
+        /* Convert the IP from socket_addr_in to string */
+        memcpy(&config->connection_info.IP_v4, bind_addr->ai_addr, sizeof(bind_addr->ai_addr));
         void* addr = &(config->connection_info.IP_v4.sin_addr);
-
-        inet_ntop(res->ai_family,
+        inet_ntop(bind_addr->ai_family,
                   addr,
                   config->connection_info.IP_str,
                   sizeof(config->connection_info.IP_str));
 
-#ifdef VERBOSE
-        printf("[ QUEST ][ INFO ] IP address for %s: %s\n",
-               config->connection_info.hostname,
-               config->connection_info.IP_str);
-#endif
+        LOG_INFO("IP address for %s: %s\n",
+                 config->connection_info.hostname,
+                 config->connection_info.IP_str);
 
+        /* Convert host port from string to unsigned integer */
         config->connection_info.IP_v4.sin_port = htons(
                 strtoul(config->connection_info.hostport, NULL, 10));
 
-        free(res);
         return E_OK;
 }
 
@@ -97,19 +94,13 @@ enum kritis3m_status_info quest_init(struct quest_configuration* config)
                 goto HOST_CON_ERR;
         }
 
-        config->connection_info.socket_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        config->connection_info
+                .socket_fd = create_client_socket(AF_INET,
+                                                  (struct sockaddr*) &config->connection_info.IP_v4,
+                                                  sizeof(config->connection_info.IP_v4));
         if (config->connection_info.socket_fd < 0)
         {
-                status = SOCKET_ERR;
-                goto SOCKET_CON_ERR;
-        }
-
-        status = connect(config->connection_info.socket_fd,
-                         (struct sockaddr*) &config->connection_info.IP_v4,
-                         sizeof(config->connection_info.IP_v4));
-        if (status < 0)
-        {
-                printf("connection failed, error code: %d\n", errno);
+                LOG_ERROR("connection failed, error code: %d\n", errno);
                 status = SOCKET_ERR;
                 goto SOCKET_CON_ERR;
         }
@@ -130,7 +121,7 @@ SOCKET_CON_ERR:
         return status;
 
 HOST_CON_ERR:
-        printf("[ QUEST ][ ERROR ] error occured during execution, error code: %d\n", errno);
+        LOG_ERROR("error occured during execution, error code: %d\n", errno);
         return QUEST_ERR;
 }
 
@@ -145,7 +136,7 @@ enum kritis3m_status_info quest_send_request(struct quest_configuration* config)
                                  config->response);
         if (status < 0)
         {
-                printf("[ QUEST ][ ERROR ]failed to send HTTP-GET request, error code: %d\n", status);
+                LOG_ERROR("failed to send HTTP-GET request, error code: %d\n", status);
                 status = CON_ERR;
         }
         else

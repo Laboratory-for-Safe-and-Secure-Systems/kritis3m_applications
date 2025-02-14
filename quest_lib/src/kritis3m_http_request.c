@@ -1,4 +1,7 @@
 #include "kritis3m_http_request.h"
+#include "logging.h"
+
+LOG_MODULE_CREATE(kritis3m_http_request);
 
 #if (TMP_KEY)
 /// @brief This function serves as temporary fix to insert key material into the TLS application.
@@ -23,12 +26,12 @@ static void manage_request_error(struct http_get_response* response, CJSON_PUBLI
         CJSON_PUBLIC(cJSON*) error_msg = cJSON_GetObjectItemCaseSensitive(data, "message");
         if (error_msg == NULL)
         {
-                printf("[ QUEST ][ ERROR ] invalid request resumption!\n");
+                LOG_ERROR("invalid request resumption!\n");
                 response->error_code = HTTP_ERR;
         }
         else
         {
-                printf("[ QUEST ][ ERROR ] %s\n", error_msg->valuestring);
+                LOG_ERROR("error occured: %s\n", error_msg->valuestring);
                 response->error_code = HTTP_ERR;
         }
 
@@ -72,14 +75,10 @@ static void derive_key_info(struct http_get_response* response, CJSON_PUBLIC(cJS
                        key_ID->valuestring,
                        (response->key_info->key_ID_len + 1));
 
-#ifdef VERBOSE
-                printf("[ QUEST ][ INFO ] original key: %s -- key_ID: %s\n",
-                       key->valuestring,
-                       key_ID->valuestring);
-                printf("[ QUEST ][ INFO ] original key size: %d -- key_ID size: %d\n",
-                       (int) strlen(key->valuestring),
-                       (int) strlen(key_ID->valuestring));
-#endif
+                LOG_INFO("original key: %s -- key_ID: %s\n", key->valuestring, key_ID->valuestring);
+                LOG_INFO("original key size: %d -- key_ID size: %d\n",
+                         (int) strlen(key->valuestring),
+                         (int) strlen(key_ID->valuestring));
         }
 
         return;
@@ -107,15 +106,13 @@ static void http_get_cb(struct http_response* rsp, enum http_final_call final_da
 
         if (final_data == HTTP_DATA_MORE)
         {
-#ifdef VERBOSE
-                printf("[ QUEST ][ INFO ] Partial data received (%zd bytes).\n", rsp->data_len);
-#endif
+                LOG_INFO("partial data received (%zd bytes).\n", rsp->data_len);
         }
         else if (final_data == HTTP_DATA_FINAL)
         {
-#ifdef VERBOSE
-                printf("[ QUEST ][ INFO ] successfully received http response.\n");
-#endif
+
+                LOG_INFO("Successfully received http response.\n");
+
                 http_request_status->bytes_received = rsp->body_frag_len;
                 http_request_status->buffer_frag_start = rsp->body_frag_start;
                 http_request_status->error_code = HTTP_OK;
@@ -151,7 +148,7 @@ static struct qkd_key_info* allocate_key_info()
         key_info = malloc(sizeof(struct qkd_key_info));
         if (key_info == NULL)
         {
-                printf("[ QUEST ][ ERROR ] failed to allocate HTTP-GET response key_info parameter.\n");
+                LOG_ERROR("failed to allocate HTTP-GET response key_info parameter.\n");
                 goto ALLOC_ERR;
         }
 
@@ -168,7 +165,7 @@ struct http_request* allocate_http_request()
         request = malloc(sizeof(struct http_request));
         if (request == NULL)
         {
-                printf("[ QUEST ][ ERROR ] failed to allocate HTTP-GET request.\n");
+                LOG_ERROR("failed to allocate HTTP-GET request.\n");
                 goto ALLOC_ERR;
         }
 
@@ -187,7 +184,7 @@ struct http_get_response* allocate_http_response()
         response = malloc(sizeof(struct http_get_response));
         if (response == NULL)
         {
-                printf("[ QUEST ][ ERROR ] failed to allocate HTTP-GET response.\n");
+                LOG_ERROR("failed to allocate HTTP-GET response.\n");
                 goto ALLOC_ERR;
         }
 
@@ -217,8 +214,7 @@ static void populate_key_with_id_url(struct http_request* request, char* key_ID)
         else
         {
                 base_url = NULL;
-                printf("[ QUEST ][ ERROR ] invalid host and status configuration to assemble "
-                       "url\n");
+                LOG_ERROR("invalid host and status configuration to assemble url\n");
                 return;
         }
 
@@ -230,7 +226,7 @@ static void populate_key_with_id_url(struct http_request* request, char* key_ID)
         request->url = (char*) malloc(total_len);
         if (request->url == NULL)
         {
-                printf("[ QUEST ][ ERROR] Memory allocation failed in url assembly\n");
+                LOG_ERROR("memory allocation failed in url assembly\n");
                 return;
         }
 
@@ -254,8 +250,7 @@ static void populate_key_no_id_url(struct http_request* request)
         }
         else
         {
-                printf("[ QUEST ][ ERROR ] invalid host and status configuration to assemble "
-                       "url\n");
+                LOG_ERROR("invalid host and status configuration to assemble url\n");
         }
 }
 
@@ -274,8 +269,7 @@ static void populate_status_url(struct http_request* request)
         }
         else
         {
-                printf("[ QUEST ][ ERROR ] invalid host and status configuration to assemble "
-                       "url\n");
+                LOG_ERROR("invalid host and status configuration to assemble url\n");
         }
 }
 
@@ -296,7 +290,7 @@ static void populate_request_url(struct http_request* request,
         case HTTP_KEY_WITH_ID:
                 if (key_ID == NULL)
                 {
-                        printf("[ QUEST ][ ERROR ] invalid key ID parameter");
+                        LOG_ERROR("invalid key ID parameter");
                         break;
                 }
                 else
@@ -306,7 +300,7 @@ static void populate_request_url(struct http_request* request,
                 break;
 
         default:
-                printf("[ QUEST ][ ERROR ] invalid state of message type\n");
+                LOG_ERROR("invalid state of message type\n");
                 break;
         }
 }
