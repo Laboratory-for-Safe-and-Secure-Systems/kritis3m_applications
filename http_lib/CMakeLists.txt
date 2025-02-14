@@ -15,11 +15,6 @@ add_library(kritis3m-http-libs STATIC
 # Link kritis3m_applications_common against the http library
 target_link_libraries(kritis3m-http-libs PRIVATE kritis3m_applications_common)
 
-# Set compile definition of ENABLE_HTTPS option if activated
-if (ENABLE_HTTPS)
-    target_compile_definitions(kritis3m-http-libs PRIVATE ENABLE_HTTPS)
-endif()
-
 # Specify include directories for the kritis3m-http-libs
 target_include_directories(kritis3m-http-libs PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>

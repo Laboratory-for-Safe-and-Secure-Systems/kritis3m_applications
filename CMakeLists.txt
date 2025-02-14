@@ -8,10 +8,6 @@ option(ENABLE_MANAGEMENT "Enable Scale management" ON)
 option(ENABLE_QUEST_LIB "Enable QUEST lib" ON)
 
 
-# Generate the configuration file
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/kritis3m_application_config.h.in kritis3m_application_config.h)
-
-
 # Common files
 add_subdirectory(common)
 
@@ -54,3 +50,6 @@ endif()
 if (ENABLE_QUEST_LIB)
         add_subdirectory(quest_lib)
 endif()
+
+# Generate the configuration file
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/kritis3m_application_config.h.in kritis3m_application_config.h)

@@ -39,6 +39,8 @@ k_timeout_t
 #include "linux_comp.h"
 #endif // __ZEPHYR__
 
+#include "kritis3m_application_config.h"
+
 #ifdef ENABLE_HTTPS
 #include "asl.h"
 #endif

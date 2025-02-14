@@ -5,7 +5,10 @@
 #cmakedefine ENABLE_TCP_CLIENT_STDIN_BRIDGE
 #cmakedefine ENABLE_TLS_PROXY
 #cmakedefine ENABLE_NETWORK_TESTER
+#cmakedefine ENABLE_HTTP_LIBS
+#cmakedefine ENABLE_HTTPS
 #cmakedefine ENABLE_MANAGEMENT
+#cmakedefine ENABLE_QUEST_LIB
 
 #if defined(ENABLE_MANAGEMENT)
 
