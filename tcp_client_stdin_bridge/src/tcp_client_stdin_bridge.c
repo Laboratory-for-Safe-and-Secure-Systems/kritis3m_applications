@@ -5,10 +5,10 @@
 #include <unistd.h>
 
 #if defined(_WIN32)
-        #include <winsock2.h>
+#include <winsock2.h>
 #else
-        #include <netinet/tcp.h>
-        #include <sys/socket.h>
+#include <netinet/tcp.h>
+#include <sys/socket.h>
 #endif
 
 #include "tcp_client_stdin_bridge.h"
@@ -27,7 +27,7 @@ LOG_MODULE_CREATE(tcp_client_stdin_bridge);
 
 #if !defined(__ZEPHYR__) && !defined(_WIN32)
 
-        #define RECV_BUFFER_SIZE 1024
+#define RECV_BUFFER_SIZE 1024
 
 enum tcp_client_stdin_bridge_management_message_type
 {
@@ -409,43 +409,24 @@ int tcp_client_stdin_bridge_run(tcp_client_stdin_bridge_config const* config)
                 ERROR_OUT("Error looking up target IP address");
 
         /* Create the TCP socket for the outgoing connection */
-        client_stdin_bridge.tcp_socket = socket(client_stdin_bridge.target_addr->ai_family,
-                                                SOCK_STREAM,
-                                                IPPROTO_TCP);
+        client_stdin_bridge.tcp_socket = create_client_socket(
+                client_stdin_bridge.target_addr->ai_family);
         if (client_stdin_bridge.tcp_socket == -1)
                 ERROR_OUT("Error creating TCP socket");
 
         /* Set the new socket to non-blocking */
         setblocking(client_stdin_bridge.tcp_socket, false);
 
-        /* Set TCP_NODELAY option to disable Nagle algorithm */
-        if (setsockopt(client_stdin_bridge.tcp_socket,
-                       IPPROTO_TCP,
-                       TCP_NODELAY,
-                       (char*) &(int) {1},
-                       sizeof(int)) < 0)
-                ERROR_OUT("setsockopt(TCP_NODELAY) failed: error %d", errno);
-
-        #if !defined(_WIN32)
-        /* Set retry count to send a total of 3 SYN packets => Timeout ~7s */
-        if (setsockopt(client_stdin_bridge.tcp_socket,
-                       IPPROTO_TCP,
-                       TCP_SYNCNT,
-                       (char*) &(int) {2},
-                       sizeof(int)) < 0)
-                ERROR_OUT("setsockopt(TCP_SYNCNT) failed: error %d", errno);
-        #endif
-
         /* Connect to the peer */
         ret = connect(client_stdin_bridge.tcp_socket,
                       (struct sockaddr*) client_stdin_bridge.target_addr->ai_addr,
                       client_stdin_bridge.target_addr->ai_addrlen);
         if ((ret != 0) &&
-        #if defined(_WIN32)
+#if defined(_WIN32)
             (WSAGetLastError() != WSAEWOULDBLOCK))
-        #else
+#else
             (errno != EINPROGRESS))
-        #endif
+#endif
                 ERROR_OUT("Unable to connect to target peer, errno: %d", errno);
 
         /* Add new server to the poll_set */

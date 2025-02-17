@@ -77,7 +77,13 @@ int create_listening_socket(int type, struct sockaddr* addr, socklen_t addr_len)
  *
  * Return value is the socket file descriptor or -1 in case of an error
  */
-int create_client_socket(int type, struct sockaddr* addr, socklen_t addr_len);
+int create_client_socket(int type);
+
+/* Configure a peer socket obtained from an accept() call to a listening socket.
+ *
+ * Returns 0 in case of success, -1 otherwise.
+ */
+int configure_peer_socket(int peer_sock);
 
 /**
  * @brief Parses an input string to extract an IP address and port number.

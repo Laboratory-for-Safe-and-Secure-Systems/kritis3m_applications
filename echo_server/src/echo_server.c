@@ -6,10 +6,10 @@
 #include <unistd.h>
 
 #if defined(_WIN32)
-        #include <winsock2.h>
+#include <winsock2.h>
 #else
-        #include <netinet/tcp.h>
-        #include <sys/socket.h>
+#include <netinet/tcp.h>
+#include <sys/socket.h>
 #endif
 
 #include "echo_server.h"
@@ -31,13 +31,13 @@ LOG_MODULE_CREATE(echo_server);
 
 #if defined(__ZEPHYR__)
 
-        #define MAX_CLIENTS 5
-        #define RECV_BUFFER_SIZE 1024
+#define MAX_CLIENTS 5
+#define RECV_BUFFER_SIZE 1024
 
 #else
 
-        #define MAX_CLIENTS 25
-        #define RECV_BUFFER_SIZE 16384
+#define MAX_CLIENTS 25
+#define RECV_BUFFER_SIZE 16384
 
 #endif
 
@@ -102,7 +102,7 @@ static echo_server the_server = {
 
 static echo_client client_pool[MAX_CLIENTS] __attribute__((section(CONFIG_RAM_SECTION_STACKS_1)));
 
-        #define STACK_SIZE (32 * 1024)
+#define STACK_SIZE (32 * 1024)
 Z_KERNEL_STACK_DEFINE_IN(echo_server_stack,
                          STACK_SIZE,
                          __attribute__((section(CONFIG_RAM_SECTION_STACKS_1))));
@@ -477,14 +477,14 @@ static echo_client* add_new_client(echo_server* server, int client_socket, struc
         client->socket = client_socket;
         client->slot = freeSlot;
 
-        setblocking(client->socket, false);
-
-        if (setsockopt(client->socket, IPPROTO_TCP, TCP_NODELAY, (char*) &(int) {1}, sizeof(int)) < 0)
+        if (configure_peer_socket(client->socket) != 0)
         {
-                LOG_ERROR("setsockopt(TCP_NODELAY) for client socket failed: error %d", errno);
+                LOG_ERROR("Error configuring peer socket");
                 client_cleanup(client);
                 return NULL;
         }
+
+        setblocking(client->socket, false);
 
         /* Create the TLS session */
         if (server->use_tls == true)

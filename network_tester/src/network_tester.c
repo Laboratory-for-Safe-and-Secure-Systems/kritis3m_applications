@@ -222,19 +222,9 @@ static int connection_setup(network_tester* tester)
                 closesocket(tester->tcp_socket);
 
         /* Create the TCP socket for the outgoing connection */
-        tester->tcp_socket = socket(tester->current_target->ai_family, SOCK_STREAM, IPPROTO_TCP);
+        tester->tcp_socket = create_client_socket(tester->current_target->ai_family);
         if (tester->tcp_socket == -1)
                 ERROR_OUT("Error creating TCP socket");
-
-        /* Set TCP_NODELAY option to disable Nagle algorithm */
-        if (setsockopt(tester->tcp_socket, IPPROTO_TCP, TCP_NODELAY, (char*) &(int) {1}, sizeof(int)) < 0)
-                ERROR_OUT("setsockopt(TCP_NODELAY) failed: error %d", errno);
-
-#if !defined(__ZEPHYR__) && !defined(_WIN32)
-        /* Set retry count to send a total of 3 SYN packets => Timeout ~7s */
-        if (setsockopt(tester->tcp_socket, IPPROTO_TCP, TCP_SYNCNT, (char*) &(int) {2}, sizeof(int)) < 0)
-                ERROR_OUT("setsockopt(TCP_SYNCNT) failed: error %d", errno);
-#endif
 
         /* Create the TLS session */
         if (tester->config->use_tls == true && tester->tls_session == NULL)

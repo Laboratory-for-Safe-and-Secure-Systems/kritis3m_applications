@@ -94,12 +94,19 @@ enum kritis3m_status_info quest_init(struct quest_configuration* config)
                 goto HOST_CON_ERR;
         }
 
-        config->connection_info
-                .socket_fd = create_client_socket(AF_INET,
-                                                  (struct sockaddr*) &config->connection_info.IP_v4,
-                                                  sizeof(config->connection_info.IP_v4));
+        config->connection_info.socket_fd = create_client_socket(AF_INET);
         if (config->connection_info.socket_fd < 0)
         {
+                LOG_ERROR("connection failed, error code: %d\n", errno);
+                status = SOCKET_ERR;
+                goto SOCKET_CON_ERR;
+        }
+
+        if (connect(config->connection_info.socket_fd,
+                    (struct sockaddr*) &config->connection_info.IP_v4,
+                    sizeof(config->connection_info.IP_v4)) < 0)
+        {
+
                 LOG_ERROR("connection failed, error code: %d\n", errno);
                 status = SOCKET_ERR;
                 goto SOCKET_CON_ERR;

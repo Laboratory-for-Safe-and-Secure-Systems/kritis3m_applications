@@ -27,6 +27,7 @@
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <unistd.h>
 
 #endif
@@ -965,36 +966,26 @@ cleanup:
  *
  * Return value is the socket file descriptor or -1 in case of an error
  */
-int create_client_socket(int type, struct sockaddr* addr, socklen_t addr_len)
+int create_client_socket(int type)
 {
         int sock = -1;
         int status;
-        char ip_str[INET6_ADDRSTRLEN];
 
-        /* Expected type either AF_INET or AF_INET6 */
-        if (type == AF_INET)
-                net_addr_ntop(type, &((struct sockaddr_in*) addr)->sin_addr, ip_str, sizeof(ip_str));
-        else if (type == AF_INET6)
-                net_addr_ntop(type, &((struct sockaddr_in6*) addr)->sin6_addr, ip_str, sizeof(ip_str));
-
-        /* Prepare the socket */
+        /* Create the socket */
         sock = socket(type, SOCK_STREAM, IPPROTO_TCP);
 
         if (sock == -1)
-                ERROR_OUT("Error creating client TCP socket");
+                ERROR_OUT("Error creating TCP client socket");
 
-        /* If AF_INET6 set IP-protcol to IPv6 only */
-        if (type == AF_INET6)
-        {
-                if (setsockopt(sock, IPPROTO_IPV6, IPV6_V6ONLY, (char*) &(int) {1}, sizeof(int)) < 0)
-                        ERROR_OUT("setsockopt(IPV6_V6ONLY) failed: error %d\n", errno);
-        }
+        /* Set TCP_NODELAY option to disable Nagle algorithm */
+        if (setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, (char*) &(int) {1}, sizeof(int)) < 0)
+                ERROR_OUT("setsockopt(TCP_NODELAY) failed: error %d", errno);
 
-        status = connect(sock, addr, addr_len);
-        if (status < 0)
-        {
-                ERROR_OUT("connection failed, error code: %d\n", errno);
-        }
+#if !defined(__ZEPHYR__) && !defined(_WIN32)
+        /* Set retry count to send a total of 3 SYN packets => Timeout ~7s */
+        if (setsockopt(sock, IPPROTO_TCP, TCP_SYNCNT, (char*) &(int) {2}, sizeof(int)) < 0)
+                ERROR_OUT("setsockopt(TCP_SYNCNT) failed: error %d", errno);
+#endif
 
         return sock;
 
@@ -1003,4 +994,20 @@ cleanup:
                 closesocket(sock);
 
         return -1;
+}
+
+/* Configure a peer socket obtained from an accept() call to a listening socket.
+ *
+ * Returns 0 in case of success, -1 otherwise.
+ */
+int configure_peer_socket(int peer_sock)
+{
+        /* Set TCP_NODELAY option to disable Nagle algorithm */
+        if (setsockopt(peer_sock, IPPROTO_TCP, TCP_NODELAY, (char*) &(int) {1}, sizeof(int)) < 0)
+        {
+                LOG_ERROR("setsockopt(TCP_NODELAY) failed: error %d", errno);
+                return -1;
+        }
+
+        return 0;
 }
