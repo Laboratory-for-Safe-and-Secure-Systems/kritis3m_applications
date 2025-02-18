@@ -22,11 +22,11 @@
 /********************************************
  * 			    ZEPHYR				  	    *
  * *****************************************/
-#if defined(__ZEPYHR__)
+#if defined(__ZEPHYR__)
 #include <zephyr/kernel.h>
-#else
+
+#else /* __ZEPHYR__ */
 #include <limits.h>
-// #include <linux/kernel.h> // for offset of and other kernel utilities
 #include <stdio.h>
 
 #define CONTAINER_OF(ptr, type, member)                                                            \
@@ -36,11 +36,7 @@
         })
 #define snprintk snprintf
 
-#endif
-
-// #include <netinet/in.h>
-// #include <poll.h>
-// #include <sys/socket.h>
+#endif /* __ZEPHYR__ */
 
 #include "http_client.h"
 #include "logging.h"

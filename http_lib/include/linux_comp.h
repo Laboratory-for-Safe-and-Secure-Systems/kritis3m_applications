@@ -21,17 +21,23 @@ timepoint get_timepoint_in(duration duration);
 
 #if defined(__ZEPHYR__)
 
+#include <zephyr/kernel.h>
+
 struct duration
 {
-        int a;
+        int timespan;
 };
 // Struct definitions
 struct timepoint
 {
-        int b;
+        int time;
 };
-#else
+
+
+#else /* __ZEPHYR__ */
+
 #include <time.h>
+
 struct duration
 {
         struct timespec timespan;
@@ -42,7 +48,7 @@ struct timepoint
         struct timespec time;
 };
 
-#endif
+#endif /* __ZEPHYR__ */
 
 // future time
 
