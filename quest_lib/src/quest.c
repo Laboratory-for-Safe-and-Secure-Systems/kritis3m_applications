@@ -10,7 +10,6 @@ LOG_MODULE_CREATE(quest_lib);
 static enum kritis3m_status_info establish_host_connection(struct quest_configuration* config)
 {
         int status;
-        int sock = -1;
         struct addrinfo* bind_addr = NULL;
 
         /* Look-up IP address from hostname and hostport */
