@@ -303,7 +303,10 @@ int create_endpoint_config(crypto_identity* crypto_id,
 
         ep_cfg->key_exchange_method = crypto_profile->ASLKeyExchangeMethod;
         ep_cfg->mutual_authentication = crypto_profile->MutualAuthentication;
-        ep_cfg->no_encryption = crypto_profile->NoEncryption;
+        if (crypto_profile->NoEncryption)
+                ep_cfg->ciphersuites = "TLS13-SHA384-SHA384:TLS13-AES256-GCM-SHA384";
+        else
+                ep_cfg->ciphersuites = "TLS13-AES256-GCM-SHA384:TLS13-SHA384-SHA384";
 
         ep_cfg->device_certificate_chain.buffer = crypto_id->certificates.chain_buffer;
         ep_cfg->device_certificate_chain.size = crypto_id->certificates.chain_buffer_size;
