@@ -1,3 +1,4 @@
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -24,7 +25,7 @@ int read_file(const char* filePath, uint8_t** buffer, size_t* bytesInBuffer)
 
         if (file == NULL)
         {
-                LOG_ERROR("file (%s) cannot be opened", filePath);
+                LOG_ERROR("file (%s) cannot be opened (error %d: %s)", filePath, errno, strerror(errno));
                 return -1;
         }
 
@@ -369,7 +370,7 @@ int write_file(const char* file_path, uint8_t const* buffer, size_t buffer_size,
         file = fopen(file_path, append ? "ab" : "wb");
         if (!file)
         {
-                LOG_ERROR("Error opening file: %s\n", file_path);
+                LOG_ERROR("file (%s) cannot be opened (error %d: %s)", file_path, errno, strerror(errno));
                 goto error_occured;
         }
 
