@@ -2,6 +2,44 @@
 
 #if defined(__ZEPHYR__)
 
+// Convert milliseconds to duration
+duration ms_to_duration(int ms)
+{
+        duration dur;
+        dur.timespan = K_MSEC(ms);              // Convert milliseconds to seconds
+        return dur;
+}
+
+timepoint get_timepoint_in(duration duration)
+{
+        /* we dont need to get the current time here, 
+         * as the kernel does this for us. */
+        timepoint now;
+        return timepoint_add_duration(now, duration);
+}
+
+// Convert duration to milliseconds
+int duration_to_ms(duration dur)
+{
+        return k_ticks_to_ms_floor32(dur.timespan.ticks);
+}
+
+// Add a duration to a timepoint
+timepoint timepoint_add_duration(timepoint tp, duration dur)
+{
+        tp.time = sys_timepoint_calc(dur.timespan);
+        return tp;
+}
+
+
+// Get the remaining duration from now to a future timepoint
+duration get_remaining_duration_reference_now(timepoint tp)
+{
+        duration dur;
+        dur.timespan.ticks =  sys_timepoint_timeout(tp.time).ticks;
+        return dur;
+}
+
 #else
 
 #include <errno.h>
@@ -11,7 +49,7 @@
 #include <time.h>
 
 // Convert milliseconds to duration
-duration ms_toduration(int ms)
+duration ms_to_duration(int ms)
 {
         duration dur;
         dur.timespan.tv_sec = ms / 1000;              // Convert milliseconds to seconds
@@ -19,7 +57,7 @@ duration ms_toduration(int ms)
         return dur;
 }
 
-timepoint get_now()
+static timepoint get_now()
 {
         timepoint now;
         clock_gettime(CLOCK_MONOTONIC, &now.time); // Get the current time
@@ -33,7 +71,7 @@ timepoint get_timepoint_in(duration duration)
 }
 
 // Convert duration to milliseconds
-int duration_toms(duration dur)
+int duration_to_ms(duration dur)
 {
         return (dur.timespan.tv_sec * 1000) + (dur.timespan.tv_nsec / 1000000);
 }
@@ -57,7 +95,7 @@ timepoint timepoint_add_duration(timepoint tp, duration dur)
 }
 
 // Get the difference between two timepoints as a duration
-duration get_differential_duration(timepoint ref, timepoint tp)
+static duration get_differential_duration(timepoint ref, timepoint tp)
 {
         duration diff;
 

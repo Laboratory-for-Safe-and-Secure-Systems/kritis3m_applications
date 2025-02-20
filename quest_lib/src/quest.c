@@ -134,7 +134,7 @@ HOST_CON_ERR:
 enum kritis3m_status_info quest_send_request(struct quest_configuration* config)
 {
         enum kritis3m_status_info status = E_OK;
-        duration timeout = ms_toduration(TIMEOUT_DURATION);
+        duration timeout = ms_to_duration(TIMEOUT_DURATION);
 
         status = http_client_req(config->connection_info.socket_fd,
                                  config->request,
