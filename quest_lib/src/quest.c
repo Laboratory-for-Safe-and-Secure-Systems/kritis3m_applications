@@ -7,22 +7,81 @@
 LOG_MODULE_CREATE(quest_lib);
 
 /*------------------------------ private functions -------------------------------*/
+
+#if defined(__ZEPHYR__)
+/// @brief As zephyr operates with it's own type of address information (zsock_addrinfo),
+///        we need to convert the address variable derived from the getaddressinfo()
+///        call into a variable of type sockaddr_in, to ensure correct behaviour later on.
+/// @param zaddr_info zephyr socket address info struct previously passed to the
+///                   getaddressinfo() function.
+/// @param addr pointer to the destination sockaddr_in variable used later on.
+/// @return returns E_OK if working correctly, otherwise returns an error code less than zero.
+static enum kritis3m_status_info convert_addrinfo_to_sockaddr_in(struct zsock_addrinfo* zaddr_info,
+                                                                 struct sockaddr_in* addr)
+{
+        if (zaddr_info == NULL || addr == NULL)
+        {
+                LOG_ERROR("passed argument was NULL!");
+                return E_NOT_OK;
+        }
+
+        // We expect the resolved address to be of type IPv4.
+        // TODO: integrate IPv6 support here.
+        if (zaddr_info->ai_family == AF_INET)
+        {
+                struct sockaddr_in* addr_in = (struct sockaddr_in*) zaddr_info->ai_addr;
+                *addr = *addr_in;
+        }
+        else
+        {
+                LOG_WARN("resolved IP address was not of type IPv4.");
+                return ADDR_ERR;
+        }
+
+        return E_OK;
+}
+#endif
+
+/// @brief To initialize the quest lib we establish a connection to the QKD line. This
+///        requires a DNS resolve call to get the IP address of the QKD server and subsequent
+///        socket preparation and connection establishment.
+/// @param config quest_configuration containing the connection_info parameters.
+/// @return returns E_OK if working correctly, otherwise returns an error code less than zero.
 static enum kritis3m_status_info establish_host_connection(struct quest_configuration* config)
 {
         int status;
-        struct addrinfo* bind_addr = NULL;
 
+#if defined(__ZEPHYR__)
+        /* zephyr's socket addrinfo variable to store resolved IP address */
+        struct zsock_addrinfo* bind_addr = NULL;
+#else
+        /* addrinfo* variable to store resolved IP address */
+        struct addrinfo* bind_addr = NULL;
+#endif
         /* Look-up IP address from hostname and hostport */
-        if ((status = address_lookup_client(config->connection_info.hostname,
-                                            (uint16_t) strtol(config->connection_info.hostport, NULL, 10),
-                                            &bind_addr)) != 0)
+        status = address_lookup_client(config->connection_info.hostname,
+                                       (uint16_t) strtol(config->connection_info.hostport, NULL, 10),
+                                       &bind_addr);
+        if (status != 0)
         {
                 LOG_ERROR("error looking up server IP address, error code %d", status);
                 return ADDR_ERR;
         }
 
+#if defined(__ZEPHYR__)
+        /* Convert zephyr's socket address info to socket address_in */
+        status = convert_addrinfo_to_sockaddr_in(bind_addr, &config->connection_info.IP_v4);
+        if (status != E_OK)
+        {
+                LOG_ERROR("error occured during address conversion.");
+                return ADDR_ERR;
+        }
+#else
+        /* Copy binary version of the IP address */
+        memcpy(&config->connection_info.IP_v4, &bind_addr->ai_addr, sizeof(&bind_addr->ai_addr));
+#endif
+
         /* Convert the IP from socket_addr_in to string */
-        memcpy(&config->connection_info.IP_v4, bind_addr->ai_addr, sizeof(bind_addr->ai_addr));
         void* addr = &(config->connection_info.IP_v4.sin_addr);
         inet_ntop(bind_addr->ai_family,
                   addr,
