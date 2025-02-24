@@ -21,9 +21,9 @@ static void insert_temporary_key(struct http_get_response* response)
 }
 #endif
 
-static void manage_request_error(struct http_get_response* response, CJSON_PUBLIC(cJSON*) data)
+static void manage_request_error(struct http_get_response* response, cJSON* data)
 {
-        CJSON_PUBLIC(cJSON*) error_msg = cJSON_GetObjectItemCaseSensitive(data, "message");
+        cJSON* error_msg = cJSON_GetObjectItemCaseSensitive(data, "message");
         if (error_msg == NULL)
         {
                 LOG_ERROR("invalid request resumption!\n");
@@ -41,7 +41,7 @@ static void manage_request_error(struct http_get_response* response, CJSON_PUBLI
 #endif
 }
 
-static void derive_key_info(struct http_get_response* response, CJSON_PUBLIC(cJSON*) data)
+static void derive_key_info(struct http_get_response* response, cJSON* data)
 {
         cJSON* key;
         cJSON* key_ID;
@@ -88,9 +88,9 @@ QKD_ERROR:
         return;
 }
 
-static void derive_status_info(struct http_get_response* response, CJSON_PUBLIC(cJSON*) data)
+static void derive_status_info(struct http_get_response* response, cJSON* data)
 {
-        CJSON_PUBLIC(cJSON*) status = cJSON_GetObjectItemCaseSensitive(data, "source_KME_ID");
+        cJSON* status = cJSON_GetObjectItemCaseSensitive(data, "source_KME_ID");
 
         if (status == NULL)
         {
@@ -117,8 +117,7 @@ static void http_get_cb(struct http_response* rsp, enum http_final_call final_da
                 http_request_status->buffer_frag_start = rsp->body_frag_start;
                 http_request_status->error_code = HTTP_OK;
 
-                CJSON_PUBLIC(cJSON*)
-                data = cJSON_Parse((const char*) http_request_status->buffer_frag_start);
+                cJSON* data = cJSON_Parse((const char*) http_request_status->buffer_frag_start);
 
                 if (http_request_status->msg_type == HTTP_STATUS)
                 {

@@ -12,6 +12,8 @@ add_library(kritis3m-http-libs STATIC
         ${CMAKE_CURRENT_SOURCE_DIR}/src/http_parser.c
 )
 
+target_compile_definitions(kritis3m-http-libs PUBLIC CJSON_HIDE_SYMBOLS)
+
 # Link kritis3m_applications_common against the http library
 target_link_libraries(kritis3m-http-libs PRIVATE kritis3m_applications_common)
 

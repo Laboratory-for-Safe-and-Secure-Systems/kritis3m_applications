@@ -5,18 +5,16 @@
 /*     This file repesents the Quantum-Key Exchange Server Transaction (QUEST) library    */
 /******************************************************************************************/
 
-#include <arpa/inet.h>
 #include <errno.h>
-#include <netdb.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/socket.h>
 
 #include "http_client.h"
 #include "http_method.h"
 #include "kritis3m_http_request.h"
+#include "networking.h"
 
 enum kritis3m_status_info
 {
