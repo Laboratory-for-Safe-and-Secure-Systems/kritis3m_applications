@@ -302,7 +302,7 @@ int send_statusto_server(t_http_get_cb response_callback,
         int fd = -1;
         struct http_request req = {0};
         char response_buffer[STATUS_BUFFER_SIZE];
-        struct response response = {.buffer = response_buffer,
+        struct response response = {.buffer = (uint8_t*) response_buffer,
                                     .buffer_frag_start = NULL,
                                     .buffer_size = STATUS_BUFFER_SIZE,
                                     .http_status_code = -1,
@@ -359,7 +359,7 @@ int send_statusto_server(t_http_get_cb response_callback,
         req.response = http_status_cb;
         req.host = host;
         req.port = port;
-        req.recv_buf = response_buffer;
+        req.recv_buf = (uint8_t*) response_buffer;
         req.recv_buf_len = sizeof(response_buffer);
         req.content_type_value = "application/json";
         req.payload = payload;
@@ -418,7 +418,7 @@ int initial_call_controller(t_http_get_cb response_callback)
         int fd = -1;
         struct http_request req = {0};
         char response_buffer[DISTRIBUTION_BUFFER_SIZE];
-        struct response response = {.buffer = response_buffer,
+        struct response response = {.buffer = (uint8_t*) response_buffer,
                                     .buffer_frag_start = NULL,
                                     .buffer_size = DISTRIBUTION_BUFFER_SIZE,
                                     .http_status_code = -1,
@@ -430,7 +430,7 @@ int initial_call_controller(t_http_get_cb response_callback)
         memset(ip_type, 0, 10);
         //---------------------------------initialization ---------------------------------//
 
-        if ((response_callback == NULL))
+        if (response_callback == NULL)
                 goto error_occured;
 
         // get host
@@ -487,7 +487,7 @@ int initial_call_controller(t_http_get_cb response_callback)
         req.response = http_status_cb;
         req.host = host;
         req.port = port;
-        req.recv_buf = response_buffer;
+        req.recv_buf = (uint8_t*) response_buffer;
         req.recv_buf_len = sizeof(response_buffer);
         duration timeout = ms_toduration(14 * 1000);
 

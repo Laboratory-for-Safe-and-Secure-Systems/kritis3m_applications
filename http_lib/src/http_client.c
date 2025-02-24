@@ -89,7 +89,7 @@ static int https_send_data(asl_session* session,
                                 remaining_len -= to_be_copied;
                                 // LOG_HEXDUMP_DBG(send_buf, end_of_send,
                                 // 		"Data to send");
-                                ret = asl_send(session, send_buf, end_of_send);
+                                ret = asl_send(session, (uint8_t*) send_buf, end_of_send);
                                 if (ret < 0)
                                 {
                                         LOG_DEBUG("Cannot send %d bytes (%d)", end_of_send, ret);
@@ -258,7 +258,7 @@ err:
 static int https_flush_data(asl_session* session, const char* send_buf, size_t send_buf_len)
 {
         int ret;
-        ret = asl_send(session, send_buf, send_buf_len);
+        ret = asl_send(session, (uint8_t const*) send_buf, send_buf_len);
         // LOG_HEXDUMP_DBG(send_buf, send_buf_len, "Data to send");
         if (ret < 0)
 
@@ -655,7 +655,8 @@ static int https_wait_data(int sock, asl_session* session, struct http_request* 
                                 req->internal.response.data_len += received;
                                 (void) http_parser_execute(&req->internal.parser,
                                                            &req->internal.parser_settings,
-                                                           req->internal.response.recv_buf + offset,
+                                                           (char*) req->internal.response.recv_buf +
+                                                                   offset,
                                                            received);
                                 break;
                         }
@@ -771,7 +772,8 @@ static int http_wait_data(int sock, struct http_request* req, const timepoint re
 
                                 (void) http_parser_execute(&req->internal.parser,
                                                            &req->internal.parser_settings,
-                                                           req->internal.response.recv_buf + offset,
+                                                           (char*) req->internal.response.recv_buf +
+                                                                   offset,
                                                            received);
                         }
 
@@ -1359,7 +1361,7 @@ int https_client_req(int sock, asl_session* session, struct http_request* req, d
                                 length = req->payload_len;
                         }
 
-                        ret = asl_send(session, req->payload, length);
+                        ret = asl_send(session, (uint8_t const*) req->payload, length);
                         if (ret < 0)
                         {
                                 goto out;

@@ -16,7 +16,6 @@
 #include "tcp_client_stdin_bridge.h"
 #include "tls_proxy.h"
 
-
 #include "logging.h"
 LOG_MODULE_CREATE(application_log_module);
 
@@ -102,8 +101,7 @@ struct application_manager
         poll_set notifier;
 };
 
-
-//main application manager instance used by the main thread
+// main application manager instance used by the main thread
 static struct application_manager manager = {
         .initialized = false,
         .management_pair[THREAD_INT] = -1,
@@ -112,24 +110,23 @@ static struct application_manager manager = {
         .notifier = {0},
 };
 
-
 /*-------------------------------  FORWARD DECLARATIONS---------------------------------*/
-//mainthread
+// mainthread
 void* application_service_main_thread(void* arg);
-//ipc
+// ipc
 enum MSG_RESPONSE_CODE management_request_helper(int socket, application_message* msg);
 int respond_with(int socket, enum MSG_RESPONSE_CODE response_code);
 static int read_management_message(int socket, application_message* msg);
 static int send_management_message(int socket, application_message* msg);
 enum MSG_RESPONSE_CODE management_request_helper(int socket, application_message* msg);
 ManagementReturncode handle_management_message(int fd, struct application_manager* appl_manager);
-//services
+// services
 bool is_client_supported(client_connection_request con_req);
 int stop_application(Kritis3mApplications* appl);
 int stop_application_service(struct application_manager* application_manager);
 int start_application(Kritis3mApplications* appl);
 int client_matches_trusted_client(TrustedClients* trusted_client, struct sockaddr* connecting_client);
-//helper functions
+// helper functions
 int create_echo_config(Kritis3mApplications* appl, echo_server_config* config);
 int create_tcp_stdin_bridge_config(Kritis3mApplications* appl, tcp_client_stdin_bridge_config* config);
 int create_proxy_config(Kritis3mApplications* appl, proxy_config* config);
@@ -137,8 +134,7 @@ int get_endpoint_configuration(int ep_1id, asl_endpoint_configuration* ep);
 
 void cleanup_application_manager(void);
 
-
-//initialize application manager
+// initialize application manager
 void init_application_manager(void)
 {
         int ret = 0;
@@ -153,7 +149,7 @@ void init_application_manager(void)
         sem_init(&manager.thread_setup_sem, 0, 0);
 }
 
-//start application manager
+// start application manager
 int start_application_manager(ApplicationConfiguration* configuration)
 {
 
@@ -203,12 +199,12 @@ error_occured:
         return ret;
 }
 
-//application manager main thread
+// application manager main thread
 void* application_service_main_thread(void* arg)
 {
         /*------------------------------------------ INITIALIZATION ------------------------------------------ */
         int ret = -1;
-        bool shutodwn = true;
+        bool shutdown = true;
         int management_socket = -1;
         struct application_manager* appl_manager = (struct application_manager*) arg;
 
@@ -319,8 +315,7 @@ cleanup_application_service:
         return NULL;
 }
 
-
-//returns if application_manager is running
+// returns if application_manager is running
 bool is_running()
 {
         if ((!manager.initialized) || (manager.management_pair[THREAD_EXT] < 0) ||
@@ -332,7 +327,7 @@ bool is_running()
 }
 
 /*------------------------------------------ IPC functions ------------------------------------------------------*/
-//send management message
+// send management message
 static int send_management_message(int socket, application_message* msg)
 {
         int ret = 0;
@@ -368,7 +363,7 @@ static int send_management_message(int socket, application_message* msg)
 
         return 0;
 }
-//read management message
+// read management message
 static int read_management_message(int socket, application_message* msg)
 {
         int ret = recv(socket, (char*) msg, sizeof(application_message), 0);
@@ -388,7 +383,7 @@ static int read_management_message(int socket, application_message* msg)
         return 0;
 }
 
-//respond with a MSG_RESPONSE_CODE to a management request
+// respond with a MSG_RESPONSE_CODE to a management request
 int respond_with(int socket, enum MSG_RESPONSE_CODE response_code)
 {
         application_message response = {0};
@@ -397,7 +392,7 @@ int respond_with(int socket, enum MSG_RESPONSE_CODE response_code)
         return send_management_message(socket, &response);
 }
 
-//send APPLICATION_CONNECTION_REQUEST to main thread
+// send APPLICATION_CONNECTION_REQUEST to main thread
 bool confirm_client(int application_id, struct sockaddr* connecting_client)
 {
         application_message request = {0};
@@ -448,7 +443,7 @@ error_occured:
         return ret;
 }
 
-//sends management request and awaits response
+// sends management request and awaits response
 enum MSG_RESPONSE_CODE management_request_helper(int socket, application_message* msg)
 {
         int ret;
@@ -474,7 +469,7 @@ error_occured:
         return retval;
 }
 
-//send APPLICATION_SERVICE_STOP_REQUEST to main thread
+// send APPLICATION_SERVICE_STOP_REQUEST to main thread
 int stop_application_manager()
 {
         int socket = -1;
@@ -515,13 +510,13 @@ int stop_application_manager()
         return ret;
 }
 
-//handle management request
+// handle management request
 ManagementReturncode handle_management_message(int fd, struct application_manager* appl_manager)
 {
         application_message msg = {0};
         int ret = -1;
 
-        enum MSG_RESPONSE_CODE retval = MSG_OK;
+        enum ManagementReturncode retval = MGMT_OK;
         ret = read_management_message(fd, &msg);
         if (ret < 0)
         {
@@ -541,13 +536,13 @@ ManagementReturncode handle_management_message(int fd, struct application_manage
                         ret = start_application(appl);
                         if (ret < 0)
                                 goto error_occured;
-                        retval = MSG_OK;
+                        retval = MGMT_OK;
                         break;
                 }
         // not implemented yet
         case APPLICATION_STATUS_REQUEST:
                 {
-                        retval = MSG_ERROR;
+                        retval = MGMT_ERR;
                         LOG_INFO("application status request not implemented yet");
 
                         break;
@@ -573,7 +568,7 @@ ManagementReturncode handle_management_message(int fd, struct application_manage
                         {
                                 LOG_ERROR("Can't stop application with appl_id %d", appl_id);
                         }
-                        retval = MSG_OK;
+                        retval = MGMT_OK;
                         break;
                 }
         /**
@@ -582,7 +577,7 @@ ManagementReturncode handle_management_message(int fd, struct application_manage
         case APPLICATION_SERVICE_START_REQUEST:
                 {
                         ApplicationConfiguration* config = msg.payload.config;
-                        ApplicationManagerStatus status = {.running_applications = 0, .Status = MSG_OK};
+                        ApplicationManagerStatus status = {.running_applications = 0, .Status = APK_OK};
                         int ret = 0;
 
                         if (appl_manager->configuration != NULL)
@@ -610,7 +605,7 @@ ManagementReturncode handle_management_message(int fd, struct application_manage
                                 {
                                         LOG_ERROR("appl within applications is NULL, ERROR");
                                         appl_manager->configuration = NULL;
-                                        status.Status = MSG_ERROR;
+                                        status.Status = APK_ERR;
                                         return MGMT_ERR;
                                 }
                                 ret = start_application(appl);
@@ -618,7 +613,7 @@ ManagementReturncode handle_management_message(int fd, struct application_manage
                                 {
                                         LOG_ERROR("couldnt start proxy applciation with id %d",
                                                   appl->id);
-                                        status.Status = MSG_ERROR;
+                                        status.Status = APK_ERR;
                                         return MGMT_ERR;
                                 }
                                 else
@@ -634,8 +629,8 @@ ManagementReturncode handle_management_message(int fd, struct application_manage
                                 LOG_ERROR("application_manager: couldnt send status report");
                         }
 
-                        status.Status = MSG_OK;
-                        return 0;
+                        status.Status = APK_OK;
+                        return MGMT_OK;
                 }
         // shut down application manager
         // cleanup is processed in main thread
@@ -671,7 +666,7 @@ ManagementReturncode handle_management_message(int fd, struct application_manage
                         if ((appl_id < 0))
                                 goto error_occured;
                         bool is_supported = is_client_supported(con_req);
-                        retval = (is_supported == true) ? MSG_OK : MSG_FORBIDDEN;
+                        retval = (is_supported == true) ? MGMT_OK : MGMT_FORBIDDEN;
                         retval = MGMT_OK;
                         break;
                 }
@@ -685,7 +680,7 @@ ManagementReturncode handle_management_message(int fd, struct application_manage
         default:
                 {
                         LOG_ERROR("unknown request");
-                        retval = MSG_ERROR;
+                        retval = MGMT_ERR;
                         break;
                 }
         }
@@ -698,14 +693,14 @@ error_occured:
         LOG_ERROR("Error occured handling internal management request");
         ret = -1;
         if (retval > 0)
-                retval = MSG_ERROR;
+                retval = MGMT_ERR;
         respond_with(fd, retval);
         return retval;
 }
 
 /*-------------------------------- Services ------------------------------------------*/
 
-//whitelist lookup if client is supported or not
+// whitelist lookup if client is supported or not
 bool is_client_supported(client_connection_request con_req)
 {
         ApplicationConfiguration* appl_config = manager.configuration;
@@ -736,7 +731,7 @@ bool is_client_supported(client_connection_request con_req)
         return ret;
 }
 
-//start application manager 
+// start application manager
 int start_application(Kritis3mApplications* appl)
 {
         int ret = 0;
@@ -979,7 +974,6 @@ int get_endpoint_configuration(int ep_id, asl_endpoint_configuration* ep)
         return -1;
 }
 
-
 int stop_application(Kritis3mApplications* appl)
 {
         int ret = 0;
@@ -1065,7 +1059,7 @@ error_occured:
         return ret;
 }
 
-//whitelist lookup if client is trusworthy
+// whitelist lookup if client is trusworthy
 int client_matches_trusted_client(TrustedClients* trusted_client, struct sockaddr* connecting_client)
 {
 
@@ -1135,7 +1129,7 @@ int stop_application_service(struct application_manager* application_manager)
         Kritis3mApplications* appls = NULL;
         Kritis3mApplications* appl = NULL;
 
-        if ((application_manager == NULL))
+        if (application_manager == NULL)
                 return 0;
 
         appls = application_manager->configuration->applications;
@@ -1154,7 +1148,7 @@ int stop_application_service(struct application_manager* application_manager)
         return ret;
 }
 
-//cleanup function
+// cleanup function
 void cleanup_application_manager(void)
 {
         int ret = 0;

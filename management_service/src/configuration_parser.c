@@ -338,7 +338,7 @@ ManagementReturncode parse_buffer_to_SystemConfiguration(char* json_buffer,
                 goto error_occured;
 
         int number_hw_configs = cJSON_GetArraySize(item);
-        if ((number_hw_configs == 0))
+        if (number_hw_configs == 0)
                 goto error_occured;
 
         if (number_hw_configs > MAX_NUMBER_HW_CONFIG)
