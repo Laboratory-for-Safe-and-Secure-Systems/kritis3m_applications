@@ -62,10 +62,10 @@ int setblocking(int fd, bool val);
 int create_socketpair(int socket_pair[2]);
 
 /* Lookup the provided outgoing destination and fill the linked-list accordingly. */
-int address_lookup_client(char const* dest, uint16_t port, struct addrinfo** addr);
+int address_lookup_client(char const* dest, uint16_t port, struct addrinfo** addr, int family);
 
 /* Lookup the provided incoming destination and fill the linked-list accordingly. */
-int address_lookup_server(char const* dest, uint16_t port, struct addrinfo** addr);
+int address_lookup_server(char const* dest, uint16_t port, struct addrinfo** addr, int family);
 
 /* Create a new listening socket for given type and address.
  *

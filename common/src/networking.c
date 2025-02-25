@@ -860,9 +860,9 @@ int create_socketpair(int socket_pair[2])
 #endif
 }
 
-static int address_lookup_internal(char const* dest, uint16_t port, struct addrinfo** addr, int flags)
+static int address_lookup_internal(char const* dest, uint16_t port, struct addrinfo** addr, int family, int flags)
 {
-        struct addrinfo hints = {.ai_family = AF_UNSPEC,
+        struct addrinfo hints = {.ai_family = family,
                                  .ai_socktype = SOCK_STREAM,
                                  .ai_protocol = IPPROTO_TCP,
                                  .ai_flags = flags};
@@ -891,15 +891,15 @@ static int address_lookup_internal(char const* dest, uint16_t port, struct addri
 }
 
 /* Lookup the provided outgoing destination and fill the linked-list accordingly. */
-int address_lookup_client(char const* dest, uint16_t port, struct addrinfo** addr)
+int address_lookup_client(char const* dest, uint16_t port, struct addrinfo** addr, int family)
 {
-        return address_lookup_internal(dest, port, addr, AI_NUMERICSERV | AI_ADDRCONFIG);
+        return address_lookup_internal(dest, port, addr, family, AI_NUMERICSERV | AI_ADDRCONFIG);
 }
 
 /* Lookup the provided incoming destination and fill the linked-list accordingly. */
-int address_lookup_server(char const* dest, uint16_t port, struct addrinfo** addr)
+int address_lookup_server(char const* dest, uint16_t port, struct addrinfo** addr, int family)
 {
-        return address_lookup_internal(dest, port, addr, AI_PASSIVE | AI_NUMERICSERV | AI_ADDRCONFIG);
+        return address_lookup_internal(dest, port, addr, family, AI_PASSIVE | AI_NUMERICSERV | AI_ADDRCONFIG);
 }
 
 /* Create a new listening socket for given type and address.
