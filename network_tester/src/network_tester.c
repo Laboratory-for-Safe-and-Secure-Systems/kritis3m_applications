@@ -195,7 +195,7 @@ static int network_init(network_tester* tester)
          * results in a noop. */
         if (address_lookup_client(tester->config->target_ip,
                                   tester->config->target_port,
-                                  &tester->target_addr) < 0)
+                                  &tester->target_addr, AF_UNSPEC) < 0)
                 ERROR_OUT("Error looking up target IP address");
 
         tester->current_target = tester->target_addr;

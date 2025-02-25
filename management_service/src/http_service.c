@@ -102,7 +102,7 @@ int init_http_service(Kritis3mManagemntConfiguration* config,
         // Perform address lookup for management endpoint
         if (address_lookup_client(config->server_endpoint_addr.address,
                                   config->server_endpoint_addr.port,
-                                  (struct addrinfo**) &http_service.con.mgmt_sockaddr) != 0)
+                                  (struct addrinfo**) &http_service.con.mgmt_sockaddr, AF_UNSPEC) != 0)
         {
                 goto cleanup;
         }
@@ -116,7 +116,7 @@ int init_http_service(Kritis3mManagemntConfiguration* config,
 #ifdef PKI_READY
         if (address_lookup_client(config->identity.server_endpoint_addr.address,
                                   config->identity.server_endpoint_addr.port,
-                                  (struct addrinfo**) &http_service.mgmt_pki.mgmt_sockaddr) != 0)
+                                  (struct addrinfo**) &http_service.mgmt_pki.mgmt_sockaddr, AF_UNSPEC) != 0)
         {
                 goto cleanup;
         }

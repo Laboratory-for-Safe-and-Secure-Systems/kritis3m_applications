@@ -61,7 +61,7 @@ static enum kritis3m_status_info establish_host_connection(struct quest_configur
         /* Look-up IP address from hostname and hostport */
         status = address_lookup_client(config->connection_info.hostname,
                                        (uint16_t) strtol(config->connection_info.hostport, NULL, 10),
-                                       &bind_addr);
+                                       &bind_addr, AF_INET);
         if (status != 0)
         {
                 LOG_ERROR("error looking up server IP address, error code %d", status);

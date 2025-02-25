@@ -377,7 +377,7 @@ static int prepare_server(echo_server* server, echo_server_config const* config)
          * Do a DNS lookup to make sure we have an IP address. If we already have an IP, this
          * results in a noop. */
         struct addrinfo* bind_addr = NULL;
-        ret = address_lookup_server(config->own_ip_address, config->listening_port, &bind_addr);
+        ret = address_lookup_server(config->own_ip_address, config->listening_port, &bind_addr, AF_UNSPEC);
         if (ret < 0)
                 ERROR_OUT("Error looking up target IP address");
 

@@ -213,7 +213,7 @@ static int add_new_proxy(enum tls_proxy_direction direction, proxy_config const*
         /* Create the TCP sockets for the incoming connections (IPv4 and IPv6).
          * Do a DNS lookup to make sure we have an IP address. If we already have an IP, this
          * results in a noop. */
-        if (address_lookup_server(config->own_ip_address, config->listening_port, &bind_addr) < 0)
+        if (address_lookup_server(config->own_ip_address, config->listening_port, &bind_addr, AF_UNSPEC) < 0)
                 ERROR_OUT_EX(proxy->log_module, "Error looking up bind IP address");
 
         /* Iterate over the linked-list of results */
@@ -247,7 +247,7 @@ static int add_new_proxy(enum tls_proxy_direction direction, proxy_config const*
 
         /* Do a DNS lookup to make sure we have an IP address. If we already have an IP, this
          * results in a noop. */
-        if (address_lookup_client(config->target_ip_address, config->target_port, &proxy->target_addr) < 0)
+        if (address_lookup_client(config->target_ip_address, config->target_port, &proxy->target_addr, AF_UNSPEC) < 0)
                 ERROR_OUT_EX(proxy->log_module, "Error looking up target IP address");
 
         LOG_DEBUG_EX(proxy->log_module,
