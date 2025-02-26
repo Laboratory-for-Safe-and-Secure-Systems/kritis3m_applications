@@ -860,7 +860,11 @@ int create_socketpair(int socket_pair[2])
 #endif
 }
 
-static int address_lookup_internal(char const* dest, uint16_t port, struct addrinfo** addr, int family, int flags)
+static int address_lookup_internal(char const* dest,
+                                   uint16_t port,
+                                   struct addrinfo** addr,
+                                   int family,
+                                   int flags)
 {
         struct addrinfo hints = {.ai_family = family,
                                  .ai_socktype = SOCK_STREAM,
@@ -969,7 +973,6 @@ cleanup:
 int create_client_socket(int type)
 {
         int sock = -1;
-        int status;
 
         /* Create the socket */
         sock = socket(type, SOCK_STREAM, IPPROTO_TCP);
