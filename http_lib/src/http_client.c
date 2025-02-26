@@ -22,11 +22,11 @@
 /********************************************
  * 			    ZEPHYR				  	    *
  * *****************************************/
-#if defined(__ZEPYHR__)
+#if defined(__ZEPHYR__)
 #include <zephyr/kernel.h>
-#else
+
+#else /* __ZEPHYR__ */
 #include <limits.h>
-// #include <linux/kernel.h> // for offset of and other kernel utilities
 #include <stdio.h>
 
 #define CONTAINER_OF(ptr, type, member)                                                            \
@@ -36,11 +36,7 @@
         })
 #define snprintk snprintf
 
-#endif
-
-// #include <netinet/in.h>
-// #include <poll.h>
-// #include <sys/socket.h>
+#endif /* __ZEPHYR__ */
 
 #include "http_client.h"
 #include "logging.h"
@@ -143,7 +139,7 @@ static int sendall(int sock, const void* buf, size_t len, timepoint timepoint)
                 {
                         struct pollfd pfd;
                         int pollres;
-                        int req_timeout_ms = duration_toms(
+                        int req_timeout_ms = duration_to_ms(
                                 get_remaining_duration_reference_now(timepoint));
                         if (req_timeout_ms < 0)
                                 return -ETIMEDOUT;
@@ -591,7 +587,8 @@ static int https_wait_data(int sock, asl_session* session, struct http_request* 
 {
         int total_received = 0;
         size_t offset = 0;
-        int received, ret;
+        int received; 
+        int ret;
         struct pollfd fds[1];
         int nfds = 1;
 
@@ -600,7 +597,7 @@ static int https_wait_data(int sock, asl_session* session, struct http_request* 
 
         do
         {
-                int remaining_duration = duration_toms(get_remaining_duration_reference_now(endtimeout));
+                int remaining_duration = duration_to_ms(get_remaining_duration_reference_now(endtimeout));
                 if (remaining_duration < 0)
                 {
                         goto error;
@@ -725,7 +722,7 @@ static int http_wait_data(int sock, struct http_request* req, const timepoint re
 
         do
         {
-                int reamaining_time_ms = duration_toms(
+                int reamaining_time_ms = duration_to_ms(
                         get_remaining_duration_reference_now(req_end_timepoint));
 
                 ret = poll(fds, nfds, reamaining_time_ms);

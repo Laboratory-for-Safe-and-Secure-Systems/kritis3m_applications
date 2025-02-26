@@ -32,11 +32,9 @@
 #if defined(__ZEPHYR__)
 #include <zephyr/kernel.h>
 #include <zephyr/net/net_ip.h>
-k_timeout_t
 #define AT_LEAST MIN
 #else
 #define AT_LEAST(a, b) (((a) < (b)) ? (a) : (b))
-#include "linux_comp.h"
 #endif // __ZEPHYR__
 
 #include "kritis3m_application_config.h"
@@ -45,6 +43,7 @@ k_timeout_t
 #include "asl.h"
 #endif
 
+#include "linux_comp.h"
 #include "http_parser.h"
 
 #ifdef __cplusplus

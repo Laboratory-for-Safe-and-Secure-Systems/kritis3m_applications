@@ -28,11 +28,15 @@ static void manage_request_error(struct http_get_response* response, cJSON* data
         {
                 LOG_ERROR("invalid request resumption!\n");
                 response->error_code = HTTP_ERR;
+                response->bytes_received = 0;
+                response->buffer_frag_start = NULL;
         }
         else
         {
                 LOG_ERROR("error occured: %s\n", error_msg->valuestring);
                 response->error_code = HTTP_ERR;
+                response->bytes_received = 0;
+                response->buffer_frag_start = NULL;
         }
 
 #if (TMP_KEY)
@@ -129,13 +133,6 @@ static void http_get_cb(struct http_response* rsp, enum http_final_call final_da
                 }
 
                 cJSON_Delete(data);
-
-                return;
-
-        error_occured:
-                http_request_status->error_code = HTTP_ERR;
-                http_request_status->bytes_received = 0;
-                http_request_status->buffer_frag_start = NULL;
                 return;
         }
 }

@@ -6,32 +6,33 @@ extern "C"
 {
 #endif
 
+
+/* foreward declaration of time structs */
 typedef struct timepoint timepoint;
+
 typedef struct duration duration;
 
-duration ms_toduration(int ms);
-int duration_toms(duration duration);
-
-timepoint timepoint_add_duration(timepoint tp, duration duration);
-duration get_differential_duration(timepoint reference, timepoint timepoint);
-duration get_remaining_duration_reference_now(timepoint timepoint);
-timepoint get_now();
-// reference to now
-timepoint get_timepoint_in(duration duration);
 
 #if defined(__ZEPHYR__)
 
+#include <zephyr/kernel.h>
+//#include <inttypes.h>
+
 struct duration
 {
-        int a;
+        k_timeout_t timespan;
 };
 // Struct definitions
 struct timepoint
 {
-        int b;
+        k_timepoint_t time;
 };
-#else
+
+
+#else /* __ZEPHYR__ */
+
 #include <time.h>
+
 struct duration
 {
         struct timespec timespan;
@@ -42,9 +43,22 @@ struct timepoint
         struct timespec time;
 };
 
-#endif
+#endif /* __ZEPHYR__ */
 
-// future time
+
+/* method declaration */
+
+duration ms_to_duration(int ms);
+
+int duration_to_ms(duration duration);
+
+timepoint timepoint_add_duration(timepoint tp, duration duration);
+
+duration get_remaining_duration_reference_now(timepoint timepoint);
+
+timepoint get_timepoint_in(duration duration);
+
+
 
 #ifdef __cplusplus
 }

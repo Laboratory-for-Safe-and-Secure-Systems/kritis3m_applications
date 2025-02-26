@@ -102,7 +102,7 @@ int init_http_service(Kritis3mManagemntConfiguration* config,
         // Perform address lookup for management endpoint
         if (address_lookup_client(config->server_endpoint_addr.address,
                                   config->server_endpoint_addr.port,
-                                  (struct addrinfo**) &http_service.con.mgmt_sockaddr) != 0)
+                                  (struct addrinfo**) &http_service.con.mgmt_sockaddr, AF_UNSPEC) != 0)
         {
                 goto cleanup;
         }
@@ -116,7 +116,7 @@ int init_http_service(Kritis3mManagemntConfiguration* config,
 #ifdef PKI_READY
         if (address_lookup_client(config->identity.server_endpoint_addr.address,
                                   config->identity.server_endpoint_addr.port,
-                                  (struct addrinfo**) &http_service.mgmt_pki.mgmt_sockaddr) != 0)
+                                  (struct addrinfo**) &http_service.mgmt_pki.mgmt_sockaddr, AF_UNSPEC) != 0)
         {
                 goto cleanup;
         }
@@ -365,7 +365,7 @@ int send_statusto_server(t_http_get_cb response_callback,
         req.payload = payload;
         req.payload_len = payload_size;
 
-        duration timeout = ms_toduration(14 * 1000);
+        duration timeout = ms_to_duration(14 * 1000);
 
         ret = startup_connection(&http_service.con);
         if (ret < 0)
@@ -489,7 +489,7 @@ int initial_call_controller(t_http_get_cb response_callback)
         req.port = port;
         req.recv_buf = (uint8_t*) response_buffer;
         req.recv_buf_len = sizeof(response_buffer);
-        duration timeout = ms_toduration(14 * 1000);
+        duration timeout = ms_to_duration(14 * 1000);
 
         ret = startup_connection(&http_service.con);
         if (ret < 0)
