@@ -587,7 +587,7 @@ static int https_wait_data(int sock, asl_session* session, struct http_request* 
 {
         int total_received = 0;
         size_t offset = 0;
-        int received; 
+        int received;
         int ret;
         struct pollfd fds[1];
         int nfds = 1;
@@ -597,9 +597,11 @@ static int https_wait_data(int sock, asl_session* session, struct http_request* 
 
         do
         {
-                int remaining_duration = duration_to_ms(get_remaining_duration_reference_now(endtimeout));
+                int remaining_duration = duration_to_ms(
+                        get_remaining_duration_reference_now(endtimeout));
                 if (remaining_duration < 0)
                 {
+                        ret = -EINVAL;
                         goto error;
                 }
 
