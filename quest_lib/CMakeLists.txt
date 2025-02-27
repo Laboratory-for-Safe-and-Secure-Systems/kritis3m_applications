@@ -7,19 +7,11 @@ project(QUEST C)
 # Set the version of the library
 set(PROJECT_VERSION 1.0.0)
 
-# In case the QKD line does not operate correctly the library can inject a temporary key
-option(FALLBACK_PSK "Inject a hardcoded PSK into the http_cb" OFF)
-
 # Add the library sources
 add_library(kritis3m-quest STATIC
   src/kritis3m_http_request.c 
   src/quest.c
 )
-
-# set compile definition of FALLBACK_PSK option if activated
-if (FALLBACK_PSK)
-    target_compile_definitions(kritis3m-quest PRIVATE TMP_KEY)
-endif()
 
 # Include public headers for `library`
 target_include_directories(kritis3m-quest
