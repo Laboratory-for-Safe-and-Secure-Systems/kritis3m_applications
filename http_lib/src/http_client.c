@@ -1403,7 +1403,6 @@ int https_client_req(int sock, asl_session* session, struct http_request* req, d
         /**
          * @todo error handling
          */
-        // total_recv = http_wait_data(sock, req, req_end_timepoint);
         if (total_recv < 0)
         {
                 LOG_DEBUG("Wait data failure (%d)", total_recv);
