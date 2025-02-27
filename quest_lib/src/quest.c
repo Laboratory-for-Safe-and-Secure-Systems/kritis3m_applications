@@ -1,4 +1,5 @@
 #include "quest.h"
+#include "file_io.h"
 #include "logging.h"
 #include "networking.h"
 
@@ -8,93 +9,129 @@ LOG_MODULE_CREATE(quest_lib);
 
 /*------------------------------ private functions -------------------------------*/
 
-#if defined(__ZEPHYR__)
-/// @brief As zephyr operates with it's own type of address information (zsock_addrinfo),
-///        we need to convert the address variable derived from the getaddressinfo()
-///        call into a variable of type sockaddr_in, to ensure correct behaviour later on.
-/// @param zaddr_info zephyr socket address info struct previously passed to the
-///                   getaddressinfo() function.
-/// @param addr pointer to the destination sockaddr_in variable used later on.
-/// @return returns E_OK if working correctly, otherwise returns an error code less than zero.
-static enum kritis3m_status_info convert_addrinfo_to_sockaddr_in(struct zsock_addrinfo* zaddr_info,
-                                                                 struct sockaddr_in* addr)
-{
-        if (zaddr_info == NULL || addr == NULL)
-        {
-                LOG_ERROR("passed argument was NULL!");
-                return E_NOT_OK;
-        }
-
-        // We expect the resolved address to be of type IPv4.
-        // TODO: integrate IPv6 support here.
-        if (zaddr_info->ai_family == AF_INET)
-        {
-                struct sockaddr_in* addr_in = (struct sockaddr_in*) zaddr_info->ai_addr;
-                *addr = *addr_in;
-        }
-        else
-        {
-                LOG_WARN("resolved IP address was not of type IPv4.");
-                return ADDR_ERR;
-        }
-
-        return E_OK;
-}
-#endif
-
-/// @brief To initialize the quest lib we establish a connection to the QKD line. This
-///        requires a DNS resolve call to get the IP address of the QKD server and subsequent
-///        socket preparation and connection establishment.
-/// @param config quest_configuration containing the connection_info parameters.
+/// @brief Using the conection parameter, this function establishes the connection to the 
+///        host and creates the tls session and handshake, if enable_secure_con is true.
+/// @param config quest configuration containing the connection_info and security_params.
 /// @return returns E_OK if working correctly, otherwise returns an error code less than zero.
 static enum kritis3m_status_info establish_host_connection(struct quest_configuration* config)
 {
+        int status = E_OK;
+
+        config->connection_info.socket_fd = create_client_socket(AF_INET);
+        if (config->connection_info.socket_fd < 0)
+        {
+                LOG_ERROR("connection failed, error code: %d\n", errno);
+                status = SOCKET_ERR;
+                goto SOCKET_CON_ERR;
+        }
+
+        if (connect(config->connection_info.socket_fd,(struct sockaddr*) config->connection_info.IP_v4->ai_addr, 
+                config->connection_info.IP_v4->ai_addrlen) < 0)
+        {
+                LOG_ERROR("connection failed, error code: %d\n", errno);
+                status = SOCKET_ERR;
+                goto SOCKET_CON_ERR;
+        }
+
+        /* if enable_secure_con is true we need to perform a TLS handshake */
+        if(config->security_param.enable_secure_con)
+        {
+                config->security_param.tls_session = asl_create_session(config->security_param.client_endpoint, config->connection_info.socket_fd);
+                if(config->security_param.tls_session == NULL)
+                {
+                        LOG_ERROR("failed to establish tls session.\n");
+                        status = ASL_ERR;
+                        goto SOCKET_CON_ERR;
+                }
+
+                if(asl_handshake(config->security_param.tls_session) < 0)
+                {
+                        LOG_ERROR("tls handshake unsuccessful.\n");
+                        status = ASL_ERR;
+                        goto SOCKET_CON_ERR;
+                }
+        }
+
+SOCKET_CON_ERR:
+        return status;
+}
+
+/// @brief To establish a connection to the QKD line we need a DNS resolve call to get the IP 
+///        address of the QKD key management server and subsequent port socket preparation.
+/// @param config quest_configuration containing the connection_info parameters.
+/// @return returns E_OK if working correctly, otherwise returns an error code less than zero.
+static enum kritis3m_status_info derive_connection_parameter(struct quest_configuration* config)
+{
         int status;
 
-#if defined(__ZEPHYR__)
-        /* zephyr's socket addrinfo variable to store resolved IP address */
-        struct zsock_addrinfo* bind_addr = NULL;
-#else
-        /* addrinfo* variable to store resolved IP address */
-        struct addrinfo* bind_addr = NULL;
-#endif
+        /* temporary fix to connect to mock-server */
+        config->connection_info.hostname = "127.0.0.2";
+
         /* Look-up IP address from hostname and hostport */
         status = address_lookup_client(config->connection_info.hostname,
                                        (uint16_t) strtol(config->connection_info.hostport, NULL, 10),
-                                       &bind_addr, AF_INET);
+                                       &config->connection_info.IP_v4, AF_INET);
         if (status != 0)
         {
                 LOG_ERROR("error looking up server IP address, error code %d", status);
                 return ADDR_ERR;
         }
 
-#if defined(__ZEPHYR__)
-        /* Convert zephyr's socket address info to socket address_in */
-        status = convert_addrinfo_to_sockaddr_in(bind_addr, &config->connection_info.IP_v4);
-        if (status != E_OK)
-        {
-                LOG_ERROR("error occured during address conversion.");
-                return ADDR_ERR;
-        }
-#else
-        /* Copy binary version of the IP address */
-        memcpy(&config->connection_info.IP_v4, &bind_addr->ai_addr, sizeof(&bind_addr->ai_addr));
-#endif
-
+        /* temporary fix to connect to mock-server */
+        config->connection_info.hostname = "im-lfd-qkd-bob.othr.de";
+       
         /* Convert the IP from socket_addr_in to string */
-        void* addr = &(config->connection_info.IP_v4.sin_addr);
-        inet_ntop(bind_addr->ai_family,
-                  addr,
-                  config->connection_info.IP_str,
+        inet_ntop(AF_INET, config->connection_info.IP_v4, config->connection_info.IP_str,
                   sizeof(config->connection_info.IP_str));
 
-        LOG_INFO("IP address for %s: %s\n",
+        LOG_INFO("IP address for %s: %s:%s\n",
                  config->connection_info.hostname,
-                 config->connection_info.IP_str);
+                 config->connection_info.IP_str,
+                 config->connection_info.hostport);
 
-        /* Convert host port from string to unsigned integer */
-        config->connection_info.IP_v4.sin_port = htons(
-                strtoul(config->connection_info.hostport, NULL, 10));
+        return E_OK;
+}
+
+/// @brief If the connection to the QKD line key management interface is secured via HTTPS,
+///        we need to establish the Agile Security Library (ASL) to verify the server 
+///        certificate and encrypt the communication with the server.
+/// @param config quest_configuration containing the fields for the security_params populated
+///        in this function.
+/// @return returns E_OK if working correctly, otherwise returns an error code less than zero.
+static enum kritis3m_status_info initialize_asl_library(struct quest_configuration* config)
+{
+        asl_configuration asl_config = asl_default_config();
+        if(asl_init(&asl_config) < 0)
+                return ASL_ERR;
+        
+        certificates certs = get_empty_certificates();
+        asl_endpoint_configuration endpoint_config = asl_default_endpoint_config();
+        
+        /* set certificate and key paths */
+        certs.root_path        = "../build/_deps/kritis3m_applications-build/quest_lib/certs/root.pem";
+        certs.certificate_path = "../build/_deps/kritis3m_applications-build/quest_lib/certs/chain.pem";
+        certs.private_key_path = "../build/_deps/kritis3m_applications-build/quest_lib/certs/privateKey.pem";
+        
+        /*read certificates into buffer */
+        if(read_certificates(&certs) != 0)
+                return ASL_ERR;
+        
+        /* assign cert chain buffer and size to the asl_endpoint_config */
+        endpoint_config.device_certificate_chain.buffer = certs.chain_buffer;
+        endpoint_config.device_certificate_chain.size = certs.chain_buffer_size;
+
+        /* assign private key buffer and size to the asl_endpoint_config */
+        endpoint_config.private_key.buffer = certs.key_buffer;
+        endpoint_config.private_key.size = certs.key_buffer_size;
+
+        /* assign root cert buffer and size to the asl_endpoint_config */
+        endpoint_config.root_certificate.buffer = certs.root_buffer;
+        endpoint_config.root_certificate.size = certs.root_buffer_size;
+
+        /* set mutual authentication to false */
+        endpoint_config.mutual_authentication = false;
+
+        config->security_param.client_endpoint = asl_setup_client_endpoint(&endpoint_config);         
 
         return E_OK;
 }
@@ -107,6 +144,10 @@ struct quest_configuration* quest_default_config(void)
         default_config = malloc(sizeof(struct quest_configuration));
 
         default_config->verbose = false;
+
+        default_config->security_param.enable_secure_con = true;
+        default_config->security_param.client_endpoint = NULL;
+        default_config->security_param.tls_session = NULL;
 
         default_config->connection_info.hostname = "im-lfd-qkd-bob.othr.de";
         default_config->connection_info.hostport = "9120";
@@ -123,6 +164,13 @@ enum kritis3m_status_info quest_deinit(struct quest_configuration* config)
 {
         if (config == NULL)
                 return E_OK;
+
+        if(config->security_param.enable_secure_con)
+        {
+                asl_close_session(config->security_param.tls_session);
+                asl_free_endpoint(config->security_param.client_endpoint);
+                asl_cleanup();
+        }
 
         if (config->request != NULL)
         {
@@ -146,29 +194,20 @@ enum kritis3m_status_info quest_init(struct quest_configuration* config)
 {
         enum kritis3m_status_info status = E_OK;
 
-        status = establish_host_connection(config);
+        if(config->security_param.enable_secure_con)
+        {
+                status = initialize_asl_library(config);
+                if(status < E_OK)
+                        goto HOST_CON_ERR;
+        }
+
+        status = derive_connection_parameter(config);
         if (status < E_OK)
-        {
                 goto HOST_CON_ERR;
-        }
 
-        config->connection_info.socket_fd = create_client_socket(AF_INET);
-        if (config->connection_info.socket_fd < 0)
-        {
-                LOG_ERROR("connection failed, error code: %d\n", errno);
-                status = SOCKET_ERR;
-                goto SOCKET_CON_ERR;
-        }
-
-        if (connect(config->connection_info.socket_fd,
-                    (struct sockaddr*) &config->connection_info.IP_v4,
-                    sizeof(config->connection_info.IP_v4)) < 0)
-        {
-
-                LOG_ERROR("connection failed, error code: %d\n", errno);
-                status = SOCKET_ERR;
-                goto SOCKET_CON_ERR;
-        }
+        status = establish_host_connection(config);
+        if(status < E_OK)
+                goto HOST_CON_ERR;
 
         config->request = allocate_http_request();
 
@@ -181,8 +220,6 @@ enum kritis3m_status_info quest_init(struct quest_configuration* config)
                               config->connection_info.hostname,
                               config->connection_info.hostport,
                               config->key_ID);
-
-SOCKET_CON_ERR:
         return status;
 
 HOST_CON_ERR:
@@ -194,11 +231,19 @@ enum kritis3m_status_info quest_send_request(struct quest_configuration* config)
 {
         enum kritis3m_status_info status = E_OK;
         duration timeout = ms_to_duration(TIMEOUT_DURATION);
+        
+        /* if enable_secure_con is true, we use HTTPS */
+        if(config->security_param.enable_secure_con)
+        {
+                status = https_client_req(config->connection_info.socket_fd, config->security_param.tls_session, 
+                        config->request, timeout, config->response);
+        }
+        else /* otherwise we use standard HTTP */
+        {
+                status = http_client_req(config->connection_info.socket_fd,
+                        config->request, timeout, config->response);
+        }
 
-        status = http_client_req(config->connection_info.socket_fd,
-                                 config->request,
-                                 timeout,
-                                 config->response);
         if (status < 0)
         {
                 LOG_ERROR("failed to send HTTP-GET request, error code: %d\n", status);
