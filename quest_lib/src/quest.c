@@ -92,50 +92,6 @@ static enum kritis3m_status_info derive_connection_parameter(struct quest_config
         return E_OK;
 }
 
-/// @brief If the connection to the QKD line key management interface is secured via HTTPS,
-///        we need to establish the Agile Security Library (ASL) to verify the server 
-///        certificate and encrypt the communication with the server.
-/// @param config quest_configuration containing the fields for the security_params populated
-///        in this function.
-/// @return returns E_OK if working correctly, otherwise returns an error code less than zero.
-static enum kritis3m_status_info initialize_asl_library(struct quest_configuration* config)
-{
-        asl_configuration asl_config = asl_default_config();
-        if(asl_init(&asl_config) < 0)
-                return ASL_ERR;
-        
-        certificates certs = get_empty_certificates();
-        asl_endpoint_configuration endpoint_config = asl_default_endpoint_config();
-        
-        /* set certificate and key paths */
-        certs.root_path        = "../build/_deps/kritis3m_applications-build/quest_lib/certs/root.pem";
-        certs.certificate_path = "../build/_deps/kritis3m_applications-build/quest_lib/certs/chain.pem";
-        certs.private_key_path = "../build/_deps/kritis3m_applications-build/quest_lib/certs/privateKey.pem";
-        
-        /*read certificates into buffer */
-        if(read_certificates(&certs) != 0)
-                return ASL_ERR;
-        
-        /* assign cert chain buffer and size to the asl_endpoint_config */
-        endpoint_config.device_certificate_chain.buffer = certs.chain_buffer;
-        endpoint_config.device_certificate_chain.size = certs.chain_buffer_size;
-
-        /* assign private key buffer and size to the asl_endpoint_config */
-        endpoint_config.private_key.buffer = certs.key_buffer;
-        endpoint_config.private_key.size = certs.key_buffer_size;
-
-        /* assign root cert buffer and size to the asl_endpoint_config */
-        endpoint_config.root_certificate.buffer = certs.root_buffer;
-        endpoint_config.root_certificate.size = certs.root_buffer_size;
-
-        /* set mutual authentication to false */
-        endpoint_config.mutual_authentication = false;
-
-        config->security_param.client_endpoint = asl_setup_client_endpoint(&endpoint_config);         
-
-        return E_OK;
-}
-
 /*------------------------------- public functions -------------------------------*/
 struct quest_configuration* quest_default_config(void)
 {
@@ -193,13 +149,6 @@ enum kritis3m_status_info quest_deinit(struct quest_configuration* config)
 enum kritis3m_status_info quest_init(struct quest_configuration* config)
 {
         enum kritis3m_status_info status = E_OK;
-
-        if(config->security_param.enable_secure_con)
-        {
-                status = initialize_asl_library(config);
-                if(status < E_OK)
-                        goto HOST_CON_ERR;
-        }
 
         status = derive_connection_parameter(config);
         if (status < E_OK)

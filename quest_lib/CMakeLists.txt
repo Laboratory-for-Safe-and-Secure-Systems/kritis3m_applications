@@ -25,8 +25,3 @@ target_link_libraries(kritis3m-quest PUBLIC kritis3m-http-libs)
 
 # Link against the kritis3m_applications_common
 target_link_libraries(kritis3m-quest PUBLIC kritis3m_applications_common)
-
-# Copy the certificates and keys into the build folder
-file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/certs/chain.pem DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/certs/)
-file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/certs/privateKey.pem DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/certs/)
-file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/certs/root.pem DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/certs/)
