@@ -57,7 +57,7 @@ struct quest_configuration
 
         } connection_info;
 
-        struct 
+        struct
         {
                 /* Use HTTPS connection instead of HTTP */
                 bool enable_secure_con;
@@ -67,7 +67,7 @@ struct quest_configuration
 
                 /* OPTIONAL parameter for HTTPS communication */
                 asl_session* tls_session;
-        
+
         } security_param;
 
         /* Specify which type of HTTP-GET message shall be sent */
