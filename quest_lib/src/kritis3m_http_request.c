@@ -3,24 +3,6 @@
 
 LOG_MODULE_CREATE(kritis3m_http_request);
 
-#if (TMP_KEY)
-/// @brief This function serves as temporary fix to insert key material into the TLS application.
-///        As soon, as the QKD line problem is resolved, this code must be removed from the
-///        library implementation!
-/// @param response http_response object containing message information and returns the key info
-///        to the sender of the http_get call.
-static void insert_temporary_key(struct http_get_response* response)
-{
-        char temp_key[] = "1111 1111 1111 1111 1111 1111 11\0";
-        char temp_key_ID[] = "2222 2222 2222 2222 2222 2222 22\0";
-
-        memcpy(response->key_info->key, &temp_key, strlen(temp_key));
-        memcpy(response->key_info->key_ID, &temp_key_ID, strlen(temp_key_ID));
-
-        response->key_info->key_len = strlen(temp_key);
-}
-#endif
-
 static void manage_request_error(struct http_get_response* response, cJSON* data)
 {
         cJSON* error_msg = cJSON_GetObjectItemCaseSensitive(data, "message");
@@ -38,11 +20,6 @@ static void manage_request_error(struct http_get_response* response, cJSON* data
                 response->bytes_received = 0;
                 response->buffer_frag_start = NULL;
         }
-
-#if (TMP_KEY)
-        /* this call is a fix, which can be deactivated as CMAKE option, once the QKD line is fixed */
-        insert_temporary_key(response);
-#endif
 }
 
 static void derive_key_info(struct http_get_response* response, cJSON* data)

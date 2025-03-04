@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "asl.h"
 #include "http_client.h"
 #include "http_method.h"
 #include "kritis3m_http_request.h"
@@ -29,6 +30,7 @@ enum kritis3m_status_info
         WOLFSSL_ERR = -5,
         ADDR_ERR = -6,
         CON_ERR = -7,
+        ASL_ERR = -8,
 };
 
 struct quest_configuration
@@ -48,12 +50,25 @@ struct quest_configuration
                 char* hostport;
 
                 /* IP_v4 address used for host connection*/
-                struct sockaddr_in IP_v4;
+                struct addrinfo* IP_v4;
 
                 /* IP_v4 string for readability */
                 char IP_str[INET6_ADDRSTRLEN];
 
         } connection_info;
+
+        struct
+        {
+                /* Use HTTPS connection instead of HTTP */
+                bool enable_secure_con;
+
+                /* OPTIONAL parameter for asl client endpoint */
+                asl_endpoint* client_endpoint;
+
+                /* OPTIONAL parameter for HTTPS communication */
+                asl_session* tls_session;
+
+        } security_param;
 
         /* Specify which type of HTTP-GET message shall be sent */
         enum http_get_request_type request_type;
