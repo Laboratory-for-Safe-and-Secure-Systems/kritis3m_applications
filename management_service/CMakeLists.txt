@@ -5,6 +5,7 @@ add_library(kritis3m_service STATIC
         ${CMAKE_CURRENT_SOURCE_DIR}/src/kritis3m_configuration.c
         ${CMAKE_CURRENT_SOURCE_DIR}/src/configuration_parser.c
         ${CMAKE_CURRENT_SOURCE_DIR}/src/http_service.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/control_plane_conn.c
 
         # ${CMAKE_CURRENT_SOURCE_DIR}/src/zephyr_timerfd.c
 )
