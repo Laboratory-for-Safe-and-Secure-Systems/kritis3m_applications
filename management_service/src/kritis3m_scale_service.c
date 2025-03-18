@@ -2,12 +2,14 @@
 #include <pthread.h>
 #include <string.h>
 #include <unistd.h>
+#include <signal.h>
+#include <time.h>
+#include <sys/timerfd.h>
 
 #include "logging.h"
 #include "networking.h"
 #include "control_plane_conn.h"
 #include "poll_set.h"
-// #include "sys/timerfd.h"
 
 #include "cJSON.h"
 #include "http_client.h"
@@ -23,9 +25,9 @@ LOG_MODULE_CREATE(kritis3m_service);
 #define DISTRIBUTION_BUFFER_SIZE 3000
 #define POLICY_RESP_BUFFER_SIZE 1000
 #define HEARTBEAT_REQ_BUFFER_SIZE 1000
+#define HELLO_INTERVAL_SEC 60  // Send hello message every 60 seconds
 
 // main kritis3m_service module type
-//  Variable static struct kritis3m_service svc = {0}, single instance used by the kritis3m_service module
 struct kritis3m_service
 {
         bool initialized;
@@ -37,6 +39,8 @@ struct kritis3m_service
         poll_set pollfd;
         asl_endpoint_configuration management_endpoint_config;
         asl_endpoint* client_endpoint;
+        int hello_timer_fd;  // File descriptor for the hello timer
+        bool timer_initialized;
 };
 
 // ipc services
@@ -45,6 +49,11 @@ enum service_message_type
         SVC_MSG_RESPONSE,
         SVC_MSG_KRITIS3M_SERVICE_STOP,
         SVC_MSG_APPLICATION_MANGER_STATUS_REQ,
+        SVC_MSG_CTRLPLANE_CERT_GET_REQ,
+        SVC_MSG_DATAPLANE_CERT_GET_REQ,
+        SVC_MSG_DATAPLANE_CERT_APPLY_REQ,
+        SVC_MSG_CTRLPLANE_CERT_APPLY_REQ,
+        SVC_MSG_DATAPLANE_CONFIG_APPLY_REQ,
 }__attribute__((aligned(4)));
 
 /**
@@ -61,6 +70,17 @@ typedef struct service_message
                 {
                         ApplicationManagerStatus status;
                 } appl_status;
+                struct cert_apply_req
+                {
+                        char* buffer;
+                        int buffer_len;
+                } cert_apply;
+                struct config_apply_req
+                {
+                        char* config;
+                        int config_len;
+                        void* cb;  // Store callback as void pointer
+                } config_apply;
         } payload;
 } service_message;
 
@@ -73,6 +93,9 @@ void init_configuration_manager(ConfigurationManager* manager, Kritis3mNodeConfi
 int prepare_all_interfaces(HardwareConfiguration hw_config[], int num_configs);
 // http
 void cleanup_kritis3m_service();
+// timer
+static int init_hello_timer(struct kritis3m_service* svc);
+static void cleanup_hello_timer(struct kritis3m_service* svc);
 
 /* ----------------------- MAIN kritis3m_service module -------------------------*/
 static struct kritis3m_service svc = {0};
@@ -89,6 +112,7 @@ void set_kritis3m_serivce_defaults(struct kritis3m_service* svc)
         pthread_attr_init(&svc->thread_attr);
         pthread_attr_setdetachstate(&svc->thread_attr, PTHREAD_CREATE_JOINABLE);
         poll_set_init(&svc->pollfd);
+        svc->timer_initialized = false;
 }
 
 /**
@@ -158,6 +182,12 @@ int start_kritis3m_service(char* config_file, int log_level)
                 goto error_occured;
         }
 
+        // Initialize hello timer
+        ret = init_hello_timer(&svc);
+        if (ret < 0) {
+                LOG_ERROR("Failed to initialize hello timer");
+                goto error_occured;
+        }
 
         // 4. initialization of configuration manager
         /**
@@ -241,6 +271,14 @@ void* kritis3m_service_main_thread(void* arg)
                 goto terminate;
         }
 
+        // Add hello timer to poll set
+        ret = poll_set_add_fd(&svc->pollfd, svc->hello_timer_fd, POLLIN | POLLERR);
+        if (ret < 0)
+        {
+                LOG_ERROR("Failed to add hello timer to poll set");
+                goto terminate;
+        }
+
         // 8. Start application manager
         ret = start_application_manager(&application_configuration_manager.primary.application_config);
         if (ret < 0)
@@ -254,7 +292,6 @@ void* kritis3m_service_main_thread(void* arg)
 
         while (1)
         {
-
                 ret = poll(svc->pollfd.fds, svc->pollfd.num_fds, -1);
 
                 if (ret == -1)
@@ -302,6 +339,24 @@ void* kritis3m_service_main_thread(void* arg)
                                                           "message");
                                                 goto terminate;
                                         }
+                                }
+                        }
+                        /* Check hello timer */
+                        else if (fd == svc->hello_timer_fd)
+                        {
+                                if (event & POLLIN)
+                                {
+                                        uint64_t exp;
+                                        ssize_t s = read(svc->hello_timer_fd, &exp, sizeof(uint64_t));
+                                        if (s == sizeof(uint64_t))
+                                        {
+                                                enum MSG_RESPONSE_CODE ret = send_hello_message(true);
+                                                if (ret != MSG_OK) {
+                                                        LOG_ERROR("Failed to send hello message: %d", ret);
+                                                }
+                                        }
+                                }else if (event & POLLERR) {
+                                LOG_ERROR("hello timer error");
                                 }
                         }
                 }
@@ -416,6 +471,9 @@ ManagementReturncode handle_svc_message(int socket, service_message* msg, int cf
         {
         case SVC_MSG_APPLICATION_MANGER_STATUS_REQ:
                 {
+                        LOG_INFO("Received application manager status request");
+                        response_code = MSG_OK;
+                        break;
                 }
         case SVC_MSG_KRITIS3M_SERVICE_STOP:
                 {
@@ -423,6 +481,39 @@ ManagementReturncode handle_svc_message(int socket, service_message* msg, int cf
                         LOG_INFO("Kritis3m service: Received Stop Request");
                         response_code = MSG_OK;
                         return_code = MGMT_THREAD_STOP;
+                        break;
+                }
+        case SVC_MSG_CTRLPLANE_CERT_GET_REQ:
+                {
+                        LOG_INFO("Received control plane certificate get request");
+                        response_code = MSG_OK;
+                        break;
+                }
+        case SVC_MSG_DATAPLANE_CERT_GET_REQ:
+                {
+                        LOG_INFO("Received data plane certificate get request");
+                        response_code = MSG_OK;
+                        break;
+                }
+        case SVC_MSG_DATAPLANE_CERT_APPLY_REQ:
+                {
+                        LOG_INFO("Received data plane certificate apply request");
+                        LOG_INFO("Buffer length: %d", msg->payload.cert_apply.buffer_len);
+                        response_code = MSG_OK;
+                        break;
+                }
+        case SVC_MSG_CTRLPLANE_CERT_APPLY_REQ:
+                {
+                        LOG_INFO("Received control plane certificate apply request");
+                        LOG_INFO("Buffer length: %d", msg->payload.cert_apply.buffer_len);
+                        response_code = MSG_OK;
+                        break;
+                }
+        case SVC_MSG_DATAPLANE_CONFIG_APPLY_REQ:
+                {
+                        LOG_INFO("Received data plane config apply request");
+                        LOG_INFO("Config length: %d", msg->payload.config_apply.config_len);
+                        response_code = MSG_OK;
                         break;
                 }
         case SVC_MSG_RESPONSE:
@@ -452,7 +543,138 @@ error_occured:
 void cleanup_kritis3m_service()
 {
         svc.initialized = false;
+        cleanup_hello_timer(&svc);
         free_NodeConfig(&svc.node_configuration);
         cleanup_configuration_manager(&svc.configuration_manager);
+}
+
+enum MSG_RESPONSE_CODE ctrlplane_cert_get_req()
+{
+        if (!svc.initialized || svc.management_socket[THREAD_EXT] < 0)
+        {
+                LOG_ERROR("Kritis3m_service is not initialized");
+                return MSG_ERROR;
+        }
+
+        service_message request = {0};
+        request.msg_type = SVC_MSG_CTRLPLANE_CERT_GET_REQ;
+        return external_management_request(svc.management_socket[THREAD_EXT], &request, sizeof(request));
+}
+
+enum MSG_RESPONSE_CODE dataplane_cert_get_req()
+{
+        if (!svc.initialized || svc.management_socket[THREAD_EXT] < 0)
+        {
+                LOG_ERROR("Kritis3m_service is not initialized");
+                return MSG_ERROR;
+        }
+
+        service_message request = {0};
+        request.msg_type = SVC_MSG_DATAPLANE_CERT_GET_REQ;
+        return external_management_request(svc.management_socket[THREAD_EXT], &request, sizeof(request));
+}
+
+enum MSG_RESPONSE_CODE dataplane_cert_apply_req(char* buffer, int buffer_len)
+{
+        if (!svc.initialized || svc.management_socket[THREAD_EXT] < 0)
+        {
+                LOG_ERROR("Kritis3m_service is not initialized");
+                return MSG_ERROR;
+        }
+
+        if (!buffer || buffer_len <= 0)
+        {
+                LOG_ERROR("Invalid buffer parameters");
+                return MSG_ERROR;
+        }
+
+        service_message request = {0};
+        request.msg_type = SVC_MSG_DATAPLANE_CERT_APPLY_REQ;
+        request.payload.cert_apply.buffer = buffer;
+        request.payload.cert_apply.buffer_len = buffer_len;
+        return external_management_request(svc.management_socket[THREAD_EXT], &request, sizeof(request));
+}
+
+enum MSG_RESPONSE_CODE ctrlplane_cert_apply_req(char* buffer, int buffer_len)
+{
+        if (!svc.initialized || svc.management_socket[THREAD_EXT] < 0)
+        {
+                LOG_ERROR("Kritis3m_service is not initialized");
+                return MSG_ERROR;
+        }
+
+        if (!buffer || buffer_len <= 0)
+        {
+                LOG_ERROR("Invalid buffer parameters");
+                return MSG_ERROR;
+        }
+
+        service_message request = {0};
+        request.msg_type = SVC_MSG_CTRLPLANE_CERT_APPLY_REQ;
+        request.payload.cert_apply.buffer = buffer;
+        request.payload.cert_apply.buffer_len = buffer_len;
+        return external_management_request(svc.management_socket[THREAD_EXT], &request, sizeof(request));
+}
+
+enum MSG_RESPONSE_CODE dataplane_config_apply_req(char* config, int config_len, config_status_cb cb)
+{
+        if (!svc.initialized || svc.management_socket[THREAD_EXT] < 0)
+        {
+                LOG_ERROR("Kritis3m_service is not initialized");
+                return MSG_ERROR;
+        }
+
+        if (!config || config_len <= 0)
+        {
+                LOG_ERROR("Invalid config parameters");
+                return MSG_ERROR;
+        }
+
+        service_message request = {0};
+        request.msg_type = SVC_MSG_DATAPLANE_CONFIG_APPLY_REQ;
+        request.payload.config_apply.config = config;
+        request.payload.config_apply.config_len = config_len;
+        request.payload.config_apply.cb = (void*)cb;  // Cast callback to void pointer
+        return external_management_request(svc.management_socket[THREAD_EXT], &request, sizeof(request));
+}
+
+static int init_hello_timer(struct kritis3m_service* svc)
+{
+        struct itimerspec its;
+        int ret;
+
+        // Create timer file descriptor
+        svc->hello_timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
+        if (svc->hello_timer_fd == -1) {
+                LOG_ERROR("Failed to create hello timer: %s", strerror(errno));
+                return -1;
+        }
+
+        // Set timer interval
+        its.it_value.tv_sec = HELLO_INTERVAL_SEC;
+        its.it_value.tv_nsec = 0;
+        its.it_interval.tv_sec = HELLO_INTERVAL_SEC;
+        its.it_interval.tv_nsec = 0;
+
+        // Start timer
+        ret = timerfd_settime(svc->hello_timer_fd, 0, &its, NULL);
+        if (ret != 0) {
+                LOG_ERROR("Failed to start hello timer: %s", strerror(errno));
+                close(svc->hello_timer_fd);
+                return -1;
+        }
+
+        svc->timer_initialized = true;
+        LOG_INFO("Hello timer initialized successfully");
+        return 0;
+}
+
+static void cleanup_hello_timer(struct kritis3m_service* svc)
+{
+        if (svc->timer_initialized) {
+                close(svc->hello_timer_fd);
+                svc->timer_initialized = false;
+                LOG_INFO("Hello timer cleaned up");
+        }
 }
 
