@@ -79,19 +79,6 @@ enum ApplicationStatus
         APK_OK = 0,
 };
 
-/**
- * @brief Enumeration of IPC return codes.
- *
- * This enumeration defines the response codes used for inter-process communication (IPC),
- * indicating the status of a message or request.
- */
-enum MSG_RESPONSE_CODE
-{
-        MSG_ERROR = -1,    /**< Indicates an error occurred. */
-        MSG_OK = 0,        /**< Indicates the operation was successful. */
-        MSG_FORBIDDEN = 1, /**< Indicates the request was forbidden. */
-        MSG_BUSY = 2,      /**< Indicates the system is currently busy. */
-};
 
 /**
  * @brief Enumeration of services used to identify requests in the HTTP module.
@@ -108,6 +95,7 @@ enum used_service
         MGMT_SEND_STATUS_REQ, /**< Request to send the status to the management server. */
         MGMT_POLICY_CONFIRM,  /**< Request to confirm the management policy. */
 };
+
 
 typedef struct SystemConfiguration SystemConfiguration;
 struct SystemConfiguration;
@@ -351,6 +339,11 @@ char* applicationManagerStatusToJson(const ApplicationManagerStatus* status,
 /*-------------------------- Networking Functions ---------------------------------*/
 // net helper methods
 int parse_addr_toKritis3maddr(char* ip_port, Kritis3mSockaddr* dst);
+
+
+
+
+
 // creates filepaths of certificates and reads certificate
 int load_certificates(crypto_identity* identity);
 // obtains endpoint configuration from crypto identity and crypto_profile object

@@ -79,15 +79,6 @@ int create_listening_socket(int type, struct sockaddr* addr, socklen_t addr_len)
  */
 int create_client_socket(int type);
 
-/* Read from a socket pair 
-* Return value is the number of bytes read or -1 in case of an error
-*/
-int sockpair_read(int socket, void* buffer, size_t length);
-
-/* Write to a socket pair 
-* Return value is the number of bytes written or -1 in case of an error
-*/
-int sockpair_write(int socket, void* buffer, size_t length, size_t* retries);
 
 /* Configure a peer socket obtained from an accept() call to a listening socket.
  *

@@ -622,12 +622,6 @@ ManagementReturncode handle_management_message(int fd, struct application_manage
                                         status.running_applications++;
                                 }
                         }
-                        // notify kritis3m_service
-                        ret = req_send_status_report(status);
-                        if (ret < 0)
-                        {
-                                LOG_ERROR("application_manager: couldnt send status report");
-                        }
 
                         status.Status = APK_OK;
                         return MGMT_OK;

@@ -2,9 +2,9 @@
 #define KRITIS3M_SCALE_SERVICE_H
 
 #include "kritis3m_configuration.h"
+#include "control_plane_conn.h"
+#include "ipc.h"
 
-
-int req_send_status_report(ApplicationManagerStatus manager_status);
 
 /**
  * @brief Starts the `kritis3m_service` module.
@@ -22,7 +22,26 @@ int req_send_status_report(ApplicationManagerStatus manager_status);
  */
 int start_kritis3m_service(char* config_file, int log_level);
 
+enum MSG_RESPONSE_CODE req_send_status_report(ApplicationManagerStatus manager_status);
+
 //stops kritis3m_scale service
-int stop_kritis3m_service();
+enum MSG_RESPONSE_CODE stop_kritis3m_service();
+
+enum MSG_RESPONSE_CODE ctrlplane_cert_get_req();
+enum MSG_RESPONSE_CODE dataplane_cert_get_req();
+
+enum MSG_RESPONSE_CODE dataplane_cert_apply_req(char* buffer, int buffer_len);
+enum MSG_RESPONSE_CODE ctrlplane_cert_apply_req(char* buffer, int buffer_len);
+
+//returns callback which is used by control plane conn to await signal for synchronous update
+//cb: callback function
+//arg: argument to pass to the callback
+typedef int config_status_cb(void*);
+enum MSG_RESPONSE_CODE dataplane_config_apply_req(char* config, int config_len, config_status_cb cb);
+
+
+
+
+
 
 #endif // KRITIS3M_SCALE_SERVICE_H

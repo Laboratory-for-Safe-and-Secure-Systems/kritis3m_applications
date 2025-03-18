@@ -3,6 +3,7 @@
 
 #include "asl.h"
 #include "kritis3m_configuration.h"
+#include "ipc.h"
 #include <stdbool.h>
 
 
@@ -28,11 +29,6 @@ int init_control_plane_conn();
  */
 int start_control_plane_conn(struct control_plane_conn_config_t* conn);
 
-/**
- * Stop the control plane connection
- * @return Returns 0 on success, non-zero error code otherwise
- */
-ManagementReturncode stop_control_plane_conn();
 
 /**
  * Clean up resources used by the control plane connection
@@ -44,20 +40,37 @@ void cleanup_control_plane_conn();
  * @param value The hello value to send (true/false)
  * @return Returns a ManagementReturncode indicating the result
  */
-ManagementReturncode send_hello_message(bool value);
+enum MSG_RESPONSE_CODE send_hello_message(bool value);
 
 /**
  * Send a log message to the control plane
  * @param message The log message to send
  * @return Returns a ManagementReturncode indicating the result
  */
-ManagementReturncode send_log_message(const char* message);
+enum MSG_RESPONSE_CODE send_log_message(const char* message);
+
+/**
+ * Stop the control plane connection
+ * @return Returns 0 on success, non-zero error code otherwise
+ */
+enum MSG_RESPONSE_CODE stop_control_plane_conn();
+
+enum policy_status{
+    CERT_REQ_RECEIVED,
+    CERT_RECEIVED,
+    CERT_APPLIED,
+
+    CONFIG_RECEIVED , 
+    CONFIG_USABLE,
+    CONFIG_APPLIED,
+
+}; 
 
 /**
  * Send a policy status to the control plane
  * @param status The policy status to send
- * @return Returns a ManagementReturncode indicating the result
+ * @return Returns a MSG_RESPONSE_CODE indicating the result
  */
-ManagementReturncode send_policy_status(const char* status);
+enum MSG_RESPONSE_CODE send_policy_status(const char* status);
 
 #endif // CONTROL_PLANE_CONN_H

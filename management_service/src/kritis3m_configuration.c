@@ -21,6 +21,9 @@ const char* identity_folder_names[max_identities] = {"management_service",
 
 static ConfigurationManager config_manger;
 
+
+
+
 int get_Kritis3mNodeConfiguration(char* filename, Kritis3mNodeConfiguration* config)
 {
         int ret = 0;
