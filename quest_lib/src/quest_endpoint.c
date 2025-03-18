@@ -18,7 +18,7 @@ static enum kritis3m_status_info derive_connection_parameter(quest_endpoint* end
         int status;
 
         /* temporary fix to connect to mock-server */
-        endpoint->connection_info.hostname = "127.0.0.2";
+        endpoint->connection_info.hostname = "192.168.0.1";
 
         /* Look-up IP address from hostname and hostport */
         status = address_lookup_client(endpoint->connection_info.hostname,

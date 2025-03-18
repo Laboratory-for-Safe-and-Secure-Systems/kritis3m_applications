@@ -203,6 +203,9 @@ static void populate_key_with_id_url(struct http_request* request, char* key_ID)
                 return;
         }
 
+        /* Initialize request url buffer with zero values */
+        memset((char*)request->url, 0, total_len);
+
         // Copy the base URL and concatenate the key
         strcpy((char*) request->url, base_url);
         strcat((char*) request->url, key_ID);

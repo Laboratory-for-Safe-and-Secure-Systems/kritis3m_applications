@@ -5,6 +5,8 @@
 #include "kritis3m_http_request.h"
 #include "quest.h"
 
+#define KEY_ID_LEN 64
+
 /*------------------------------ private structures ------------------------------*/
 struct quest_transaction
 {
@@ -31,7 +33,7 @@ struct quest_transaction
         struct http_get_response* response;
 
         /* OPTIONAL parameter for HTTP-GET WITH KEY ID */
-        char key_ID[33];
+        char key_ID[KEY_ID_LEN];
 };
 
 struct quest_endpoint
