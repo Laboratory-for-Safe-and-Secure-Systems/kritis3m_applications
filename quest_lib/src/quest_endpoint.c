@@ -129,5 +129,8 @@ enum kritis3m_status_info quest_free_endpoint(quest_endpoint* endpoint)
                 asl_free_endpoint(endpoint->security_param.client_endpoint);
         }
 
+        if (endpoint != NULL)
+                free(endpoint);
+
         return E_OK;
 }

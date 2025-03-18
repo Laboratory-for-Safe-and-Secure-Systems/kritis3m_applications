@@ -254,5 +254,8 @@ enum kritis3m_status_info quest_free_transaction(quest_transaction* qkd_transact
                 deinit_http_response(qkd_transaction->response);
         }
 
+        if (qkd_transaction != NULL)
+                free(qkd_transaction);
+
         return E_OK;
 }
