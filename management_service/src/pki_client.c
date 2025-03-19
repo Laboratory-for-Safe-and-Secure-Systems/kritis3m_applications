@@ -588,7 +588,7 @@ void cleanup_pki_client()
         }
         if (client.sock != -1)
         {
-                close(client.sock);
+                closesocket(client.sock);
                 client.sock = -1;
         }
         if (client.sockpair[THREAD_EXT] != -1)
@@ -655,6 +655,10 @@ enum MSG_RESPONSE_CODE dataplane_enroll_request()
         {
                 return MSG_ERROR;
         }
+
+        struct pki_msg_t msg = {0};
+        msg.msg_type = PKI_CLIENT_DATAPLANE_ENROLL_REQUEST;
+        return external_management_request(client.sockpair[THREAD_EXT], &msg, sizeof(msg));
 }
 
 enum MSG_RESPONSE_CODE controlplane_enroll_request()

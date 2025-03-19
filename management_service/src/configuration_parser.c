@@ -2,6 +2,7 @@
 #include <stdlib.h>
 
 #include "cJSON.h"
+#include "configuration_manager.h"
 #include "configuration_parser.h"
 #include "errno.h"
 #include "file_io.h"
@@ -19,6 +20,193 @@ int parse_crypo_config(cJSON* json_obj,
                        char* pin);
 int parse_crypo_identity(cJSON* json_obj, crypto_identity* crypto_identity, char* crypto_identity_path);
 int parse_application(cJSON* json_obj, Kritis3mApplications* application);
+
+int parse_buffer_to_sysconfig(char* json_buffer, int json_buffer_size, struct sysconfig* config)
+{
+        int ret = 0;
+        cJSON* root = cJSON_ParseWithLength(json_buffer, json_buffer_size);
+        if (!root)
+        {
+                LOG_ERROR("Failed to parse JSON buffer");
+                return -1;
+        }
+
+        // Parse serial number
+        cJSON* serial_number = cJSON_GetObjectItem(root, "serial_number");
+        if (!serial_number || !cJSON_IsString(serial_number))
+        {
+                LOG_ERROR("Invalid or missing serial_number");
+                goto error;
+        }
+        config->serial_number = duplicate_string(serial_number->valuestring);
+
+        // Parse active states
+        cJSON* dataplane_active = cJSON_GetObjectItem(root, "dataplane_active");
+        if (!dataplane_active || !cJSON_IsNumber(dataplane_active))
+        {
+                LOG_ERROR("Invalid or missing dataplane_active");
+                goto error;
+        }
+        config->dataplane_active = dataplane_active->valueint;
+
+        cJSON* controlplane_active = cJSON_GetObjectItem(root, "controlplane_active");
+        if (!controlplane_active || !cJSON_IsNumber(controlplane_active))
+        {
+                LOG_ERROR("Invalid or missing controlplane_active");
+                goto error;
+        }
+        config->controlplane_active = controlplane_active->valueint;
+
+        cJSON* application_active = cJSON_GetObjectItem(root, "application_active");
+        if (!application_active || !cJSON_IsNumber(application_active))
+        {
+                LOG_ERROR("Invalid or missing application_active");
+                goto error;
+        }
+        config->application_active = application_active->valueint;
+
+        // Parse broker configuration
+        cJSON* broker = cJSON_GetObjectItem(root, "broker");
+        if (!broker || !cJSON_IsObject(broker))
+        {
+                LOG_ERROR("Invalid or missing broker configuration");
+                goto error;
+        }
+
+        cJSON* broker_host = cJSON_GetObjectItem(broker, "host");
+        if (!broker_host || !cJSON_IsString(broker_host))
+        {
+                LOG_ERROR("Invalid or missing broker host");
+                goto error;
+        }
+        config->broker_host = duplicate_string(broker_host->valuestring);
+
+        cJSON* broker_port = cJSON_GetObjectItem(broker, "port");
+        if (!broker_port || !cJSON_IsNumber(broker_port))
+        {
+                LOG_ERROR("Invalid or missing broker port");
+                goto error;
+        }
+        config->broker_port = broker_port->valueint;
+
+        // Parse EST configuration
+        cJSON* est = cJSON_GetObjectItem(root, "est");
+        if (!est || !cJSON_IsObject(est))
+        {
+                LOG_ERROR("Invalid or missing EST configuration");
+                goto error;
+        }
+
+        cJSON* est_host = cJSON_GetObjectItem(est, "host");
+        if (!est_host || !cJSON_IsString(est_host))
+        {
+                LOG_ERROR("Invalid or missing EST host");
+                goto error;
+        }
+        config->est_host = duplicate_string(est_host->valuestring);
+
+        cJSON* est_port = cJSON_GetObjectItem(est, "port");
+        if (!est_port || !cJSON_IsNumber(est_port))
+        {
+                LOG_ERROR("Invalid or missing EST port");
+                goto error;
+        }
+        config->est_port = est_port->valueint;
+
+        config->endpoint_config = malloc(sizeof(asl_endpoint_configuration));
+        if (config->endpoint_config == NULL)
+        {
+                LOG_ERROR("Failed to allocate memory for endpoint configuration");
+
+                // Parse endpoint configuration
+                cJSON* endpoint_config = cJSON_GetObjectItem(root, "endpoint_config");
+                if (!endpoint_config || !cJSON_IsObject(endpoint_config))
+                {
+                        LOG_ERROR("Invalid or missing endpoint configuration");
+                        goto error;
+                }
+
+                cJSON* kex = cJSON_GetObjectItem(endpoint_config, "kex");
+                if (!kex || !cJSON_IsString(kex))
+                {
+                        LOG_ERROR("Invalid or missing KEX configuration");
+                        goto error;
+                }
+                // Map KEX string to enum value
+                if (strcmp(kex->valuestring, "KEX_DEFAULT") == 0)
+                {
+                        config->endpoint_config->key_exchange_method = ASL_KEX_DEFAULT;
+                }
+                else if (strcmp(kex->valuestring, "KEX_CLASSIC_SECP256") == 0)
+                {
+                        config->endpoint_config->key_exchange_method = ASL_KEX_CLASSIC_SECP256;
+                }
+                else if (strcmp(kex->valuestring, "KEX_CLASSIC_SECP384") == 0)
+                {
+                        config->endpoint_config->key_exchange_method = ASL_KEX_CLASSIC_SECP384;
+                }
+                else if (strcmp(kex->valuestring, "KEX_CLASSIC_SECP521") == 0)
+                {
+                        config->endpoint_config->key_exchange_method = ASL_KEX_CLASSIC_SECP521;
+                }
+                else if (strcmp(kex->valuestring, "KEX_CLASSIC_X25519") == 0)
+                {
+                        config->endpoint_config->key_exchange_method = ASL_KEX_CLASSIC_X25519;
+                }
+                else if (strcmp(kex->valuestring, "KEX_CLASSIC_X448") == 0)
+                {
+                        config->endpoint_config->key_exchange_method = ASL_KEX_CLASSIC_X448;
+                }
+                else
+                {
+                        LOG_ERROR("Unsupported KEX method: %s", kex->valuestring);
+                        goto error;
+                }
+
+                cJSON* mtls = cJSON_GetObjectItem(endpoint_config, "mtls");
+                if (!mtls || !cJSON_IsBool(mtls))
+                {
+                        LOG_ERROR("Invalid or missing mTLS configuration");
+                        goto error;
+                }
+                config->endpoint_config->mutual_authentication = cJSON_IsTrue(mtls);
+
+                cJSON* keylog_path = cJSON_GetObjectItem(endpoint_config, "keylog_path");
+                if (keylog_path && cJSON_IsString(keylog_path))
+                {
+                        config->endpoint_config->keylog_file = duplicate_string(
+                                keylog_path->valuestring);
+                }
+                else
+                {
+                        config->endpoint_config->keylog_file = NULL;
+                }
+
+                cJSON* cipher_suites = cJSON_GetObjectItem(endpoint_config, "cipher_suites");
+                if (!cipher_suites || !cJSON_IsString(cipher_suites))
+                {
+                        LOG_ERROR("Invalid or missing cipher suites configuration");
+                        goto error;
+                }
+                config->endpoint_config->ciphersuites = duplicate_string(cipher_suites->valuestring);
+
+                // Parse log level
+                cJSON* log_level = cJSON_GetObjectItem(root, "log_level");
+                if (!log_level || !cJSON_IsNumber(log_level))
+                {
+                        LOG_ERROR("Invalid or missing log level");
+                        goto error;
+                }
+                config->log_level = log_level->valueint;
+
+                cJSON_Delete(root);
+                return ret;
+
+        error:
+                cJSON_Delete(root);
+                return -1;
+        }
+}
 
 int parse_json_to_ManagementConfig(cJSON* json_management_service,
                                    Kritis3mManagemntConfiguration* config,
@@ -133,7 +321,9 @@ int parse_json_to_ManagementConfig(cJSON* json_management_service,
 
 error_occured:
         ret = -1;
-        LOG_ERROR("can't parse management serivce configuation, error occured with errno: %d", errno);
+        LOG_ERROR("can't parse management serivce configuation, error occured with errno: "
+                  "%d",
+                  errno);
         return ret;
 }
 
@@ -329,7 +519,7 @@ ManagementReturncode parse_buffer_to_SystemConfiguration(char* json_buffer,
         retval = parse_whitelist(item, &config->application_config.whitelist);
         if (retval < MGMT_OK)
                 goto error_occured;
-        /***********************************END  WHITELIST  **********************************/
+        /***********************************END  WHITELIST **********************************/
 
         /*********************************** HW_CONFIG      **********************************/
 
