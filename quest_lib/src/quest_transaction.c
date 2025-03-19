@@ -125,6 +125,9 @@ quest_transaction* quest_setup_transaction(quest_endpoint* endpoint,
                 return NULL;
         }
 
+        /* Ensure all buffers of the transaction are zero */
+        memset(qkd_transaction, 0, sizeof(struct quest_transaction));
+
         status = configure_transaction(qkd_transaction, endpoint, req_type, identity);
         if (status != E_OK)
         {
@@ -250,6 +253,9 @@ enum kritis3m_status_info quest_free_transaction(quest_transaction* qkd_transact
                 /* free http-get response */
                 deinit_http_response(qkd_transaction->response);
         }
+
+        if (qkd_transaction != NULL)
+                free(qkd_transaction);
 
         return E_OK;
 }
