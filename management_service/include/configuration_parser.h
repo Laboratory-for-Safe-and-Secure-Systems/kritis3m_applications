@@ -4,6 +4,7 @@
 #include "configuration_manager.h"
 #include "kritis3m_configuration.h"
 
+int parse_sysconfig_to_json(struct sysconfig* config, char* json_buffer, int json_buffer_size);
 int parse_buffer_to_sysconfig(char* json_buffer, int json_buffer_size, struct sysconfig* config);
 
 // parse json to Kritis3mNodeConfiguration, which stores the startup information

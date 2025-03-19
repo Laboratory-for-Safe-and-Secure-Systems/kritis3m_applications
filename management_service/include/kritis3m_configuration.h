@@ -79,7 +79,6 @@ enum ApplicationStatus
         APK_OK = 0,
 };
 
-
 /**
  * @brief Enumeration of services used to identify requests in the HTTP module.
  *
@@ -95,7 +94,6 @@ enum used_service
         MGMT_SEND_STATUS_REQ, /**< Request to send the status to the management server. */
         MGMT_POLICY_CONFIRM,  /**< Request to confirm the management policy. */
 };
-
 
 typedef struct SystemConfiguration SystemConfiguration;
 struct SystemConfiguration;
@@ -340,19 +338,14 @@ char* applicationManagerStatusToJson(const ApplicationManagerStatus* status,
 // net helper methods
 int parse_addr_toKritis3maddr(char* ip_port, Kritis3mSockaddr* dst);
 
-
-
-
-
 // creates filepaths of certificates and reads certificate
-int load_certificates(crypto_identity* identity);
+// int load_certificates(crypto_identity* identity);
 // obtains endpoint configuration from crypto identity and crypto_profile object
 int create_endpoint_config(crypto_identity* crypto_id,
                            CryptoProfile* crypto_profile,
                            asl_endpoint_configuration* ep_cfg);
 
 /*Cleanup Functions */
-void cleanup_configuration_manager(ConfigurationManager* configuation_manager);
 void cleanup_Systemconfiguration(SystemConfiguration* systemconfiguration);
 void free_ManagementConfiguration(Kritis3mManagemntConfiguration* config);
 void free_CryptoIdentity(crypto_identity* identity);

@@ -30,13 +30,13 @@ struct sysconfig
         int est_port;
         asl_endpoint_configuration* endpoint_config;
 };
-
 struct worker_controlplane_set_certificate_args
 {
         char* buffer;
         size_t size;
         void* arg;
 };
-void* worker_controlplane_set_certificate(void*);
+
+int controlplane_set_certificate(char* buffer, size_t size);
 
 #endif // CONFIGURATION_MANAGER_H
