@@ -1,8 +1,9 @@
 #include "ipc.h"
-#include <poll.h>
 #include "errno.h"
 #include "logging.h"
 #include "networking.h"
+#include <poll.h>
+#include <string.h>
 
 LOG_MODULE_CREATE(ipc);
 
@@ -43,10 +44,14 @@ enum MSG_RESPONSE_CODE sockpair_read(int socket, void* buffer, size_t length)
                         LOG_ERROR("Received invalid response (ret=%d; expected=%lu)", ret, length);
                         return MSG_ERROR;
                 }
-        }else if (fds[0].revents & POLLERR || fds[0].revents & POLLHUP){
+        }
+        else if (fds[0].revents & POLLERR || fds[0].revents & POLLHUP)
+        {
                 LOG_ERROR("Socket error or hang up");
                 return MSG_ERROR;
-        }else{
+        }
+        else
+        {
                 LOG_ERROR("Unknown event");
                 return MSG_ERROR;
         }
@@ -111,19 +116,13 @@ enum MSG_RESPONSE_CODE external_management_request(int socket, void* message, si
                 return MSG_ERROR;
         }
 
-        common_message_t response;
+        common_response_t response;
         ret = sockpair_read(socket, &response, sizeof(response));
         if (ret < 0)
         {
                 LOG_ERROR("Failed to read response from external management request");
                 return MSG_ERROR;
         }
-        if (response.type != GENERAL_RETURN)
-        {
-                LOG_ERROR("Received invalid response from external management request");
-                return MSG_ERROR;
-        }
-        response_code = response.data.return_code;
 
-        return response_code;
+        return response;
 }

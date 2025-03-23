@@ -24,7 +24,9 @@ LOG_MODULE_CREATE(configuration_manager);
 
 // forward declaration
 void cleanup_sysconfig();
-int test_server_conn(char* host, int port, asl_endpoint_configuration* endpoint_config);
+void cleanup_configuration_manager(void);
+
+int test_server_conn(char* host, asl_endpoint_configuration* endpoint_config);
 int write_sysconfig(void);
 
 void cleanup_endpoint_config(asl_endpoint_configuration* endpoint_config);
@@ -60,6 +62,164 @@ struct configuration_manager
 };
 
 static struct configuration_manager configuration_manager = {0};
+
+const struct sysconfig* get_sysconfig()
+{
+        return (const struct sysconfig*) &configuration_manager.sys_config;
+}
+
+int get_dataplane_update(struct application_manager_config* config, struct hardware_configs* hw_config)
+{
+        if (!config || !hw_config || !configuration_manager.initialized)
+        {
+                LOG_ERROR("Invalid arguments or configuration manager not initialized");
+                return -1;
+        }
+
+        char* source_path = NULL;
+
+        // Determine which application config to read based on active configuration
+        switch (configuration_manager.sys_config.application_active)
+        {
+        case ACTIVE_ONE:
+                // If active is one, use application_2_path (inactive)
+                source_path = configuration_manager.application_2_path;
+                break;
+        case ACTIVE_TWO:
+                // If active is two, use application_1_path (inactive)
+                source_path = configuration_manager.application_1_path;
+                break;
+        case ACTIVE_NONE:
+                // If none is active, use application_1_path as default
+                LOG_INFO("No active application configuration is set, using application_1_path as "
+                         "default");
+                source_path = configuration_manager.application_1_path;
+                break;
+        default:
+                LOG_ERROR("Invalid application active configuration");
+                return -1;
+        }
+
+        if (!source_path)
+        {
+                LOG_ERROR("Failed to determine source path for application configuration");
+                return -1;
+        }
+
+        // Read the configuration file
+        char* buffer = NULL;
+        size_t buffer_size = 0;
+        int ret = read_file(source_path, (uint8_t**) &buffer, &buffer_size);
+        if (ret < 0)
+        {
+                LOG_ERROR("Failed to read application configuration from %s", source_path);
+                return -1;
+        }
+
+        // Parse the configuration
+        ret = parse_config(buffer, buffer_size, config, hw_config);
+        if (ret != 0)
+        {
+                LOG_ERROR("Failed to parse application configuration");
+                free(buffer);
+                return -1;
+        }
+
+        // Now load certificates for each group's endpoint configuration
+        for (int i = 0; i < config->number_of_groups; i++)
+        {
+                if (!config->group_config[i].endpoint_config)
+                {
+                        LOG_ERROR("Endpoint configuration missing for group %d", i);
+                        free(buffer);
+                        return -1;
+                }
+
+                // Determine which dataplane certificate chain to use based on active configuration
+                char* chain_path = NULL;
+                switch (configuration_manager.sys_config.dataplane_active)
+                {
+                case ACTIVE_ONE:
+                        chain_path = configuration_manager.dataplane_1_chain_path;
+                        break;
+                case ACTIVE_TWO:
+                        chain_path = configuration_manager.dataplane_2_chain_path;
+                        break;
+                case ACTIVE_NONE:
+                        LOG_INFO("No active dataplane configuration is set, using "
+                                 "dataplane_1_chain_path as default");
+                        chain_path = configuration_manager.dataplane_1_chain_path;
+                        break;
+                default:
+                        LOG_ERROR("Invalid dataplane active configuration");
+                        free(buffer);
+                        return -1;
+                }
+
+                // Load certificates into this endpoint configuration
+                ret = load_endpoint_certificates(config->group_config[i].endpoint_config,
+                                                 chain_path,
+                                                 configuration_manager.dataplane_key_path,
+                                                 configuration_manager.dataplane_root_cert);
+                if (ret != 0)
+                {
+                        LOG_ERROR("Failed to load certificates for group %d", i);
+                        free(buffer);
+                        return -1;
+                }
+
+                LOG_INFO("Successfully loaded certificates for group %d", i);
+        }
+
+        LOG_INFO("Successfully loaded application configuration from %s", source_path);
+        free(buffer);
+        return 0;
+}
+
+// store config
+int controlplane_store_config(char* buffer, size_t size)
+{
+        if (!buffer || size == 0 || !configuration_manager.initialized)
+        {
+                LOG_ERROR("Invalid buffer or size");
+                return -1;
+        }
+
+        char* destination = NULL;
+
+        switch (configuration_manager.sys_config.controlplane_active)
+        {
+        case ACTIVE_NONE:
+                LOG_INFO("No active controlplane configuration is set, using 1 as default");
+                destination = configuration_manager.application_1_path;
+                break;
+        case ACTIVE_ONE:
+                destination = configuration_manager.application_2_path;
+                break;
+        case ACTIVE_TWO:
+                destination = configuration_manager.application_1_path;
+                break;
+        default:
+                LOG_ERROR("Invalid controlplane active configuration");
+                return -1;
+        }
+
+        if (!destination)
+        {
+                LOG_ERROR("Failed to determine destination path");
+                return -1;
+        }
+
+        int ret = write_file(destination, buffer, size, false);
+        if (ret != 0)
+        {
+                LOG_ERROR("Failed to write configuration to %s", destination);
+                return -1;
+        }
+
+        LOG_INFO("Successfully stored configuration to %s", destination);
+        return 0;
+}
 
 int init_configuration_manager(char* base_path)
 {
@@ -108,7 +268,7 @@ int init_configuration_manager(char* base_path)
 
         size_t buffer_size = 0;
         ret = read_file(configuration_manager.sys_config_path, (uint8_t**) &buffer, &buffer_size);
-        if (ret != 0)
+        if (ret < 0)
         {
                 LOG_ERROR("Failed to read sys_config");
                 goto error;
@@ -124,16 +284,16 @@ int init_configuration_manager(char* base_path)
         switch (configuration_manager.sys_config.controlplane_active)
         {
         case ACTIVE_ONE:
-                load_endpoint_certificates(configuration_manager.sys_config.endpoint_config,
-                                           configuration_manager.controlplane_1_chain_path,
-                                           configuration_manager.controlplane_key_path,
-                                           configuration_manager.controlplane_root_cert);
+                ret = load_endpoint_certificates(configuration_manager.sys_config.endpoint_config,
+                                                 configuration_manager.controlplane_1_chain_path,
+                                                 configuration_manager.controlplane_key_path,
+                                                 configuration_manager.controlplane_root_cert);
                 break;
         case ACTIVE_TWO:
-                load_endpoint_certificates(configuration_manager.sys_config.endpoint_config,
-                                           configuration_manager.controlplane_2_chain_path,
-                                           configuration_manager.controlplane_key_path,
-                                           configuration_manager.controlplane_root_cert);
+                ret = load_endpoint_certificates(configuration_manager.sys_config.endpoint_config,
+                                                 configuration_manager.controlplane_2_chain_path,
+                                                 configuration_manager.controlplane_key_path,
+                                                 configuration_manager.controlplane_root_cert);
                 break;
         case ACTIVE_NONE:
                 LOG_INFO("No active controlplane certs");
@@ -142,6 +302,9 @@ int init_configuration_manager(char* base_path)
                 LOG_ERROR("Invalid controlplane active configuration");
                 goto error;
         }
+
+        if (ret < 0)
+                goto error;
         return 0;
 
 error:
@@ -152,7 +315,7 @@ error:
         return -1;
 }
 
-int test_server_conn(char* host, int port, asl_endpoint_configuration* endpoint_config)
+int test_server_conn(char* host, asl_endpoint_configuration* endpoint_config)
 {
         if (!host || !endpoint_config)
         {
@@ -174,8 +337,12 @@ int test_server_conn(char* host, int port, asl_endpoint_configuration* endpoint_
                 goto error;
         }
 
-        // Look up the server address
-        if (address_lookup_client(host, port, &addr, AF_UNSPEC) != 0)
+        // modified for testing purposes
+        // modified for testing purposes
+        // modified for testing purposes
+        // modified for testing purposes
+        // modified for testing purposes
+        if (address_lookup_client(host, 8080, &addr, AF_UNSPEC) != 0)
         {
                 LOG_ERROR("Failed to resolve server address");
                 ret = -1;
@@ -296,9 +463,7 @@ int controlplane_set_certificate(char* buffer, size_t size)
                 goto error;
         }
 
-        ret = test_server_conn(configuration_manager.sys_config.broker_host,
-                               configuration_manager.sys_config.broker_port,
-                               endpoint_config);
+        ret = test_server_conn(configuration_manager.sys_config.broker_host, endpoint_config);
         if (ret != 0)
         {
                 LOG_ERROR("Failed to test controlplane certificate");
@@ -350,7 +515,6 @@ error:
         free(endpoint_config);
         return -1;
 }
-
 int load_endpoint_certificates(asl_endpoint_configuration* endpoint_config,
                                char* chain_path,
                                char* key_path,
@@ -371,7 +535,7 @@ int load_endpoint_certificates(asl_endpoint_configuration* endpoint_config,
         // Load the certificate chain
         if (read_file(chain_path,
                       (uint8_t**) &endpoint_config->device_certificate_chain.buffer,
-                      &endpoint_config->device_certificate_chain.size) != 0)
+                      &endpoint_config->device_certificate_chain.size) < 0)
         {
                 LOG_ERROR("Failed to load controlplane certificate chain");
                 return -1;
@@ -380,7 +544,7 @@ int load_endpoint_certificates(asl_endpoint_configuration* endpoint_config,
         // Load the private key
         if (read_file(key_path,
                       (uint8_t**) &endpoint_config->private_key.buffer,
-                      &endpoint_config->private_key.size) != 0)
+                      &endpoint_config->private_key.size) < 0)
         {
                 LOG_ERROR("Failed to load controlplane private key");
                 return -1;
@@ -389,7 +553,7 @@ int load_endpoint_certificates(asl_endpoint_configuration* endpoint_config,
         // Load the root certificate
         if (read_file(root_path,
                       (uint8_t**) &endpoint_config->root_certificate.buffer,
-                      &endpoint_config->root_certificate.size) != 0)
+                      &endpoint_config->root_certificate.size) < 0)
         {
                 LOG_ERROR("Failed to load controlplane root certificate");
                 return -1;

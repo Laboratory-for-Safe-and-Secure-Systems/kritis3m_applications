@@ -552,23 +552,23 @@ ManagementReturncode handle_management_message(int fd, struct application_manage
                 {
                         int appl_id = msg.payload.application_id;
                         Kritis3mApplications*
-                                appl = find_application_by_application_id(appl_manager
-                                                                                  ->configuration->applications,
-                                                                          appl_manager
-                                                                                  ->configuration->number_applications,
-                                                                          appl_id);
-                        if (appl == NULL)
-                        {
-                                LOG_ERROR("no application found with application_id %d. STOP "
-                                          "Request failed",
-                                          appl_id);
-                        }
-                        ret = stop_application(appl);
-                        if (ret < 0)
-                        {
-                                LOG_ERROR("Can't stop application with appl_id %d", appl_id);
-                        }
-                        retval = MGMT_OK;
+                                // appl = find_application_by_application_id(appl_manager
+                                //                                                   ->configuration->applications,
+                                //                                           appl_manager
+                                //                                                   ->configuration->number_applications,
+                                //                                           appl_id);
+                                //         if (appl == NULL)
+                                // {
+                                //         LOG_ERROR("no application found with application_id %d. STOP "
+                                //                   "Request failed",
+                                //                   appl_id);
+                                // }
+                                // ret = stop_application(appl);
+                                // if (ret < 0)
+                                // {
+                                //         LOG_ERROR("Can't stop application with appl_id %d", appl_id);
+                                // }
+                                retval = MGMT_OK;
                         break;
                 }
         /**
@@ -854,7 +854,7 @@ int create_proxy_config(Kritis3mApplications* appl, proxy_config* config)
 
         config->application_id = appl->id;
 
-        ret = get_endpoint_configuration(appl->ep1_id, &config->tls_config);
+        // ret = get_endpoint_configuration(appl->ep1_id, &config->tls_config);
         if (ret < 0)
                 goto error_occured;
 
@@ -882,7 +882,7 @@ int create_echo_config(Kritis3mApplications* appl, echo_server_config* config)
 
         config->use_tls = true;
 
-        ret = get_endpoint_configuration(appl->ep1_id, &config->tls_config);
+        // ret = get_endpoint_configuration(appl->ep1_id, &config->tls_config);
         if (ret < 0)
                 goto error_occured;
 
@@ -915,57 +915,6 @@ int create_tcp_stdin_bridge_config(Kritis3mApplications* appl, tcp_client_stdin_
 error_occured:
         ret = -1;
         return ret;
-}
-
-int get_endpoint_configuration(int ep_id, asl_endpoint_configuration* ep)
-{
-        int ret = 0;
-        crypto_identity* identity = NULL;
-        CryptoProfile* profile = NULL;
-
-        if ((!manager.initialized) || (manager.configuration == NULL) || (ep == NULL))
-        {
-                LOG_ERROR("manager is not initialized");
-                return -1;
-        }
-
-        int number_crypto_profiles = manager.configuration->number_crypto_profiles;
-        int number_identitities = manager.configuration->number_crypto_identity;
-
-        if ((number_crypto_profiles <= 0) || (number_crypto_profiles <= 0))
-        {
-
-                LOG_ERROR("crypto is not correctly initialized");
-                return -1;
-        }
-
-        identity = manager.configuration->crypto_identity;
-        profile = manager.configuration->crypto_profile;
-
-        // search crypto profiles
-        for (int i = 0; i < number_crypto_profiles; i++)
-        {
-                if (profile[i].id == ep_id)
-                {
-                        // search matching crypto identity containing the certificates
-                        for (int j = 0; j < number_identitities; j++)
-                        {
-                                if (identity[j].id == profile[i].crypto_identity_id)
-                                {
-                                        LOG_DEBUG("found crypto configuration for crypto id: %d",
-                                                  ep_id);
-                                        ret = create_endpoint_config(&identity[j], &profile[i], ep);
-                                        if (ret < 0)
-                                        {
-                                                LOG_DEBUG("can't init endpoint");
-                                                return -1;
-                                        }
-                                        return 0;
-                                }
-                        }
-                }
-        }
-        return -1;
 }
 
 int stop_application(Kritis3mApplications* appl)

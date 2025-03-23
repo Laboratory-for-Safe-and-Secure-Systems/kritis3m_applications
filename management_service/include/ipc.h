@@ -1,9 +1,9 @@
 #ifndef IPC_H
 #define IPC_H
 
-#include <stdint.h>
-#include <stddef.h>
 #include "kritis3m_configuration.h"
+#include <stddef.h>
+#include <stdint.h>
 
 /**
  * @brief Enumeration of IPC return codes.
@@ -19,21 +19,10 @@ enum MSG_RESPONSE_CODE
         MSG_BUSY = 2,      /**< Indicates the system is currently busy. */
 };
 
-typedef enum gen_msg_type {
-    GENERAL_RETURN = 0,
-} __attribute__((aligned(4))) gen_msg_type_t;
-
-typedef struct common_message{
-        enum gen_msg_type type;
-        union{
-                int32_t return_code;
-        } data;
-} common_message_t;
-
+typedef int32_t common_response_t;
 
 enum MSG_RESPONSE_CODE external_management_request(int socket, void* message, size_t message_size);
 int sockpair_write(int socket, void* buffer, size_t length, size_t* retries);
 enum MSG_RESPONSE_CODE sockpair_read(int socket, void* buffer, size_t length);
-
 
 #endif // IPC_H

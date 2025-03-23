@@ -3,6 +3,7 @@
 
 #include "asl.h"
 #include "kritis3m_configuration.h"
+#include "tls_proxy.h"
 
 int init_configuration_manager(char* base_path);
 
@@ -24,7 +25,6 @@ struct sysconfig
         enum ACTIVE application_active;
 
         char* broker_host;
-        int broker_port;
 
         char* est_host;
         int est_port;
@@ -36,7 +36,31 @@ struct worker_controlplane_set_certificate_args
         size_t size;
         void* arg;
 };
+struct hardware_configs
+{
+        HardwareConfiguration* hw_configs;
+        int number_of_hw_configs;
+};
+
+struct group_config
+{
+        asl_endpoint_configuration* endpoint_config;
+        int number_proxies;
+        proxy_config proxy_config;
+        int number_of_applications;
+};
+
+struct application_manager_config
+{
+        struct group_config* group_config;
+        int number_of_groups;
+};
+
+const struct sysconfig* get_sysconfig();
+
+int get_dataplane_update(struct application_manager_config* config, struct hardware_configs* hw_config);
 
 int controlplane_set_certificate(char* buffer, size_t size);
+int controlplane_store_config(char* buffer, size_t size);
 
 #endif // CONFIGURATION_MANAGER_H

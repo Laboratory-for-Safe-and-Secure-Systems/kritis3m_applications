@@ -1,4 +1,5 @@
 #include <errno.h>
+#include <poll.h>
 #include <pthread.h>
 #include <signal.h>
 #include <string.h>
@@ -6,6 +7,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "configuration_manager.h"
 #include "control_plane_conn.h"
 #include "logging.h"
 #include "networking.h"
@@ -26,14 +28,12 @@ LOG_MODULE_CREATE(kritis3m_service);
 #define DISTRIBUTION_BUFFER_SIZE 3000
 #define POLICY_RESP_BUFFER_SIZE 1000
 #define HEARTBEAT_REQ_BUFFER_SIZE 1000
-#define HELLO_INTERVAL_SEC 60 // Send hello message every 60 seconds
+#define HELLO_INTERVAL_SEC 10 // Send hello message every 60 seconds
 
 // main kritis3m_service module type
 struct kritis3m_service
 {
         bool initialized;
-        Kritis3mNodeConfiguration node_configuration;
-        ConfigurationManager configuration_manager;
         int management_socket[2];
         pthread_t mainthread;
         pthread_attr_t thread_attr;
@@ -90,7 +90,6 @@ int respond_with(int socket, enum MSG_RESPONSE_CODE response_code);
 ManagementReturncode handle_svc_message(int socket, service_message* msg, int cfg_id, int version_number);
 // init
 void* kritis3m_service_main_thread(void* arg);
-void init_configuration_manager(ConfigurationManager* manager, Kritis3mNodeConfiguration* node_config);
 int prepare_all_interfaces(HardwareConfiguration hw_config[], int num_configs);
 // http
 void cleanup_kritis3m_service();
@@ -107,8 +106,6 @@ void set_kritis3m_serivce_defaults(struct kritis3m_service* svc)
         if (svc == NULL)
                 return;
         memset(&svc->management_endpoint_config, 0, sizeof(asl_endpoint_configuration));
-        memset(&svc->configuration_manager, 0, sizeof(ConfigurationManager));
-        memset(&svc->node_configuration, 0, sizeof(Kritis3mNodeConfiguration));
         create_socketpair(svc->management_socket);
         pthread_attr_init(&svc->thread_attr);
         pthread_attr_setdetachstate(&svc->thread_attr, PTHREAD_CREATE_JOINABLE);
@@ -135,93 +132,31 @@ int start_kritis3m_service(char* config_file, int log_level)
         // initializations
         int ret = 0;
 
-        CryptoProfile default_profile = {
-                .ASLKeyExchangeMethod = ASL_KEX_DEFAULT,
-                .MutualAuthentication = true,
-                .Name = "default",
-                .NoEncryption = false,
-                .UseSecureElement = false,
-                .Keylog = false,
-        };
         /** -------------- set log level ----------------------------- */
         LOG_LVL_SET(log_level);
-
-        // get global node config
         set_kritis3m_serivce_defaults(&svc);
-        svc.node_configuration.config_path = config_file;
-        svc.node_configuration.config_path_size = strlen(config_file);
-        init_application_manager();
-
-        // reads and the configfile and parses content to node_configuration
-        ret = get_Kritis3mNodeConfiguration(config_file, &svc.node_configuration);
+        init_control_plane_conn();
+        ret = init_configuration_manager(config_file);
         if (ret < 0)
         {
-                LOG_ERROR("can't parse Config, error occured: %d ", errno);
-                return ret;
-        }
-        if ((svc.node_configuration.primary_path == NULL) ||
-            (svc.node_configuration.config_path == NULL) ||
-            (svc.node_configuration.pki_cert_path == NULL))
-        {
-                LOG_ERROR("filepaths incorrect");
-                return -1;
-        }
-
-        // pass middleware and pin from cli to endpoint conf
-        svc.management_endpoint_config.pkcs11
-                .module_path = svc.node_configuration.management_identity.secure_middleware_path;
-        svc.management_endpoint_config.pkcs11.module_pin = svc.node_configuration
-                                                                   .management_identity.pin;
-
-        // 2. setsup endpoint configuration, used to communicate with the controller
-        ret = create_endpoint_config(&svc.node_configuration.management_identity.identity,
-                                     &default_profile,
-                                     &svc.management_endpoint_config);
-        if (ret < 0)
-        {
-                LOG_ERROR("endpoint config error");
+                LOG_ERROR("Failed to initialize configuration manager");
                 goto error_occured;
         }
-
-        // Initialize hello timer
         ret = init_hello_timer(&svc);
         if (ret < 0)
         {
                 LOG_ERROR("Failed to initialize hello timer");
                 goto error_occured;
         }
+        const struct sysconfig* sys_config = get_sysconfig();
+        struct control_plane_conn_config_t conn_config = {0};
+        conn_config.serialnumber = sys_config->serial_number;
+        conn_config.endpoint_config = sys_config->endpoint_config;
+        conn_config.mqtt_broker_host = sys_config->broker_host;
 
-        // 4. initialization of configuration manager
-        /**
-         * @brief the configuration manager stores the application data.
-         * To ensure a secure update with rollback functionality, two applicationconfigs, primary and secondary are used
-         * - In this state only the primary object is used
-         */
-        init_configuration_manager(&svc.configuration_manager, &svc.node_configuration);
-
-        // set primary application config
-        if (svc.configuration_manager.active_configuration == CFG_NONE)
-        {
-                LOG_INFO("no configuration selected. Starting with primary configuration");
-                svc.configuration_manager.active_configuration = CFG_PRIMARY;
-        }
-
-        // 5. Read and Parse application config
-        ManagementReturncode retval = get_Systemconfig(&svc.configuration_manager,
-                                                       &svc.node_configuration);
-        if (retval != MGMT_OK)
-        {
-                LOG_ERROR("reading primary.json failed. Shutdown");
-                goto error_occured;
-        }
+        start_control_plane_conn(&conn_config);
 
         // 6. prepare hardware
-        ret = prepare_all_interfaces(svc.configuration_manager.primary.application_config.hw_config,
-                                     svc.configuration_manager.primary.application_config.number_hw_config);
-        if (ret < 0)
-        {
-                LOG_WARN("error occured when initializing net module. Continue");
-        }
         svc.initialized = true;
 
         // 7. start management application
@@ -263,8 +198,6 @@ void* kritis3m_service_main_thread(void* arg)
         ManagementReturncode retval = MGMT_OK;
 
         asl_endpoint_configuration* ep_cfg = &svc->management_endpoint_config;
-        Kritis3mNodeConfiguration node_configuration = svc->node_configuration;
-        ConfigurationManager application_configuration_manager = svc->configuration_manager;
 
         ret = poll_set_add_fd(&svc->pollfd, svc->management_socket[THREAD_INT], POLLIN | POLLERR);
         if (ret < 0)
@@ -280,17 +213,6 @@ void* kritis3m_service_main_thread(void* arg)
                 LOG_ERROR("Failed to add hello timer to poll set");
                 goto terminate;
         }
-
-        // 8. Start application manager
-        ret = start_application_manager(&application_configuration_manager.primary.application_config);
-        if (ret < 0)
-        {
-                LOG_ERROR("can't start application manage");
-                goto terminate;
-        }
-
-        cfg_id = application_configuration_manager.primary.cfg_id;
-        version_number = application_configuration_manager.primary.version;
 
         while (1)
         {
@@ -377,19 +299,6 @@ terminate:
         pthread_detach(pthread_self());
         return NULL;
 }
-
-void init_configuration_manager(ConfigurationManager* manager, Kritis3mNodeConfiguration* node_config)
-{
-        if ((node_config == NULL) || (manager == NULL))
-                return;
-        manager->active_configuration = node_config->selected_configuration;
-        strncpy(manager->primary_file_path, node_config->primary_path, MAX_FILEPATH_SIZE);
-        strncpy(manager->secondary_file_path, node_config->secondary_path, MAX_FILEPATH_SIZE);
-        cleanup_Systemconfiguration(&manager->primary);
-        cleanup_Systemconfiguration(&manager->secondary);
-}
-
-//------------------------------------------ HARDWARE INFORMATION --------------------------------------- //
 
 int prepare_all_interfaces(HardwareConfiguration hw_config[], int num_configs)
 {
@@ -563,8 +472,122 @@ void cleanup_kritis3m_service()
 {
         svc.initialized = false;
         cleanup_hello_timer(&svc);
-        free_NodeConfig(&svc.node_configuration);
-        cleanup_configuration_manager(&svc.configuration_manager);
+}
+
+struct node_update_coordinatior
+{
+        int update_socket[2];
+        pthread_t mainthread;
+        pthread_attr_t thread_attr;
+        bool initialized;
+};
+
+static struct node_update_coordinatior node_update_coordinatior = {0};
+struct node_update_init_params
+{
+
+        int timeout_s;
+        char* buffer;
+        int buffer_len;
+        ManagementReturncode (*cb)(int);
+};
+
+void* handle_ctrlplane_apply_req(void* arg)
+{
+        int ret = 0;
+        struct node_update_init_params* params = (struct node_update_init_params*) arg;
+        node_update_coordinatior.initialized = true;
+
+        struct pollfd update_pollfd;
+        update_pollfd.fd = node_update_coordinatior.update_socket[THREAD_INT];
+        update_pollfd.events = POLLIN | POLLERR;
+
+        // these states correspond to grpc
+        enum apply_states
+        {
+                NODE_UPDATE_ERROR = 0,
+                NODE_UPDATE_UNKNOWN = 1,
+                NODE_UPDATE_RECEIVED = 3,
+                NODE_UPDATE_APPLICABLE = 4,
+                NODE_UPDATE_APPLYREQUEST = 5,
+                NODE_UPDATE_APPLIED = 6,
+
+        };
+        enum apply_states current_state = NODE_UPDATE_UNKNOWN;
+        enum apply_states next_state = NODE_UPDATE_UNKNOWN;
+        struct application_manager_config app_config = {0};
+        struct hardware_configs hw_configs = {0};
+
+        while (1)
+        {
+
+                while (current_state != NODE_UPDATE_APPLIED)
+                {
+                        switch (current_state)
+                        {
+                        case NODE_UPDATE_ERROR:
+                                // error handling
+                                // either error received from control server, or application manager or hw_config has an error
+                                break;
+                        case NODE_UPDATE_UNKNOWN:
+                                // unknown error
+                                break;
+                        case NODE_UPDATE_RECEIVED:
+                                ret = controlplane_store_config(params->buffer, params->buffer_len);
+                                if (ret < 0)
+                                {
+                                        LOG_ERROR("Failed to store controlplane config");
+                                        goto error_occured;
+                                }
+                                ret = get_dataplane_update(&app_config, &hw_configs);
+                                if (ret < 0)
+                                {
+                                        LOG_ERROR("Failed to get dataplane update");
+                                        goto error_occured;
+                                }
+                                for (int i = 0; i < hw_configs.number_of_hw_configs; i++)
+                                {
+                                        ret = prepare_all_interfaces(&hw_configs.hw_configs[i], 1);
+                                }
+
+                                next_state = NODE_UPDATE_APPLICABLE;
+                                break;
+                        case NODE_UPDATE_APPLICABLE:
+                                params->cb(NODE_UPDATE_APPLICABLE);
+
+                                // after config is stored and hw_config is updated, signal via control_plane_conn that the config is applicable
+                                break;
+                        case NODE_UPDATE_APPLYREQUEST:
+                                // node received update request from server. start application manager and start applications
+                                break;
+                        case NODE_UPDATE_APPLIED:
+                                break;
+                        default:
+                                break;
+                        }
+                }
+
+                // check for update request
+                if (ret = poll(&update_pollfd, 1, -1) <= 0)
+                {
+                        goto error_occured;
+                }
+                if (update_pollfd.revents & POLLIN)
+                {
+                        int32_t signal = sockpair_read(node_update_coordinatior.update_socket[THREAD_INT],
+                                                       &signal,
+                                                       sizeof(signal));
+                        if (ret < 0)
+                        {
+                                LOG_ERROR("Failed to receive signal from server");
+                                goto error_occured;
+                        }
+                        respond_with(node_update_coordinatior.update_socket[THREAD_INT], MSG_OK);
+                }
+        error_occured:
+                node_update_coordinatior.initialized = false;
+                return NULL;
+        }
 }
 
 enum MSG_RESPONSE_CODE ctrlplane_cert_get_req()

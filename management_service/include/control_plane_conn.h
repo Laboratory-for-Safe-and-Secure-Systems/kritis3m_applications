@@ -2,24 +2,24 @@
 #define CONTROL_PLANE_CONN_H
 
 #include "asl.h"
-#include "kritis3m_configuration.h"
 #include "ipc.h"
+#include "kritis3m_configuration.h"
 #include <stdbool.h>
 
-
-//service functions init, start, stop, cleanup
-struct control_plane_conn_config_t {
+// service functions init, start, stop, cleanup
+struct control_plane_conn_config_t
+{
         char* serialnumber;
-        char* mqtt_broker_host; 
+        char* mqtt_broker_host;
         asl_endpoint_configuration* endpoint_config;
         int hello_period_min;
 };
 
 /* Initialize the control plane core
-* Preperation of internal data structures
-* 
-* @return Returns 0 if the control plane core is successfully initialized, otherwise returns a non-zero error code.
-*/
+ * Preperation of internal data structures
+ *
+ * @return Returns 0 if the control plane core is successfully initialized, otherwise returns a non-zero error code.
+ */
 int init_control_plane_conn();
 
 /**
@@ -28,7 +28,6 @@ int init_control_plane_conn();
  * @return Returns 0 on success, non-zero error code otherwise
  */
 int start_control_plane_conn(struct control_plane_conn_config_t* conn);
-
 
 /**
  * Clean up resources used by the control plane connection
@@ -55,17 +54,17 @@ enum MSG_RESPONSE_CODE send_log_message(const char* message);
  */
 enum MSG_RESPONSE_CODE stop_control_plane_conn();
 
-enum policy_status{
-    CERT_REQ_RECEIVED,
-    CERT_RECEIVED,
-    CERT_APPLIED,
+enum policy_status
+{
+        CERT_REQ_RECEIVED,
+        CERT_RECEIVED,
+        CERT_APPLIED,
 
-    CONFIG_RECEIVED , 
-    CONFIG_USABLE,
-    CONFIG_APPLIED,
+        CONFIG_RECEIVED,
+        CONFIG_USABLE,
+        CONFIG_APPLIED,
 
-}; 
-
+};
 /**
  * Send a policy status to the control plane
  * @param status The policy status to send

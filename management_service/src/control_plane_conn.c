@@ -8,11 +8,11 @@
 
 #include "MQTTAsync.h"
 #include "file_io.h"
+#include "ipc.h"
 #include "kritis3m_configuration.h"
 #include "logging.h"
 #include "networking.h"
 #include "poll_set.h"
-#include "ipc.h"
 
 LOG_MODULE_CREATE("CONTROL_PLANE_CONN");
 
@@ -32,8 +32,11 @@ struct control_plane_conn_t
         MQTTAsync_connectOptions conn_opts;
         MQTTAsync_responseOptions opts;
         MQTTAsync client;
+
         char* serialnumber;
         asl_endpoint_configuration* endpoint_config;
+        char* mqtt_broker_host;
+
         int socket_pair[2];
         int hello_period_min;
         char* topic_log;
@@ -92,7 +95,7 @@ enum control_plane_conn_message_type
         CONTROL_PLANE_SEND_HELLO,
         CONTROL_PLANE_SEND_POLICY_STATUS,
         CONTROL_PLANE_SEND_LOG,
-}__attribute__((aligned(4)));
+};
 
 struct control_plane_conn_message
 {
@@ -160,7 +163,6 @@ int msgarrvd(void* context, char* topicName, int topicLen, MQTTAsync_message* me
 
         // Create comparison topics
 
-
         if (conn->topic_config == NULL || conn->topic_cert_mgmt == NULL || conn->topic_cert_prod == NULL)
         {
                 LOG_ERROR("Failed to create comparison topics");
@@ -170,6 +172,7 @@ int msgarrvd(void* context, char* topicName, int topicLen, MQTTAsync_message* me
         if (strcmp(topicName, conn->topic_config) == 0)
         {
                 LOG_INFO("Received new configuration: %.*s", message->payloadlen, payload);
+                write_file("./config.json", payload, message->payloadlen, false);
         }
         else if (strcmp(topicName, conn->topic_cert_mgmt) == 0)
         {
@@ -317,7 +320,6 @@ void* control_plane_conn_thread(void* arg)
                 goto exit;
         }
 
-
         struct pollfd fds[1];
         fds[THREAD_INT].fd = conn.socket_pair[THREAD_INT];
         fds[THREAD_INT].events = POLLIN | POLLERR | POLLHUP;
@@ -366,7 +368,6 @@ exit:
         closesocket(conn.socket_pair[THREAD_INT]);
         closesocket(conn.socket_pair[THREAD_EXT]);
 
-
         // Ensure MQTT client is properly closed
         if (conn.client && MQTTAsync_isConnected(conn.client))
         {
@@ -376,7 +377,7 @@ exit:
                 MQTTAsync_disconnect(conn.client, &disc_opts);
         }
 
-                cleanup_control_plane_conn();
+        cleanup_control_plane_conn();
 
         return NULL;
 }
@@ -384,12 +385,11 @@ exit:
 // Helper function to send return code back to the caller
 static int send_return_code(struct control_plane_conn_t* conn, enum MSG_RESPONSE_CODE code)
 {
-        struct control_plane_conn_message response;
-        response.type = CONTROL_PLANE_RETURN;
-        response.data.return_code = code;
-        
-        int rc = sockpair_write(conn->socket_pair[THREAD_INT], &response, sizeof(response), NULL);
-        if (rc < 0) {
+        common_response_t response = code;
+
+        int rc = sockpair_write(conn->socket_pair[THREAD_INT], &response, sizeof(common_response_t), NULL);
+        if (rc < 0)
+        {
                 LOG_ERROR("Failed to send return code: %s", strerror(errno));
         }
         return rc;
@@ -504,9 +504,16 @@ int start_control_plane_conn(struct control_plane_conn_config_t* conn_config)
                 LOG_ERROR("Invalid control plane connection configuration");
                 goto exit;
         }
+        conn.mqtt_broker_host = duplicate_string(conn_config->mqtt_broker_host);
+        if (conn.mqtt_broker_host == NULL)
+        {
+                LOG_ERROR("Failed to allocate memory for MQTT broker host");
+                ret = -1;
+                goto exit;
+        }
 
         // Copy configuration
-        conn.serialnumber = strdup(conn_config->serialnumber);
+        conn.serialnumber = duplicate_string(conn_config->serialnumber);
         if (conn.serialnumber == NULL)
         {
                 LOG_ERROR("Failed to allocate memory for serial number");
@@ -545,7 +552,7 @@ int start_control_plane_conn(struct control_plane_conn_config_t* conn_config)
         // Create MQTT client
         ret = MQTTAsync_create(&conn.client,
                                conn_config->mqtt_broker_host,
-                               conn_config->serialnumber,
+                               conn.serialnumber,
                                MQTTCLIENT_PERSISTENCE_NONE,
                                NULL);
         if (ret != MQTTASYNC_SUCCESS)
@@ -594,6 +601,10 @@ void cleanup_control_plane_conn()
         if (conn.serialnumber)
         {
                 free(conn.serialnumber);
+        }
+        if (conn.mqtt_broker_host)
+        {
+                free(conn.mqtt_broker_host);
         }
         if (conn.endpoint_config)
         {
@@ -670,47 +681,56 @@ static int handle_policy_status(struct control_plane_conn_t* conn, const char* s
 
 enum MSG_RESPONSE_CODE send_hello_message(bool value)
 {
-        if (!conn.client) {
+        if (!conn.client)
+        {
                 LOG_WARN("Control plane connection not started");
                 return MSG_ERROR;
         }
-        
+
         struct control_plane_conn_message message;
         message.type = CONTROL_PLANE_SEND_HELLO;
         message.data.hello.value = value;
-        
+
         int rc = external_management_request(conn.socket_pair[THREAD_EXT], &message, sizeof(message));
-        if (rc != MSG_OK) {
-                LOG_ERROR("Failed to send hello message: %s", strerror(errno));
+        if (rc != MSG_OK)
+        {
+                LOG_ERROR("Failed to send hello message: %d", rc);
         }
-        
+
         return rc;
 }
 
 enum MSG_RESPONSE_CODE send_log_message(const char* message)
 {
-        if (!conn.client) {
+        if (!conn.client)
+        {
                 LOG_WARN("Control plane connection not started");
                 return MSG_ERROR;
         }
-        
-        if (message == NULL) {
+
+        if (message == NULL)
+        {
                 LOG_WARN("Cannot send NULL log message");
                 return MSG_ERROR;
         }
-        
+
         struct control_plane_conn_message msg;
         msg.type = CONTROL_PLANE_SEND_LOG;
         msg.data.log.message = strdup(message);
-        if (msg.data.log.message == NULL) {
+        if (msg.data.log.message == NULL)
+        {
                 LOG_ERROR("Failed to allocate memory for log message");
                 return MSG_ERROR;
         }
-        
-        enum MSG_RESPONSE_CODE rc = external_management_request(conn.socket_pair[THREAD_EXT], &msg, sizeof(msg));
-        if (rc != MSG_OK) {
+
+        enum MSG_RESPONSE_CODE rc = external_management_request(conn.socket_pair[THREAD_EXT],
+                                                                &msg,
+                                                                sizeof(msg));
+        if (rc != MSG_OK)
+        {
                 LOG_ERROR("Failed to send log message: %s", strerror(errno));
-                if (msg.data.log.message) {
+                if (msg.data.log.message)
+                {
                         free(msg.data.log.message);
                 }
         }
@@ -719,33 +739,40 @@ enum MSG_RESPONSE_CODE send_log_message(const char* message)
 
 enum MSG_RESPONSE_CODE send_policy_status(const char* status)
 {
-        if (!conn.client) {
+        if (!conn.client)
+        {
                 LOG_WARN("Control plane connection not started");
                 return MSG_ERROR;
         }
-        
-        if (status == NULL) {
+
+        if (status == NULL)
+        {
                 LOG_WARN("Cannot send NULL policy status");
                 return MSG_ERROR;
         }
-        
+
         struct control_plane_conn_message msg;
         msg.type = CONTROL_PLANE_SEND_POLICY_STATUS;
         msg.data.policy.status = strdup(status);
-        if (msg.data.policy.status == NULL) {
+        if (msg.data.policy.status == NULL)
+        {
                 LOG_ERROR("Failed to allocate memory for policy status");
                 return MGMT_ERR;
         }
-        
-        enum MSG_RESPONSE_CODE rc = external_management_request(conn.socket_pair[THREAD_EXT], &msg, sizeof(msg));
-        if (rc != MSG_OK) {
+
+        enum MSG_RESPONSE_CODE rc = external_management_request(conn.socket_pair[THREAD_EXT],
+                                                                &msg,
+                                                                sizeof(msg));
+        if (rc != MSG_OK)
+        {
                 LOG_ERROR("Failed to send policy status: %s", strerror(errno));
-                if (msg.data.policy.status) {
+                if (msg.data.policy.status)
+                {
                         free(msg.data.policy.status);
                 }
                 return rc;
         }
-        
+
         return rc;
 }
 
@@ -764,7 +791,9 @@ enum MSG_RESPONSE_CODE stop_control_plane_conn()
         message.type = CONTROL_PLANE_CONN_STOP;
 
         // Send stop message to thread
-        enum MSG_RESPONSE_CODE rc = external_management_request(conn.socket_pair[THREAD_EXT], &message, sizeof(message));
+        enum MSG_RESPONSE_CODE rc = external_management_request(conn.socket_pair[THREAD_EXT],
+                                                                &message,
+                                                                sizeof(message));
         if (rc != MSG_OK)
         {
                 LOG_ERROR("Failed to send stop message: %s", strerror(errno));
