@@ -25,6 +25,8 @@ LOG_MODULE_CREATE(configuration_manager);
 // forward declaration
 void cleanup_sysconfig();
 void cleanup_configuration_manager(void);
+void cleanup_application_config(struct application_manager_config* config);
+void cleanup_hardware_configs(struct hardware_configs* hw_configs);
 
 int test_server_conn(char* host, asl_endpoint_configuration* endpoint_config);
 int write_sysconfig(void);
@@ -68,6 +70,30 @@ const struct sysconfig* get_sysconfig()
         return (const struct sysconfig*) &configuration_manager.sys_config;
 }
 
+int ack_dataplane_update()
+{
+        if (!configuration_manager.initialized)
+        {
+                LOG_ERROR("Configuration manager not initialized");
+                return -1;
+        }
+        switch (configuration_manager.sys_config.dataplane_active)
+        {
+        case ACTIVE_ONE:
+                configuration_manager.sys_config.dataplane_active = ACTIVE_TWO;
+                break;
+        case ACTIVE_TWO:
+                configuration_manager.sys_config.dataplane_active = ACTIVE_ONE;
+                break;
+        case ACTIVE_NONE:
+                LOG_ERROR("No active dataplane configuration");
+                return -1;
+        }
+
+        write_sysconfig();
+
+        return 0;
+}
 int get_dataplane_update(struct application_manager_config* config, struct hardware_configs* hw_config)
 {
         if (!config || !hw_config || !configuration_manager.initialized)
@@ -177,7 +203,7 @@ int get_dataplane_update(struct application_manager_config* config, struct hardw
 }
 
 // store config
-int controlplane_store_config(char* buffer, size_t size)
+int dataplane_store_config(char* buffer, size_t size)
 {
         if (!buffer || size == 0 || !configuration_manager.initialized)
         {
@@ -404,6 +430,57 @@ error:
                 freeaddrinfo(addr);
         return ret;
 }
+
+int dataplane_set_certificate(char* buffer, size_t size)
+{
+        if (!buffer || size == 0 || !configuration_manager.initialized)
+        {
+                LOG_ERROR("Invalid buffer or size");
+                return -1;
+        }
+        char* destination = NULL;
+        asl_endpoint_configuration* endpoint_config = malloc(sizeof(asl_endpoint_configuration));
+        if (!endpoint_config)
+        {
+                LOG_ERROR("Failed to allocate memory for endpoint configuration");
+                goto error;
+        }
+        int ret = 0;
+
+        switch (configuration_manager.sys_config.dataplane_active)
+        {
+        case ACTIVE_ONE:
+                destination = configuration_manager.application_2_path;
+                break;
+        case ACTIVE_TWO:
+                destination = configuration_manager.application_1_path;
+                break;
+        case ACTIVE_NONE:
+                LOG_INFO("No active dataplane configuration is set, using 1 as default");
+                destination = configuration_manager.application_1_path;
+                break;
+        default:
+                LOG_ERROR("Invalid dataplane active configuration");
+                goto error;
+        }
+        if (!destination)
+        {
+                goto error;
+        }
+
+        // store certificates in file
+        ret = write_file(destination, buffer, size, false);
+        if (ret != 0)
+        {
+                LOG_ERROR("Failed to write controlplane certificate");
+                goto error;
+        }
+
+        return 0;
+error:
+        return -1;
+}
+
 int controlplane_set_certificate(char* buffer, size_t size)
 {
         if (!buffer || size == 0 || !configuration_manager.initialized)
@@ -669,4 +746,184 @@ int write_sysconfig(void)
 
         LOG_INFO("Successfully wrote sysconfig to file: %s", configuration_manager.sys_config_path);
         return 0;
+}
+
+int get_active_hardware_config(struct application_manager_config* app_config,
+                               struct hardware_configs* hw_configs)
+{
+        if (!app_config || !hw_configs || !configuration_manager.initialized)
+        {
+                LOG_ERROR("Invalid arguments or configuration manager not initialized");
+                return -1;
+        }
+
+        // Initialize output structures
+        memset(app_config, 0, sizeof(struct application_manager_config));
+        memset(hw_configs, 0, sizeof(struct hardware_configs));
+
+        char* source_path = NULL;
+
+        // Determine which application config to read based on active dataplane
+        switch (configuration_manager.sys_config.dataplane_active)
+        {
+        case ACTIVE_ONE:
+                source_path = configuration_manager.application_1_path;
+                break;
+        case ACTIVE_TWO:
+                source_path = configuration_manager.application_2_path;
+                break;
+        case ACTIVE_NONE:
+                LOG_INFO("No active dataplane configuration, using application_1_path as default");
+                source_path = configuration_manager.application_1_path;
+                break;
+        default:
+                LOG_ERROR("Invalid dataplane active configuration");
+                return -1;
+        }
+
+        if (!source_path)
+        {
+                LOG_ERROR("Failed to determine source path for application configuration");
+                return -1;
+        }
+
+        // Read the configuration file
+        char* buffer = NULL;
+        size_t buffer_size = 0;
+        int ret = read_file(source_path, (uint8_t**) &buffer, &buffer_size);
+        if (ret < 0)
+        {
+                LOG_ERROR("Failed to read application configuration from %s", source_path);
+                return -1;
+        }
+
+        // Parse the configuration
+        ret = parse_config(buffer, buffer_size, app_config, hw_configs);
+        if (ret != 0)
+        {
+                LOG_ERROR("Failed to parse application configuration");
+                free(buffer);
+                return -1;
+        }
+
+        // Now load certificates for each group's endpoint configuration
+        for (int i = 0; i < app_config->number_of_groups; i++)
+        {
+                if (!app_config->group_config[i].endpoint_config)
+                {
+                        LOG_ERROR("Endpoint configuration missing for group %d", i);
+                        free(buffer);
+                        cleanup_application_config(app_config);
+                        cleanup_hardware_configs(hw_configs);
+                        return -1;
+                }
+
+                // Determine which dataplane certificate chain to use
+                char* chain_path = NULL;
+                switch (configuration_manager.sys_config.dataplane_active)
+                {
+                case ACTIVE_ONE:
+                        chain_path = configuration_manager.dataplane_1_chain_path;
+                        break;
+                case ACTIVE_TWO:
+                        chain_path = configuration_manager.dataplane_2_chain_path;
+                        break;
+                case ACTIVE_NONE:
+                        LOG_INFO("No active dataplane configuration is set, using "
+                                 "dataplane_1_chain_path as default");
+                        chain_path = configuration_manager.dataplane_1_chain_path;
+                        break;
+                default:
+                        LOG_ERROR("Invalid dataplane active configuration");
+                        free(buffer);
+                        cleanup_application_config(app_config);
+                        cleanup_hardware_configs(hw_configs);
+                        return -1;
+                }
+
+                // Load certificates into this endpoint configuration
+                ret = load_endpoint_certificates(app_config->group_config[i].endpoint_config,
+                                                 chain_path,
+                                                 configuration_manager.dataplane_key_path,
+                                                 configuration_manager.dataplane_root_cert);
+                if (ret != 0)
+                {
+                        LOG_ERROR("Failed to load certificates for group %d", i);
+                        free(buffer);
+                        cleanup_application_config(app_config);
+                        cleanup_hardware_configs(hw_configs);
+                        return -1;
+                }
+
+                LOG_INFO("Successfully loaded certificates for group %d", i);
+        }
+
+        LOG_INFO("Successfully loaded active hardware configuration from %s", source_path);
+        free(buffer);
+        return 0;
+}
+
+// Helper functions to clean up resources
+void cleanup_application_config(struct application_manager_config* config)
+{
+        if (!config)
+                return;
+
+        if (config->group_config)
+        {
+                for (int i = 0; i < config->number_of_groups; i++)
+                {
+                        if (config->group_config[i].endpoint_config)
+                        {
+                                if (config->group_config[i].endpoint_config->ciphersuites)
+                                        free((void*) config->group_config[i].endpoint_config->ciphersuites);
+                                if (config->group_config[i].endpoint_config->keylog_file)
+                                        free((void*) config->group_config[i].endpoint_config->keylog_file);
+                                if (config->group_config[i]
+                                            .endpoint_config->device_certificate_chain.buffer)
+                                        free((void*) config->group_config[i]
+                                                     .endpoint_config->device_certificate_chain.buffer);
+                                if (config->group_config[i].endpoint_config->private_key.buffer)
+                                        free((void*) config->group_config[i]
+                                                     .endpoint_config->private_key.buffer);
+                                if (config->group_config[i].endpoint_config->root_certificate.buffer)
+                                        free((void*) config->group_config[i]
+                                                     .endpoint_config->root_certificate.buffer);
+                                free(config->group_config[i].endpoint_config);
+                        }
+
+                        // Free proxy wrappers
+                        if (config->group_config[i].proxy_wrapper)
+                        {
+                                for (int j = 0; j < config->group_config[i].number_proxies; j++)
+                                {
+                                        if (config->group_config[i].proxy_wrapper[j].proxy_config.own_ip_address)
+                                                free(config->group_config[i]
+                                                             .proxy_wrapper[j]
+                                                             .proxy_config.own_ip_address);
+                                        if (config->group_config[i].proxy_wrapper[j].proxy_config.target_ip_address)
+                                                free(config->group_config[i]
+                                                             .proxy_wrapper[j]
+                                                             .proxy_config.target_ip_address);
+                                }
+                                free(config->group_config[i].proxy_wrapper);
+                        }
+                }
+                free(config->group_config);
+        }
+        config->group_config = NULL;
+        config->number_of_groups = 0;
+}
+
+void cleanup_hardware_configs(struct hardware_configs* hw_configs)
+{
+        if (!hw_configs)
+                return;
+
+        if (hw_configs->hw_configs)
+        {
+                free(hw_configs->hw_configs);
+                hw_configs->hw_configs = NULL;
+        }
+        hw_configs->number_of_hw_configs = 0;
 }

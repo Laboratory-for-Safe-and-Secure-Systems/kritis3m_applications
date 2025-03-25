@@ -44,6 +44,15 @@ struct kritis3m_service
         bool timer_initialized;
 };
 
+struct node_update_coordinator
+{
+        int update_socket[2];
+        pthread_t mainthread;
+        pthread_attr_t thread_attr;
+        int timeout_s;
+        bool initialized;
+};
+
 // ipc services
 enum service_message_type
 {
@@ -76,12 +85,6 @@ typedef struct service_message
                         char* buffer;
                         int buffer_len;
                 } cert_apply;
-                struct config_apply_req
-                {
-                        char* config;
-                        int config_len;
-                        void* cb; // Store callback as void pointer
-                } config_apply;
         } payload;
 } service_message;
 
@@ -90,15 +93,19 @@ int respond_with(int socket, enum MSG_RESPONSE_CODE response_code);
 ManagementReturncode handle_svc_message(int socket, service_message* msg, int cfg_id, int version_number);
 // init
 void* kritis3m_service_main_thread(void* arg);
-int prepare_all_interfaces(HardwareConfiguration hw_config[], int num_configs);
 // http
 void cleanup_kritis3m_service();
 // timer
 static int init_hello_timer(struct kritis3m_service* svc);
+
+// coordinator for dataplane updates
+void* handle_dataplane_apply_req(void* arg);
+
 static void cleanup_hello_timer(struct kritis3m_service* svc);
 
 /* ----------------------- MAIN kritis3m_service module -------------------------*/
 static struct kritis3m_service svc = {0};
+static struct node_update_coordinator coordinator = {0};
 
 // reset svc
 void set_kritis3m_serivce_defaults(struct kritis3m_service* svc)
@@ -194,7 +201,6 @@ void* kritis3m_service_main_thread(void* arg)
         int ret = 0;
         int cfg_id = -1;
         int version_number = -1;
-        SystemConfiguration* selected_sys_cfg = NULL;
         ManagementReturncode retval = MGMT_OK;
 
         asl_endpoint_configuration* ep_cfg = &svc->management_endpoint_config;
@@ -300,37 +306,6 @@ terminate:
         return NULL;
 }
 
-int prepare_all_interfaces(HardwareConfiguration hw_config[], int num_configs)
-{
-        if (!hw_config || num_configs <= 0 || num_configs > MAX_NUMBER_HW_CONFIG)
-        {
-                return -1;
-        }
-
-        char ip_addr[INET6_ADDRSTRLEN];
-        char cidr[4];
-        int failures = 0;
-
-        // Process each interface configuration
-        for (int i = 0; i < num_configs; i++)
-        {
-                if (parse_ip_cidr(hw_config[i].ip_cidr, ip_addr, INET6_ADDRSTRLEN, cidr, 4) != 0)
-                {
-                        failures++;
-                        continue;
-                }
-
-                bool is_v6 = is_ipv6(ip_addr);
-
-                if (add_ip_address(hw_config[i].device, ip_addr, cidr, is_v6) < 0)
-                {
-                        failures++;
-                }
-        }
-
-        return (failures > 0) ? -1 : 0;
-}
-
 enum MSG_RESPONSE_CODE stop_kritis3m_service()
 {
 
@@ -424,8 +399,6 @@ ManagementReturncode handle_svc_message(int socket, service_message* msg, int cf
                 }
         case SVC_MSG_DATAPLANE_CERT_APPLY_REQ:
                 {
-                        LOG_INFO("Received data plane certificate apply request");
-                        LOG_INFO("Buffer length: %d", msg->payload.cert_apply.buffer_len);
                         response_code = MSG_OK;
                         svc_respond_with(socket, response_code);
                         break;
@@ -441,9 +414,20 @@ ManagementReturncode handle_svc_message(int socket, service_message* msg, int cf
         case SVC_MSG_DATAPLANE_CONFIG_APPLY_REQ:
                 {
                         LOG_INFO("Received data plane config apply request");
-                        LOG_INFO("Config length: %d", msg->payload.config_apply.config_len);
-                        response_code = MSG_OK;
-                        svc_respond_with(socket, response_code);
+                        svc_respond_with(socket, MSG_OK);
+                        coordinator.initialized = false;
+                        ret = create_socketpair(coordinator.update_socket);
+                        if (ret < 0)
+                        {
+                                LOG_ERROR("Failed to create socketpair");
+                                goto error_occured;
+                        }
+                        coordinator.timeout_s = 10;
+                        pthread_attr_init(&coordinator.thread_attr);
+                        pthread_create(&coordinator.mainthread,
+                                       &coordinator.thread_attr,
+                                       handle_dataplane_apply_req,
+                                       &coordinator);
                         break;
                 }
         case SVC_MSG_RESPONSE:
@@ -474,118 +458,152 @@ void cleanup_kritis3m_service()
         cleanup_hello_timer(&svc);
 }
 
-struct node_update_coordinatior
+enum MSG_RESPONSE_CODE dataplane_config_apply_send_status(struct policy_status_t* status)
 {
-        int update_socket[2];
-        pthread_t mainthread;
-        pthread_attr_t thread_attr;
-        bool initialized;
-};
+        return external_management_request(coordinator.update_socket[THREAD_EXT],
+                                           status,
+                                           sizeof(struct policy_status_t));
+}
 
-static struct node_update_coordinatior node_update_coordinatior = {0};
-struct node_update_init_params
+void* handle_dataplane_apply_req(void* arg)
 {
-
-        int timeout_s;
-        char* buffer;
-        int buffer_len;
-        ManagementReturncode (*cb)(int);
-};
-
-void* handle_ctrlplane_apply_req(void* arg)
-{
-        int ret = 0;
-        struct node_update_init_params* params = (struct node_update_init_params*) arg;
-        node_update_coordinatior.initialized = true;
+        ManagementReturncode ret;
+        coordinator.initialized = true;
 
         struct pollfd update_pollfd;
-        update_pollfd.fd = node_update_coordinatior.update_socket[THREAD_INT];
+        update_pollfd.fd = coordinator.update_socket[THREAD_INT];
         update_pollfd.events = POLLIN | POLLERR;
 
-        // these states correspond to grpc
-        enum apply_states
+        // control plane sends NODE_UPDATE_RECEIVED
+        enum apply_states current_state = NODE_UPDATE_RECEIVED;
+        if (ret < 0)
         {
-                NODE_UPDATE_ERROR = 0,
-                NODE_UPDATE_UNKNOWN = 1,
-                NODE_UPDATE_RECEIVED = 3,
-                NODE_UPDATE_APPLICABLE = 4,
-                NODE_UPDATE_APPLYREQUEST = 5,
-                NODE_UPDATE_APPLIED = 6,
+                LOG_ERROR("Failed to send status to server");
+                goto error_occured;
+        }
 
-        };
-        enum apply_states current_state = NODE_UPDATE_UNKNOWN;
-        enum apply_states next_state = NODE_UPDATE_UNKNOWN;
         struct application_manager_config app_config = {0};
         struct hardware_configs hw_configs = {0};
+
+        ret = get_dataplane_update(&app_config, &hw_configs);
+        if (ret < 0)
+        {
+                LOG_ERROR("Failed to get dataplane update");
+                goto error_occured;
+        }
+        current_state = NODE_UPDATE_APPLICABLE;
+        struct policy_status_t policy_msg = {0};
+        policy_msg.module = UPDATE_COORDINATOR;
+        policy_msg.state = NODE_UPDATE_APPLICABLE;
+        policy_msg.msg = NULL;
+        policy_msg.msg_len = 0;
+        send_policy_status(&policy_msg);
 
         while (1)
         {
 
-                while (current_state != NODE_UPDATE_APPLIED)
+                if ((ret = poll(&update_pollfd, 1, coordinator.timeout_s * 1000)) >= 0)
                 {
-                        switch (current_state)
+                        if (ret == 0)
                         {
-                        case NODE_UPDATE_ERROR:
-                                // error handling
-                                // either error received from control server, or application manager or hw_config has an error
-                                break;
-                        case NODE_UPDATE_UNKNOWN:
-                                // unknown error
-                                break;
-                        case NODE_UPDATE_RECEIVED:
-                                ret = controlplane_store_config(params->buffer, params->buffer_len);
-                                if (ret < 0)
+                                memset(&policy_msg, 0, sizeof(struct policy_status_t));
+                                policy_msg.module = UPDATE_COORDINATOR;
+                                policy_msg.state = NODE_UPDATE_ERROR;
+                                policy_msg.msg = "Timeout occured";
+                                policy_msg.msg_len = strlen("Timeout occured");
+                                send_policy_status(&policy_msg);
+                                if (current_state == NODE_UPDATE_APPLIED)
                                 {
-                                        LOG_ERROR("Failed to store controlplane config");
-                                        goto error_occured;
-                                }
-                                ret = get_dataplane_update(&app_config, &hw_configs);
-                                if (ret < 0)
-                                {
-                                        LOG_ERROR("Failed to get dataplane update");
-                                        goto error_occured;
-                                }
-                                for (int i = 0; i < hw_configs.number_of_hw_configs; i++)
-                                {
-                                        ret = prepare_all_interfaces(&hw_configs.hw_configs[i], 1);
+                                        application_manager_rollback();
                                 }
 
-                                next_state = NODE_UPDATE_APPLICABLE;
-                                break;
-                        case NODE_UPDATE_APPLICABLE:
-                                params->cb(NODE_UPDATE_APPLICABLE);
-
-                                // after config is stored and hw_config is updated, signal via control_plane_conn that the config is applicable
-                                break;
-                        case NODE_UPDATE_APPLYREQUEST:
-                                // node received update request from server. start application manager and start applications
-                                break;
-                        case NODE_UPDATE_APPLIED:
-                                break;
-                        default:
-                                break;
+                                goto error_occured;
                         }
-                }
-
-                // check for update request
-                if (ret = poll(&update_pollfd, 1, -1) <= 0)
-                {
-                        goto error_occured;
-                }
-                if (update_pollfd.revents & POLLIN)
-                {
-                        int32_t signal = sockpair_read(node_update_coordinatior.update_socket[THREAD_INT],
-                                                       &signal,
-                                                       sizeof(signal));
                         if (ret < 0)
                         {
                                 LOG_ERROR("Failed to receive signal from server");
                                 goto error_occured;
                         }
-                        respond_with(node_update_coordinatior.update_socket[THREAD_INT], MSG_OK);
+                        if (update_pollfd.revents & POLLIN)
+                        {
+                                struct policy_status_t msg = {0};
+                                int32_t state = sockpair_read(coordinator.update_socket[THREAD_INT],
+                                                              &msg,
+                                                              sizeof(struct policy_status_t));
+                                enum apply_states requested_state = msg.state;
+                                enum module caller_module = msg.module;
+
+                                switch (requested_state)
+                                {
+                                case NODE_UPDATE_ERROR: // application manager
+                                        {
+                                                send_policy_status(&msg);
+                                                break;
+                                        }
+                                case NODE_UPDATE_ABORT: // can be only received from control plane
+                                        {
+                                                if (current_state == NODE_UPDATE_APPLIED)
+                                                {
+                                                        application_manager_rollback();
+                                                }
+
+                                                break;
+                                        }
+                                case NODE_UPDATE_APPLYREQUEST: // can only be received form control plane
+                                        {
+                                                ret = change_application_config(&app_config,
+                                                                                &hw_configs);
+                                                if (ret < 0)
+                                                {
+                                                        memset(&policy_msg,
+                                                               0,
+                                                               sizeof(struct policy_status_t));
+                                                        policy_msg.module = UPDATE_COORDINATOR;
+                                                        policy_msg.state = NODE_UPDATE_ERROR;
+                                                        policy_msg.msg = msg.msg;
+                                                        policy_msg.msg_len = msg.msg_len;
+                                                        send_policy_status(&policy_msg);
+                                                        goto error_occured;
+                                                }
+                                                break;
+                                        }
+                                case NODE_UPDATE_APPLIED: // can only be received from application manager
+                                        {
+                                                current_state = NODE_UPDATE_APPLIED;
+                                                memset(&policy_msg, 0, sizeof(struct policy_status_t));
+                                                policy_msg.module = UPDATE_COORDINATOR;
+                                                policy_msg.state = NODE_UPDATE_APPLIED;
+                                                policy_msg.msg = msg.msg;
+                                                policy_msg.msg_len = msg.msg_len;
+                                                send_policy_status(&policy_msg);
+                                                break;
+                                        }
+                                case NODE_APPLY_ACK:
+                                        {
+                                                ack_dataplane_update();
+                                                goto finish_dataplane_apply_req;
+                                        }
+                                default:
+                                        LOG_ERROR("Invalid module");
+                                        goto error_occured;
+                                }
+                        }
                 }
+
+        finish_dataplane_apply_req:
+                coordinator.initialized = false;
+                closesocket(coordinator.update_socket[THREAD_INT]);
+                closesocket(coordinator.update_socket[THREAD_EXT]);
+                coordinator.update_socket[THREAD_INT] = -1;
+                coordinator.update_socket[THREAD_EXT] = -1;
+                return NULL;
+
         error_occured:
-                node_update_coordinatior.initialized = false;
+                coordinator.initialized = false;
+                closesocket(coordinator.update_socket[THREAD_INT]);
+                closesocket(coordinator.update_socket[THREAD_EXT]);
+                coordinator.update_socket[THREAD_INT] = -1;
+                coordinator.update_socket[THREAD_EXT] = -1;
                 return NULL;
         }
 }
@@ -658,7 +676,7 @@ enum MSG_RESPONSE_CODE ctrlplane_cert_apply_req(char* buffer, int buffer_len)
         return external_management_request(svc.management_socket[THREAD_EXT], &request, sizeof(request));
 }
 
-enum MSG_RESPONSE_CODE dataplane_config_apply_req(char* config, int config_len, config_status_cb cb)
+enum MSG_RESPONSE_CODE dataplane_config_apply_req()
 {
         if (!svc.initialized || svc.management_socket[THREAD_EXT] < 0)
         {
@@ -666,17 +684,8 @@ enum MSG_RESPONSE_CODE dataplane_config_apply_req(char* config, int config_len, 
                 return MSG_ERROR;
         }
 
-        if (!config || config_len <= 0)
-        {
-                LOG_ERROR("Invalid config parameters");
-                return MSG_ERROR;
-        }
-
         service_message request = {0};
         request.msg_type = SVC_MSG_DATAPLANE_CONFIG_APPLY_REQ;
-        request.payload.config_apply.config = config;
-        request.payload.config_apply.config_len = config_len;
-        request.payload.config_apply.cb = (void*) cb; // Cast callback to void pointer
         return external_management_request(svc.management_socket[THREAD_EXT], &request, sizeof(request));
 }
 

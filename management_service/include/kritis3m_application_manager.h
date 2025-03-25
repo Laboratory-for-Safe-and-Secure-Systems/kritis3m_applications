@@ -1,5 +1,6 @@
 #ifndef KRITIS3M_APPLICATION_MANAGER_H
 #define KRITIS3M_APPLICATION_MANAGER_H
+#include "configuration_manager.h"
 #include "kritis3m_configuration.h"
 
 /**
@@ -15,10 +16,22 @@ void init_application_manager(void);
  * This function starts the application manager by sending the provided
  * ApplicationConfiguration, which contains the configurations of the kritis3m applications
  *
- * @param configuration Pointer to the ApplicationConfiguration structure.
+ * @param app_config Pointer to the application_manager_config structure.
+ * @param hw_configs Pointer to the hardware_configs structure.
  * @return int Returns 0 on success, or an error code on failure.
  */
-int start_application_manager(ApplicationConfiguration* configuration);
+int start_application_manager(struct application_manager_config* app_config,
+                              struct hardware_configs* hw_configs);
+
+/**
+ * @brief Stop the application manager thread.
+ *
+ * This function sends a stop request to the application manager thread,
+ * which will clean up any running applications and exit.
+ *
+ * @return int Returns 0 on success, or an error code on failure.
+ */
+int stop_application_manager();
 
 /**
  * @brief Check if the application manager is running.
@@ -40,8 +53,31 @@ bool is_running(void);
 bool confirm_client(int application_id, struct sockaddr* connecting_client);
 
 /**
- * @brief Stop the application manager main thread.
+ * @brief Changes the current application configuration.
+ *
+ * This function sends a request to change the current application configuration
+ * with a new one. The previous configuration will be stored as a backup.
+ *
+ * @param new_config Pointer to the new application manager configuration.
+ * @return int Returns 0 on success, or an error code on failure.
  */
-int stop_application_manager();
+int change_application_config(struct application_manager_config* new_config,
+                              struct hardware_configs* hw_config);
 
+/**
+ * @brief Starts an application with the provided configuration.
+ *
+ * This function sends a request to start an application with the given configuration.
+ *
+ * @param config Pointer to the application manager configuration.
+ * @return int Returns 0 on success, or an error code on failure.
+ */
+int start_application(struct application_manager_config* config, struct hardware_configs* hw_configs);
+
+/**
+ * @brief Rolls back the application configuration.
+ *
+ * This function rolls back the application configuration to the previous one.
+ */
+int application_manager_rollback();
 #endif // KRITIS3M_APPLICATION_MANAGER_H

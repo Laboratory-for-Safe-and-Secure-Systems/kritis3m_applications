@@ -13,12 +13,6 @@
 LOG_MODULE_CREATE(kritis3m_config_paser);
 
 /*--------------------- FORWARD DECLARATION ------------------------------------*/
-int parse_whitelist(cJSON* json_obj, Whitelist* whitelist);
-int parse_crypo_config(cJSON* json_obj,
-                       CryptoProfile* CryptoProfile,
-                       char* secure_middleware_path,
-                       char* pin);
-int parse_application(cJSON* json_obj, Kritis3mApplications* application);
 
 int parse_sysconfig_to_json(struct sysconfig* config, char* json_buffer, int json_buffer_size)
 {
@@ -600,11 +594,12 @@ int parse_config(char* buffer,
                 cJSON* group_log_level = cJSON_GetObjectItem(group_item, "group_log_level");
                 if (group_log_level && cJSON_IsNumber(group_log_level))
                 {
-                        config->group_config[i].proxy_config.log_level = group_log_level->valueint;
+                        config->group_config[i]
+                                .proxy_wrapper->proxy_config.log_level = group_log_level->valueint;
                 }
                 else
                 {
-                        config->group_config[i].proxy_config.log_level = 1; // Default to 1 if not specified
+                        config->group_config[i].proxy_wrapper->proxy_config.log_level = 4; // Default to 1 if not specified
                 }
 
                 // Parse proxies array to get number of proxies
@@ -625,11 +620,12 @@ int parse_config(char* buffer,
                                         if (proxy_type && cJSON_IsNumber(proxy_type))
                                         {
                                                 config->group_config[i]
-                                                        .proxy_config.application_id = proxy_type->valueint;
+                                                        .proxy_wrapper->direction = proxy_type->valueint;
                                         }
                                         else
                                         {
-                                                config->group_config[i].proxy_config.application_id = 1; // Default ID
+                                                config->group_config[i].proxy_wrapper->direction = 0; // Default ID
+                                                LOG_ERROR("Invalid proxy type for group %d", i);
                                         }
 
                                         // Extract port from server_endpoint_addr (format: "ip:port")
@@ -641,18 +637,20 @@ int parse_config(char* buffer,
                                                 if (colon_pos)
                                                 {
                                                         config->group_config[i]
-                                                                .proxy_config.listening_port = atoi(
-                                                                colon_pos + 1);
+                                                                .proxy_wrapper->proxy_config
+                                                                .listening_port = atoi(colon_pos + 1);
                                                 }
                                                 else
                                                 {
                                                         config->group_config[i]
-                                                                .proxy_config.listening_port = 0; // Default port
+                                                                .proxy_wrapper->proxy_config
+                                                                .listening_port = 0; // Default port
                                                 }
                                         }
                                         else
                                         {
-                                                config->group_config[i].proxy_config.listening_port = 0; // Default port
+                                                config->group_config[i]
+                                                        .proxy_wrapper->proxy_config.listening_port = 0; // Default port
                                         }
                                 }
                         }
@@ -660,8 +658,8 @@ int parse_config(char* buffer,
                         {
                                 LOG_WARN("No proxies defined for group %d", i);
                                 config->group_config[i].number_proxies = 0;
-                                config->group_config[i].proxy_config.application_id = 0;
-                                config->group_config[i].proxy_config.listening_port = 0;
+                                config->group_config[i].proxy_wrapper->proxy_config.application_id = 0;
+                                config->group_config[i].proxy_wrapper->proxy_config.listening_port = 0;
                         }
                 }
                 else

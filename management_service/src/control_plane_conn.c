@@ -7,9 +7,12 @@
 #include <string.h>
 
 #include "MQTTAsync.h"
+#include "cJSON.h"
+#include "configuration_manager.h"
 #include "file_io.h"
 #include "ipc.h"
 #include "kritis3m_configuration.h"
+#include "kritis3m_scale_service.h"
 #include "logging.h"
 #include "networking.h"
 #include "poll_set.h"
@@ -80,7 +83,7 @@ static int subscribe_to_topics(struct control_plane_conn_t* conn);
 static int handle_management_message(struct control_plane_conn_t* conn);
 static int handle_hello_request(struct control_plane_conn_t* conn, bool value);
 static int handle_log_request(struct control_plane_conn_t* conn, const char* message);
-static int handle_policy_status(struct control_plane_conn_t* conn, const char* status);
+static int handle_policy_status(struct control_plane_conn_t* conn, struct policy_status_t* status);
 static int publish_message(struct control_plane_conn_t* conn,
                            const char* topic_format,
                            const void* payload,
@@ -114,7 +117,7 @@ struct control_plane_conn_message
                 } hello;
                 struct
                 {
-                        char* status;
+                        struct policy_status_t status;
                 } policy;
         } data;
 };
@@ -158,6 +161,7 @@ void connlost(void* context, char* cause)
 
 int msgarrvd(void* context, char* topicName, int topicLen, MQTTAsync_message* message)
 {
+        cJSON* json = NULL;
         struct control_plane_conn_t* conn = (struct control_plane_conn_t*) context;
         char* payload = (char*) message->payload;
 
@@ -172,7 +176,19 @@ int msgarrvd(void* context, char* topicName, int topicLen, MQTTAsync_message* me
         if (strcmp(topicName, conn->topic_config) == 0)
         {
                 LOG_INFO("Received new configuration: %.*s", message->payloadlen, payload);
-                write_file("./config.json", payload, message->payloadlen, false);
+                struct policy_status_t policy_msg = {0};
+                policy_msg.module = CONTROL_PLANE_CONNECTION;
+                policy_msg.state = NODE_UPDATE_RECEIVED;
+                policy_msg.msg = "Configuration received";
+                policy_msg.msg_len = strlen(policy_msg.msg);
+                handle_policy_status(conn, &policy_msg);
+                int ret = dataplane_store_config(payload, message->payloadlen);
+                if (ret != 0)
+                {
+                        LOG_ERROR("Failed to store configuration");
+                        goto cleanup;
+                }
+                dataplane_config_apply_req();
         }
         else if (strcmp(topicName, conn->topic_cert_mgmt) == 0)
         {
@@ -184,8 +200,37 @@ int msgarrvd(void* context, char* topicName, int topicLen, MQTTAsync_message* me
                 bool value = (strncmp(payload, "true", message->payloadlen) == 0);
                 LOG_INFO("Received cert production status: %s", value ? "true" : "false");
         }
+        else if ((strcmp(topicName, conn->topic_policy) == 0))
+        {
+                LOG_INFO("Received policy status: %s", payload);
+                cJSON* json = cJSON_ParseWithLength(message->payload, message->payloadlen);
+                if (json == NULL)
+                {
+                        LOG_ERROR("Failed to parse policy status");
+                        goto cleanup;
+                }
+                cJSON* status = cJSON_GetObjectItem(json, "status");
+                if (status == NULL)
+                {
+                        LOG_ERROR("Failed to get status from policy status");
+                        goto cleanup;
+                }
+                enum apply_states status_value = status->valueint;
+                LOG_DEBUG("Received policy status: %d", status_value);
+                struct policy_status_t policy_msg = {0};
+                policy_msg.module = CONTROL_PLANE_CONNECTION;
+                policy_msg.state = status_value;
+                policy_msg.msg = "Policy status received";
+                policy_msg.msg_len = strlen(policy_msg.msg);
+                dataplane_config_apply_send_status(&policy_msg);
+        }
 
 cleanup:
+        if (json)
+        {
+                free(json);
+                json = NULL;
+        }
         MQTTAsync_freeMessage(&message);
         MQTTAsync_free(topicName);
         return 1;
@@ -411,16 +456,6 @@ static int handle_management_message(struct control_plane_conn_t* conn)
         {
                 LOG_WARN("Cannot process message, MQTT client not connected");
 
-                // Free any allocated memory to prevent leaks
-                if (message.type == CONTROL_PLANE_SEND_LOG && message.data.log.message)
-                {
-                        free(message.data.log.message);
-                }
-                else if (message.type == CONTROL_PLANE_SEND_POLICY_STATUS && message.data.policy.status)
-                {
-                        free(message.data.policy.status);
-                }
-
                 send_return_code(conn, MGMT_CONNECT_ERROR);
                 return -1;
         }
@@ -465,19 +500,11 @@ static int handle_management_message(struct control_plane_conn_t* conn)
                 break;
 
         case CONTROL_PLANE_SEND_POLICY_STATUS:
-                if (message.data.policy.status)
+                LOG_DEBUG("Sending policy status: %s", message.data.policy.status);
+                rc = handle_policy_status(conn, &message.data.policy.status);
+                if (rc != MQTTASYNC_SUCCESS)
                 {
-                        LOG_DEBUG("Sending policy status: %s", message.data.policy.status);
-                        rc = handle_policy_status(conn, message.data.policy.status);
-                        if (rc != MQTTASYNC_SUCCESS)
-                        {
-                                LOG_ERROR("Failed to send policy status: %d", rc);
-                                return_code = MSG_ERROR;
-                        }
-                }
-                else
-                {
-                        LOG_WARN("Received policy status with NULL content");
+                        LOG_ERROR("Failed to send policy status: %d", rc);
                         return_code = MSG_ERROR;
                 }
                 break;
@@ -674,9 +701,56 @@ static int handle_log_request(struct control_plane_conn_t* conn, const char* mes
         return publish_message(conn, conn->topic_log, message, strlen(message), QOS, 0);
 }
 
-static int handle_policy_status(struct control_plane_conn_t* conn, const char* status)
+static int handle_policy_status(struct control_plane_conn_t* conn, struct policy_status_t* status)
 {
-        return publish_message(conn, conn->topic_policy, status, strlen(status), QOS, 0);
+        char* module_name = NULL;
+        if (!status || !conn)
+        {
+                LOG_ERROR("Invalid policy status or control plane connection");
+                return -1;
+        }
+        switch (status->module)
+        {
+        case CONTROL_PLANE_CONNECTION:
+                {
+                        module_name = "control plane";
+                        break;
+                }
+        case APPLICATION_MANAGER:
+                {
+                        module_name = "application manager";
+                        break;
+                }
+        case UPDATE_COORDINATOR:
+                {
+                        module_name = "update coordinator";
+                        break;
+                }
+        default:
+                {
+                        module_name = "";
+                        break;
+                }
+        }
+
+        char ret_val[900];
+        int ret = snprintf(ret_val,
+                           sizeof(ret_val),
+                           "{\"status\": %d,\n \"serial-number\": \"%s\",\n \"module\": "
+                           "\"%s\",\n "
+                           "\"msg\": \"%s\"}",
+                           status->state,
+                           conn->serialnumber,
+                           module_name,
+                           status->msg);
+        if (ret < 0 || ret >= sizeof(ret_val))
+        {
+                LOG_ERROR("Failed to format dataplane status - buffer too small or "
+                          "encoding error");
+                return -1;
+        }
+
+        return publish_message(conn, conn->topic_policy, ret_val, ret, QOS, 0);
 }
 
 enum MSG_RESPONSE_CODE send_hello_message(bool value)
@@ -737,28 +811,19 @@ enum MSG_RESPONSE_CODE send_log_message(const char* message)
         return rc;
 }
 
-enum MSG_RESPONSE_CODE send_policy_status(const char* status)
+enum MSG_RESPONSE_CODE send_policy_status(struct policy_status_t* status)
 {
+
         if (!conn.client)
         {
                 LOG_WARN("Control plane connection not started");
                 return MSG_ERROR;
         }
 
-        if (status == NULL)
-        {
-                LOG_WARN("Cannot send NULL policy status");
-                return MSG_ERROR;
-        }
-
         struct control_plane_conn_message msg;
         msg.type = CONTROL_PLANE_SEND_POLICY_STATUS;
-        msg.data.policy.status = strdup(status);
-        if (msg.data.policy.status == NULL)
-        {
-                LOG_ERROR("Failed to allocate memory for policy status");
-                return MGMT_ERR;
-        }
+
+        msg.data.policy.status = *status;
 
         enum MSG_RESPONSE_CODE rc = external_management_request(conn.socket_pair[THREAD_EXT],
                                                                 &msg,
@@ -766,10 +831,6 @@ enum MSG_RESPONSE_CODE send_policy_status(const char* status)
         if (rc != MSG_OK)
         {
                 LOG_ERROR("Failed to send policy status: %s", strerror(errno));
-                if (msg.data.policy.status)
-                {
-                        free(msg.data.policy.status);
-                }
                 return rc;
         }
 

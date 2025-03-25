@@ -36,7 +36,9 @@ enum MSG_RESPONSE_CODE ctrlplane_cert_apply_req(char* buffer, int buffer_len);
 // returns callback which is used by control plane conn to await signal for synchronous update
 // cb: callback function
 // arg: argument to pass to the callback
-typedef ManagementReturncode config_status_cb(int);
-enum MSG_RESPONSE_CODE dataplane_config_apply_req(char* config, int config_len, config_status_cb cb);
+typedef ManagementReturncode config_status_cb(int32_t);
+
+enum MSG_RESPONSE_CODE dataplane_config_apply_req();
+enum MSG_RESPONSE_CODE dataplane_config_apply_send_status(struct policy_status_t* status);
 
 #endif // KRITIS3M_SCALE_SERVICE_H

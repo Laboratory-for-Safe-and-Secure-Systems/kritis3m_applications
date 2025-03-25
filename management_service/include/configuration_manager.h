@@ -13,6 +13,12 @@ enum ACTIVE
         ACTIVE_ONE,
         ACTIVE_TWO,
 };
+enum PROXY_TYPE
+{
+        PROXY_UNSPECIFIC = 0,
+        PROXY_FORWARD,
+        PROXY_REVERSE,
+};
 
 struct sysconfig
 {
@@ -42,12 +48,17 @@ struct hardware_configs
         int number_of_hw_configs;
 };
 
+struct proxy_wrapper
+{
+        proxy_config proxy_config;
+        int direction;
+};
+
 struct group_config
 {
         asl_endpoint_configuration* endpoint_config;
         int number_proxies;
-        proxy_config proxy_config;
-        int number_of_applications;
+        struct proxy_wrapper* proxy_wrapper;
 };
 
 struct application_manager_config
@@ -59,8 +70,29 @@ struct application_manager_config
 const struct sysconfig* get_sysconfig();
 
 int get_dataplane_update(struct application_manager_config* config, struct hardware_configs* hw_config);
+int ack_dataplane_update();
 
+/**
+ * @brief Reads hardware configuration based on the active dataplane configuration
+ *
+ * This function reads in the hardware configuration from either application_1_path or application_2_path
+ * based on which dataplane configuration is active, and populates the provided structures.
+ *
+ * @param[out] app_config Pointer to application_manager_config structure to be populated
+ * @param[out] hw_configs Pointer to hardware_configs structure to be populated
+ * @return 0 on success, -1 on failure
+ *
+ * @note Both structures are allocated by this function and must be freed by the caller.
+ *       In case of an error, any allocated memory is freed internally.
+ */
+int get_active_hardware_config(struct application_manager_config* app_config,
+                               struct hardware_configs* hw_configs);
+
+int dataplane_set_certificate(char* buffer, size_t size);
 int controlplane_set_certificate(char* buffer, size_t size);
-int controlplane_store_config(char* buffer, size_t size);
+int dataplane_store_config(char* buffer, size_t size);
+
+void cleanup_application_config(struct application_manager_config* config);
+void cleanup_hardware_configs(struct hardware_configs* hw_configs);
 
 #endif // CONFIGURATION_MANAGER_H

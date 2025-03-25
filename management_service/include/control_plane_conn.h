@@ -65,11 +65,38 @@ enum policy_status
         CONFIG_APPLIED,
 
 };
+
+enum apply_states
+{
+        NODE_UPDATE_ERROR = 0,
+        NODE_UPDATE_ABORT = 1, // node sends to server -> causing other nodes to rollback, server sends to node
+        NODE_UPDATE_RECEIVED = 2,
+        NODE_UPDATE_APPLICABLE = 3, // node sends to server // we could check capabilities of the hardware
+        NODE_UPDATE_APPLYREQUEST = 4, // server sends to node
+        NODE_UPDATE_APPLIED = 5,      // node sends to server
+        NODE_APPLY_ACK = 6,           // server sends to node
+};
+
+enum module
+{
+        CONTROL_PLANE_CONNECTION,
+        APPLICATION_MANAGER,
+        SCALE_SERVICE,
+        UPDATE_COORDINATOR,
+};
+struct policy_status_t
+{
+        enum module module;
+        enum apply_states state;
+        char* msg;
+        int32_t msg_len;
+};
+
 /**
  * Send a policy status to the control plane
  * @param status The policy status to send
  * @return Returns a MSG_RESPONSE_CODE indicating the result
  */
-enum MSG_RESPONSE_CODE send_policy_status(const char* status);
+enum MSG_RESPONSE_CODE send_policy_status(struct policy_status_t* status);
 
 #endif // CONTROL_PLANE_CONN_H
