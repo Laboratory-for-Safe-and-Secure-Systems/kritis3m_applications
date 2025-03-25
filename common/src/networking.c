@@ -1,4 +1,3 @@
-
 #include <errno.h>
 #include <stdint.h>
 
@@ -665,7 +664,10 @@ int add_ip_address(const void* iface, const char* ip_addr, const char* cidr, boo
                 else
 #endif
                 {
-                        LOG_ERROR("Command %s failed with error code %d (output %s)", ret, output);
+                        LOG_ERROR("Command '%s' failed with error code %d (output %s)",
+                                  command,
+                                  ret,
+                                  output);
                 }
         }
 
@@ -709,7 +711,10 @@ int remove_ip_address(const void* iface, const char* ip_addr, const char* cidr, 
                 else
 #endif
                 {
-                        LOG_ERROR("Command %s failed with error code %d (output %s)", ret, output);
+                        LOG_ERROR("Command '%s' failed with error code %d (output %s)",
+                                  command,
+                                  ret,
+                                  output);
                 }
         }
 
@@ -770,10 +775,6 @@ int setblocking(int fd, bool val)
 }
 
 #include <stdio.h>
-
-
-
-
 
 /* Generic method to create a socketpair for inter-thread communication */
 int create_socketpair(int socket_pair[2])

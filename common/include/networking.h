@@ -55,6 +55,9 @@ int add_ip_address(const void* iface, const char* ip_addr, const char* cidr, boo
 /* Remove an ip address from a network interface */
 int remove_ipv4_address(const void* iface, const char* ip_addr, const char* cidr, bool is_ipv6);
 
+/* Remove an IP address from a network interface */
+int remove_ip_address(const void* iface, const char* ip_addr, const char* cidr, bool is_ipv6);
+
 /* Helper method to set a socket to (non) blocking */
 int setblocking(int fd, bool val);
 
@@ -78,7 +81,6 @@ int create_listening_socket(int type, struct sockaddr* addr, socklen_t addr_len)
  * Return value is the socket file descriptor or -1 in case of an error
  */
 int create_client_socket(int type);
-
 
 /* Configure a peer socket obtained from an accept() call to a listening socket.
  *

@@ -14,10 +14,15 @@ LOG_MODULE_CREATE(configuration_manager);
 #define CONTROLPLANE_ROOT_CERT_FORMAT "%s/cert/controlplane_root_cert.pem"
 #define CONTROLPLANE_1_CHAIN_PATH_FORMAT "%s/cert/1/controlplane_chain.pem"
 #define CONTROLPLANE_2_CHAIN_PATH_FORMAT "%s/cert/2/controlplane_chain.pem"
-#define DATAPLANE_KEY_PATH_FORMAT "%s/cert/dataplane_key.pem"
-#define DATAPLANE_ROOT_CERT_FORMAT "%s/cert/dataplane_root_cert.pem"
-#define DATAPLANE_1_CHAIN_PATH_FORMAT "%s/cert/1/dataplane_chain.pem"
-#define DATAPLANE_2_CHAIN_PATH_FORMAT "%s/cert/2/dataplane_chain.pem"
+
+#define DATAPLANE_KEY_PATH_FORMAT CONTROLPLANE_KEY_PATH_FORMAT   //"%s/cert/dataplane_key.pem"
+#define DATAPLANE_ROOT_CERT_FORMAT CONTROLPLANE_ROOT_CERT_FORMAT //"%s/cert/dataplane_root_cert.pem"
+
+// for testing purposes
+#define DATAPLANE_1_CHAIN_PATH_FORMAT                                                              \
+        CONTROLPLANE_1_CHAIN_PATH_FORMAT //"%s/cert/1/dataplane_chain.pem"
+#define DATAPLANE_2_CHAIN_PATH_FORMAT                                                              \
+        CONTROLPLANE_2_CHAIN_PATH_FORMAT //"%s/cert/2/dataplane_chain.pem"
 
 #define APPLICATION_1_PATH_FORMAT "%s/application/1/application.json"
 #define APPLICATION_2_PATH_FORMAT "%s/application/2/application.json"
@@ -94,7 +99,8 @@ int ack_dataplane_update()
 
         return 0;
 }
-int get_dataplane_update(struct application_manager_config* config, struct hardware_configs* hw_config)
+int get_application_inactive(struct application_manager_config* config,
+                             struct hardware_configs* hw_config)
 {
         if (!config || !hw_config || !configuration_manager.initialized)
         {
@@ -203,7 +209,7 @@ int get_dataplane_update(struct application_manager_config* config, struct hardw
 }
 
 // store config
-int dataplane_store_config(char* buffer, size_t size)
+int application_store_inactive(char* buffer, size_t size)
 {
         if (!buffer || size == 0 || !configuration_manager.initialized)
         {
@@ -213,7 +219,7 @@ int dataplane_store_config(char* buffer, size_t size)
 
         char* destination = NULL;
 
-        switch (configuration_manager.sys_config.controlplane_active)
+        switch (configuration_manager.sys_config.application_active)
         {
         case ACTIVE_NONE:
                 LOG_INFO("No active controlplane configuration is set, using 1 as default");
@@ -331,6 +337,7 @@ int init_configuration_manager(char* base_path)
 
         if (ret < 0)
                 goto error;
+        configuration_manager.initialized = true;
         return 0;
 
 error:

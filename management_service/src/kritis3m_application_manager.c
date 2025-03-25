@@ -101,6 +101,9 @@ static struct application_manager manager = {
         .management_pair[THREAD_EXT] = -1,
         .hw_configs = NULL,
         .app_config = NULL,
+        .backup_hw_configs = NULL,
+        .backup_app_config = NULL,
+
 };
 
 /*-------------------------------  FORWARD DECLARATIONS---------------------------------*/
@@ -135,8 +138,7 @@ void init_application_manager(void)
 }
 
 // start application manager
-int start_application_manager(struct application_manager_config* app_config,
-                              struct hardware_configs* hw_configs)
+int start_application_manager()
 {
         int ret = 0;
 
@@ -147,8 +149,8 @@ int start_application_manager(struct application_manager_config* app_config,
         }
 
         // Save configuration and hardware configs
-        manager.app_config = app_config;
-        manager.hw_configs = hw_configs;
+        // manager.app_config = app_config;
+        // manager.hw_configs = hw_configs;
 
         // Initialize the application manager resources
         ret = create_socketpair(manager.management_pair);
@@ -305,7 +307,9 @@ int handle_management_message(struct application_manager* manager)
                         LOG_INFO("Received response message");
                         break;
                 }
-        case CHANGE_APPLICATION_CONFIG_REQUEST || APPLICATION_START_REQUEST:
+        case APPLICATION_START_REQUEST:
+
+        case CHANGE_APPLICATION_CONFIG_REQUEST:
                 {
                         LOG_INFO("Received change application config request");
                         struct application_manager_config* new_config = msg.data.change_config.application_config;
@@ -399,7 +403,7 @@ int handle_management_message(struct application_manager* manager)
                                                 LOG_ERROR("Failed to rollback to backup"
                                                           "configuration");
                                                 // signal update_coordinator error occured
-                                                policy_msg.state = NODE_UPDATE_ERROR;
+                                                policy_msg.state = UPDATE_ERROR;
                                                 policy_msg.msg = "Failed to rollback to backup "
                                                                  "configuration";
                                                 policy_msg.msg_len = strlen(policy_msg.msg);
@@ -408,7 +412,7 @@ int handle_management_message(struct application_manager* manager)
                                         else
                                         {
                                                 LOG_INFO("rollback sucesfully");
-                                                policy_msg.state = NODE_UPDATE_ABORT;
+                                                policy_msg.state = UPDATE_ROLLBACK;
                                                 policy_msg.msg = "Rollback to backup "
                                                                  "configuration ";
                                                 policy_msg.msg_len = strlen(policy_msg.msg);
@@ -419,7 +423,7 @@ int handle_management_message(struct application_manager* manager)
                                 {
                                         // no rollback possible
                                         // send error
-                                        ret = dataplane_config_apply_send_status(NODE_UPDATE_ERROR);
+                                        ret = dataplane_config_apply_send_status(UPDATE_ERROR);
                                 }
                                 cleanup_application_config(new_config);
                                 cleanup_hardware_configs(new_hw_configs);
@@ -428,7 +432,7 @@ int handle_management_message(struct application_manager* manager)
                         {
                                 LOG_ERROR("no backup config available application manager stop");
                                 // signal update_coordinator error occured
-                                policy_msg.state = NODE_UPDATE_ERROR;
+                                policy_msg.state = UPDATE_ERROR;
                                 policy_msg.msg = "no backup config available application manager "
                                                  "stop";
                                 policy_msg.msg_len = strlen(policy_msg.msg);
@@ -553,6 +557,8 @@ int start_application_config(struct application_manager* manager,
                              struct application_manager_config* config,
                              struct hardware_configs* hw_configs)
 {
+
+        LOG_LVL_SET(LOG_LVL_DEBUG);
         int ret = 0;
         int* started_proxy_ids = NULL;
         memset(manager->proxy_ids, -1, sizeof(manager->proxy_ids));
@@ -684,8 +690,8 @@ void* application_service_main_thread(void* arg)
         }
 
         struct pollfd poll_fd[1];
-        poll_fd[0].fd = manager->management_pair[THREAD_INT];
-        poll_fd[0].events = POLLIN;
+        poll_fd[THREAD_INT].fd = manager->management_pair[THREAD_INT];
+        poll_fd[THREAD_INT].events = POLLIN;
 
         manager->initialized = true;
         sem_post(&manager->thread_setup_sem);
@@ -699,7 +705,7 @@ void* application_service_main_thread(void* arg)
                         continue;
                 }
 
-                if (poll_fd[0].revents & POLLIN)
+                if (poll_fd[THREAD_INT].revents & POLLIN)
                 {
                         ret = handle_management_message(manager);
                         if (ret > 0)

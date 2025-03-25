@@ -50,6 +50,7 @@ struct hardware_configs
 
 struct proxy_wrapper
 {
+        char* name;
         proxy_config proxy_config;
         int direction;
 };
@@ -69,7 +70,8 @@ struct application_manager_config
 
 const struct sysconfig* get_sysconfig();
 
-int get_dataplane_update(struct application_manager_config* config, struct hardware_configs* hw_config);
+int get_application_inactive(struct application_manager_config* config,
+                             struct hardware_configs* hw_config);
 int ack_dataplane_update();
 
 /**
@@ -90,7 +92,7 @@ int get_active_hardware_config(struct application_manager_config* app_config,
 
 int dataplane_set_certificate(char* buffer, size_t size);
 int controlplane_set_certificate(char* buffer, size_t size);
-int dataplane_store_config(char* buffer, size_t size);
+int application_store_inactive(char* buffer, size_t size);
 
 void cleanup_application_config(struct application_manager_config* config);
 void cleanup_hardware_configs(struct hardware_configs* hw_configs);

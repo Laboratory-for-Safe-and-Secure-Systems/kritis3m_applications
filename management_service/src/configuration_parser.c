@@ -411,6 +411,168 @@ error:
         cJSON_Delete(root);
         return -1;
 }
+int parse_proxy(cJSON* proxy, struct proxy_wrapper* proxy_wrapper, int group_log_level)
+{
+        if (!proxy || !proxy_wrapper)
+        {
+                LOG_ERROR("Invalid parameters for parse_proxy");
+                return -1;
+        }
+        cJSON* proxy_name = cJSON_GetObjectItem(proxy, "name");
+        cJSON* proxy_type = cJSON_GetObjectItem(proxy, "proxy_type");
+        cJSON* server_endpoint_addr = cJSON_GetObjectItem(proxy, "server_endpoint_addr");
+        cJSON* client_endpoint_addr = cJSON_GetObjectItem(proxy, "client_endpoint_addr");
+        proxy_wrapper->direction = (cJSON_IsNumber(proxy_type) &&
+                                    (proxy_type->valueint > PROXY_UNSPECIFIC) &&
+                                    (proxy_type->valueint <= TLS_TLS_PROXY)) ?
+                                           proxy_type->valueint :
+                                           PROXY_UNSPECIFIC;
+
+        proxy_wrapper->proxy_config.log_level = group_log_level;
+        proxy_wrapper->proxy_config.own_ip_address = cJSON_IsString(server_endpoint_addr) ?
+                                                             duplicate_string(
+                                                                     server_endpoint_addr->valuestring) :
+                                                             NULL;
+
+        proxy_wrapper->proxy_config.target_ip_address = cJSON_IsString(client_endpoint_addr) ?
+                                                                duplicate_string(
+                                                                        client_endpoint_addr->valuestring) :
+                                                                NULL;
+
+        proxy_wrapper->name = cJSON_IsString(proxy_name) ? duplicate_string(proxy_name->valuestring) :
+                                                           NULL;
+
+        // get port from addr
+        char* colon_pos = strrchr(proxy_wrapper->proxy_config.own_ip_address, ':');
+        if (colon_pos)
+        {
+                proxy_wrapper->proxy_config.listening_port = atoi(colon_pos + 1);
+        }
+        else
+                goto error_occured;
+
+        // get port from addr
+        colon_pos = strrchr(proxy_wrapper->proxy_config.target_ip_address, ':');
+        if (colon_pos)
+        {
+                proxy_wrapper->proxy_config.target_port = atoi(colon_pos + 1);
+        }
+        else
+                goto error_occured;
+
+        return (proxy_wrapper->proxy_config.own_ip_address != NULL &&
+                proxy_wrapper->proxy_config.target_ip_address != NULL) ?
+                       0 :
+                       -1;
+error_occured:
+        LOG_ERROR("Error parsing proxy");
+        return -1;
+}
+int parse_endpoint_config(asl_endpoint_configuration* endpoint_config, cJSON* endpoint_json)
+{
+        if (!endpoint_config || !endpoint_json)
+        {
+                LOG_ERROR("Invalid parameters for parse_endpoint_config");
+                return -1;
+        }
+
+        cJSON* kex = cJSON_GetObjectItem(endpoint_json, "asl_key_exchange_method");
+        if (kex && cJSON_IsString(kex))
+        {
+                const char* kex_str = kex->valuestring;
+
+                if (strcmp(kex_str, "ASL_KEX_DEFAULT") == 0)
+                        endpoint_config->key_exchange_method = ASL_KEX_DEFAULT;
+                else if (strcmp(kex_str, "ASL_KEX_CLASSIC_SECP256") == 0)
+                        endpoint_config->key_exchange_method = ASL_KEX_CLASSIC_SECP256;
+                else if (strcmp(kex_str, "ASL_KEX_CLASSIC_SECP384") == 0)
+                        endpoint_config->key_exchange_method = ASL_KEX_CLASSIC_SECP384;
+                else if (strcmp(kex_str, "ASL_KEX_CLASSIC_SECP521") == 0)
+                        endpoint_config->key_exchange_method = ASL_KEX_CLASSIC_SECP521;
+                else if (strcmp(kex_str, "ASL_KEX_CLASSIC_X25519") == 0)
+                        endpoint_config->key_exchange_method = ASL_KEX_CLASSIC_X25519;
+                else if (strcmp(kex_str, "ASL_KEX_CLASSIC_X448") == 0)
+                        endpoint_config->key_exchange_method = ASL_KEX_CLASSIC_X448;
+                else if (strcmp(kex_str, "ASL_KEX_PQC_MLKEM512") == 0)
+                        endpoint_config->key_exchange_method = ASL_KEX_PQC_MLKEM512;
+                else if (strcmp(kex_str, "ASL_KEX_PQC_MLKEM768") == 0)
+                        endpoint_config->key_exchange_method = ASL_KEX_PQC_MLKEM768;
+                else if (strcmp(kex_str, "ASL_KEX_PQC_MLKEM1024") == 0)
+                        endpoint_config->key_exchange_method = ASL_KEX_PQC_MLKEM1024;
+                else if (strcmp(kex_str, "ASL_KEX_HYBRID_SECP256_MLKEM512") == 0)
+                        endpoint_config->key_exchange_method = ASL_KEX_HYBRID_SECP256_MLKEM512;
+                else if (strcmp(kex_str, "ASL_KEX_HYBRID_SECP384_MLKEM768") == 0)
+                        endpoint_config->key_exchange_method = ASL_KEX_HYBRID_SECP384_MLKEM768;
+                else if (strcmp(kex_str, "ASL_KEX_HYBRID_SECP256_MLKEM768") == 0)
+                        endpoint_config->key_exchange_method = ASL_KEX_HYBRID_SECP256_MLKEM768;
+                else if (strcmp(kex_str, "ASL_KEX_HYBRID_SECP521_MLKEM1024") == 0)
+                        endpoint_config->key_exchange_method = ASL_KEX_HYBRID_SECP521_MLKEM1024;
+                else if (strcmp(kex_str, "ASL_KEX_HYBRID_SECP384_MLKEM1024") == 0)
+                        endpoint_config->key_exchange_method = ASL_KEX_HYBRID_SECP384_MLKEM1024;
+                else if (strcmp(kex_str, "ASL_KEX_HYBRID_X25519_MLKEM512") == 0)
+                        endpoint_config->key_exchange_method = ASL_KEX_HYBRID_X25519_MLKEM512;
+                else if (strcmp(kex_str, "ASL_KEX_HYBRID_X448_MLKEM768") == 0)
+                        endpoint_config->key_exchange_method = ASL_KEX_HYBRID_X448_MLKEM768;
+                else if (strcmp(kex_str, "ASL_KEX_HYBRID_X25519_MLKEM768") == 0)
+                        endpoint_config->key_exchange_method = ASL_KEX_HYBRID_X25519_MLKEM768;
+                else
+                        LOG_WARN("Unsupported KEX method: %s, using "
+                                 "default",
+                                 kex_str);
+        }
+        else
+                goto error_occured;
+
+        // Parse mTLS setting
+        cJSON* mutual_auth = cJSON_GetObjectItem(endpoint_json, "mutual_auth");
+        if (mutual_auth && cJSON_IsBool(mutual_auth))
+        {
+                endpoint_config->mutual_authentication = cJSON_IsTrue(mutual_auth);
+        }
+
+        // Parse cipher suites
+        cJSON* cipher = cJSON_GetObjectItem(endpoint_json, "cipher");
+        if (cipher && cJSON_IsString(cipher))
+        {
+                endpoint_config->ciphersuites = duplicate_string(cipher->valuestring);
+        }
+
+        return 0;
+error_occured:
+        return -1;
+}
+int parse_hwconfig(cJSON* hw_config_json, HardwareConfiguration* hw_config)
+{
+        if (!hw_config_json || !hw_config)
+        {
+                LOG_ERROR("Invalid parameters for parse_hwconfig");
+                return -1;
+        }
+
+        cJSON* ip_cidr = cJSON_GetObjectItem(hw_config_json, "ip_cidr");
+        if (!ip_cidr || !cJSON_IsString(ip_cidr))
+        {
+                LOG_ERROR("Invalid or missing ip_cidr in hardware config");
+                goto error_occured;
+        }
+
+        // Copy IP CIDR to the hardware configuration
+        strncpy(hw_config->ip_cidr, ip_cidr->valuestring, INET6_ADDRSTRLEN + 4);
+
+        cJSON* device = cJSON_GetObjectItem(hw_config_json, "device");
+        if (!device || !cJSON_IsString(device))
+        {
+                LOG_ERROR("Invalid or missing device in hardware config");
+                goto error_occured;
+        }
+
+        // Copy device name to the hardware configuration
+        strncpy(hw_config->device, device->valuestring, IF_NAMESIZE);
+
+        return 0;
+error_occured:
+        return -1;
+}
 
 int parse_config(char* buffer,
                  int buffer_len,
@@ -464,28 +626,14 @@ int parse_config(char* buffer,
                 if (!hw_item || !cJSON_IsObject(hw_item))
                 {
                         LOG_ERROR("Invalid hardware config item at index %d", i);
-                        goto error_hw;
+                        goto error_occured;
                 }
-
-                cJSON* ip_cidr = cJSON_GetObjectItem(hw_item, "ip_cidr");
-                if (!ip_cidr || !cJSON_IsString(ip_cidr))
+                int ret = parse_hwconfig(hw_item, &hw_configs->hw_configs[i]);
+                if (ret < 0)
                 {
-                        LOG_ERROR("Invalid or missing ip_cidr in hardware config at index %d", i);
-                        goto error_hw;
+                        LOG_ERROR("Failed to parse hardware config item at index %d", i);
+                        goto error_occured;
                 }
-
-                // Copy IP CIDR to the hardware configuration
-                strncpy(hw_configs->hw_configs[i].ip_cidr, ip_cidr->valuestring, INET6_ADDRSTRLEN + 4);
-
-                cJSON* device = cJSON_GetObjectItem(hw_item, "device");
-                if (!device || !cJSON_IsString(device))
-                {
-                        LOG_ERROR("Invalid or missing device in hardware config at index %d", i);
-                        goto error_hw;
-                }
-
-                // Copy device name to the hardware configuration
-                strncpy(hw_configs->hw_configs[i].device, device->valuestring, IF_NAMESIZE);
         }
 
         // Parse group configurations from group_proxy_update array
@@ -493,7 +641,7 @@ int parse_config(char* buffer,
         if (!groups_json || !cJSON_IsArray(groups_json))
         {
                 LOG_ERROR("Invalid or missing group_proxy_update array");
-                goto error_hw;
+                goto error_occured;
         }
 
         int group_count = cJSON_GetArraySize(groups_json);
@@ -502,7 +650,7 @@ int parse_config(char* buffer,
         if (!config->group_config)
         {
                 LOG_ERROR("Failed to allocate memory for group configs");
-                goto error_hw;
+                goto error_occured;
         }
 
         for (int i = 0; i < group_count; i++)
@@ -511,7 +659,7 @@ int parse_config(char* buffer,
                 if (!group_item || !cJSON_IsObject(group_item))
                 {
                         LOG_ERROR("Invalid group config item at index %d", i);
-                        goto error_groups;
+                        goto error_occured;
                 }
 
                 // Allocate and initialize endpoint configuration
@@ -519,9 +667,8 @@ int parse_config(char* buffer,
                 if (!config->group_config[i].endpoint_config)
                 {
                         LOG_ERROR("Failed to allocate memory for endpoint configuration");
-                        goto error_groups;
+                        goto error_occured;
                 }
-
                 // Initialize with default values
                 *config->group_config[i].endpoint_config = asl_default_endpoint_config();
 
@@ -530,76 +677,14 @@ int parse_config(char* buffer,
                 if (endpoint_json && cJSON_IsObject(endpoint_json))
                 {
                         // Parse key exchange method
-                        cJSON* kex = cJSON_GetObjectItem(endpoint_json, "asl_key_exchange_method");
-                        if (kex && cJSON_IsString(kex))
-                        {
-                                const char* kex_str = kex->valuestring;
-
-                                if (strcmp(kex_str, "ASL_KEX_DEFAULT") == 0)
-                                        config->group_config[i].endpoint_config->key_exchange_method = ASL_KEX_DEFAULT;
-                                else if (strcmp(kex_str, "ASL_KEX_CLASSIC_SECP256") == 0)
-                                        config->group_config[i].endpoint_config->key_exchange_method = ASL_KEX_CLASSIC_SECP256;
-                                else if (strcmp(kex_str, "ASL_KEX_CLASSIC_SECP384") == 0)
-                                        config->group_config[i].endpoint_config->key_exchange_method = ASL_KEX_CLASSIC_SECP384;
-                                else if (strcmp(kex_str, "ASL_KEX_CLASSIC_SECP521") == 0)
-                                        config->group_config[i].endpoint_config->key_exchange_method = ASL_KEX_CLASSIC_SECP521;
-                                else if (strcmp(kex_str, "ASL_KEX_CLASSIC_X25519") == 0)
-                                        config->group_config[i].endpoint_config->key_exchange_method = ASL_KEX_CLASSIC_X25519;
-                                else if (strcmp(kex_str, "ASL_KEX_CLASSIC_X448") == 0)
-                                        config->group_config[i].endpoint_config->key_exchange_method = ASL_KEX_CLASSIC_X448;
-                                else if (strcmp(kex_str, "ASL_KEX_PQC_MLKEM512") == 0)
-                                        config->group_config[i].endpoint_config->key_exchange_method = ASL_KEX_PQC_MLKEM512;
-                                else if (strcmp(kex_str, "ASL_KEX_PQC_MLKEM768") == 0)
-                                        config->group_config[i].endpoint_config->key_exchange_method = ASL_KEX_PQC_MLKEM768;
-                                else if (strcmp(kex_str, "ASL_KEX_PQC_MLKEM1024") == 0)
-                                        config->group_config[i].endpoint_config->key_exchange_method = ASL_KEX_PQC_MLKEM1024;
-                                else if (strcmp(kex_str, "ASL_KEX_HYBRID_SECP256_MLKEM512") == 0)
-                                        config->group_config[i].endpoint_config->key_exchange_method = ASL_KEX_HYBRID_SECP256_MLKEM512;
-                                else if (strcmp(kex_str, "ASL_KEX_HYBRID_SECP384_MLKEM768") == 0)
-                                        config->group_config[i].endpoint_config->key_exchange_method = ASL_KEX_HYBRID_SECP384_MLKEM768;
-                                else if (strcmp(kex_str, "ASL_KEX_HYBRID_SECP256_MLKEM768") == 0)
-                                        config->group_config[i].endpoint_config->key_exchange_method = ASL_KEX_HYBRID_SECP256_MLKEM768;
-                                else if (strcmp(kex_str, "ASL_KEX_HYBRID_SECP521_MLKEM1024") == 0)
-                                        config->group_config[i].endpoint_config->key_exchange_method = ASL_KEX_HYBRID_SECP521_MLKEM1024;
-                                else if (strcmp(kex_str, "ASL_KEX_HYBRID_SECP384_MLKEM1024") == 0)
-                                        config->group_config[i].endpoint_config->key_exchange_method = ASL_KEX_HYBRID_SECP384_MLKEM1024;
-                                else if (strcmp(kex_str, "ASL_KEX_HYBRID_X25519_MLKEM512") == 0)
-                                        config->group_config[i].endpoint_config->key_exchange_method = ASL_KEX_HYBRID_X25519_MLKEM512;
-                                else if (strcmp(kex_str, "ASL_KEX_HYBRID_X448_MLKEM768") == 0)
-                                        config->group_config[i].endpoint_config->key_exchange_method = ASL_KEX_HYBRID_X448_MLKEM768;
-                                else if (strcmp(kex_str, "ASL_KEX_HYBRID_X25519_MLKEM768") == 0)
-                                        config->group_config[i].endpoint_config->key_exchange_method = ASL_KEX_HYBRID_X25519_MLKEM768;
-                                else
-                                        LOG_WARN("Unsupported KEX method: %s, using default", kex_str);
-                        }
-
-                        // Parse mTLS setting
-                        cJSON* mutual_auth = cJSON_GetObjectItem(endpoint_json, "mutual_auth");
-                        if (mutual_auth && cJSON_IsBool(mutual_auth))
-                        {
-                                config->group_config[i].endpoint_config->mutual_authentication = cJSON_IsTrue(
-                                        mutual_auth);
-                        }
-
-                        // Parse cipher suites
-                        cJSON* cipher = cJSON_GetObjectItem(endpoint_json, "cipher");
-                        if (cipher && cJSON_IsString(cipher))
-                        {
-                                config->group_config[i].endpoint_config->ciphersuites = duplicate_string(
-                                        cipher->valuestring);
-                        }
+                        parse_endpoint_config(config->group_config[i].endpoint_config, endpoint_json);
                 }
-
+                int group_log_level;
                 // Setup proxy configuration
-                cJSON* group_log_level = cJSON_GetObjectItem(group_item, "group_log_level");
-                if (group_log_level && cJSON_IsNumber(group_log_level))
+                cJSON* json_group_log_level = cJSON_GetObjectItem(group_item, "group_log_level");
+                if (cJSON_IsNumber(json_group_log_level))
                 {
-                        config->group_config[i]
-                                .proxy_wrapper->proxy_config.log_level = group_log_level->valueint;
-                }
-                else
-                {
-                        config->group_config[i].proxy_wrapper->proxy_config.log_level = 4; // Default to 1 if not specified
+                        group_log_level = json_group_log_level->valueint;
                 }
 
                 // Parse proxies array to get number of proxies
@@ -607,87 +692,30 @@ int parse_config(char* buffer,
                 if (proxies && cJSON_IsArray(proxies))
                 {
                         config->group_config[i].number_proxies = cJSON_GetArraySize(proxies);
-
-                        // Find first proxy to set ID and port
                         if (config->group_config[i].number_proxies > 0)
                         {
-                                cJSON* first_proxy = cJSON_GetArrayItem(proxies, 0);
-                                if (first_proxy && cJSON_IsObject(first_proxy))
+                                config->group_config[i].proxy_wrapper = malloc(
+                                        config->group_config[i].number_proxies *
+                                        sizeof(struct proxy_wrapper));
+                                for (int j = 0; j < config->group_config[i].number_proxies; j++)
                                 {
-                                        // Get proxy ID
-                                        cJSON* proxy_type = cJSON_GetObjectItem(first_proxy,
-                                                                                "proxy_type");
-                                        if (proxy_type && cJSON_IsNumber(proxy_type))
+                                        // call parse_proxy
+                                        cJSON* proxy = cJSON_GetArrayItem(proxies, j);
+                                        if (proxy && cJSON_IsObject(proxy))
                                         {
-                                                config->group_config[i]
-                                                        .proxy_wrapper->direction = proxy_type->valueint;
-                                        }
-                                        else
-                                        {
-                                                config->group_config[i].proxy_wrapper->direction = 0; // Default ID
-                                                LOG_ERROR("Invalid proxy type for group %d", i);
-                                        }
-
-                                        // Extract port from server_endpoint_addr (format: "ip:port")
-                                        cJSON* server_addr = cJSON_GetObjectItem(first_proxy, "server_endpoint_addr");
-                                        if (server_addr && cJSON_IsString(server_addr))
-                                        {
-                                                const char* addr_str = server_addr->valuestring;
-                                                char* colon_pos = strrchr(addr_str, ':');
-                                                if (colon_pos)
-                                                {
-                                                        config->group_config[i]
-                                                                .proxy_wrapper->proxy_config
-                                                                .listening_port = atoi(colon_pos + 1);
-                                                }
-                                                else
-                                                {
-                                                        config->group_config[i]
-                                                                .proxy_wrapper->proxy_config
-                                                                .listening_port = 0; // Default port
-                                                }
-                                        }
-                                        else
-                                        {
-                                                config->group_config[i]
-                                                        .proxy_wrapper->proxy_config.listening_port = 0; // Default port
+                                                parse_proxy(proxy,
+                                                            &config->group_config[i].proxy_wrapper[j],
+                                                            group_log_level);
                                         }
                                 }
                         }
-                        else
-                        {
-                                LOG_WARN("No proxies defined for group %d", i);
-                                config->group_config[i].number_proxies = 0;
-                                config->group_config[i].proxy_wrapper->proxy_config.application_id = 0;
-                                config->group_config[i].proxy_wrapper->proxy_config.listening_port = 0;
-                        }
-                }
-                else
-                {
-                        LOG_ERROR("Missing proxies array for group %d", i);
-                        goto error_groups;
                 }
         }
-
         cJSON_Delete(root);
         return 0;
-
-error_groups:
-        for (int i = 0; i < config->number_of_groups; i++)
-        {
-                if (config->group_config[i].endpoint_config)
-                {
-                        if (config->group_config[i].endpoint_config->ciphersuites)
-                                free((void*) config->group_config[i].endpoint_config->ciphersuites);
-                        if (config->group_config[i].endpoint_config->keylog_file)
-                                free((void*) config->group_config[i].endpoint_config->keylog_file);
-                        free(config->group_config[i].endpoint_config);
-                }
-        }
-        free(config->group_config);
-
-error_hw:
-        free(hw_configs->hw_configs);
+error_occured:
+        cleanup_application_config(config);
+        cleanup_hardware_configs(hw_configs);
         cJSON_Delete(root);
         return -1;
 }

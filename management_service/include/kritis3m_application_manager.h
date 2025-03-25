@@ -20,8 +20,7 @@ void init_application_manager(void);
  * @param hw_configs Pointer to the hardware_configs structure.
  * @return int Returns 0 on success, or an error code on failure.
  */
-int start_application_manager(struct application_manager_config* app_config,
-                              struct hardware_configs* hw_configs);
+int start_application_manager();
 
 /**
  * @brief Stop the application manager thread.

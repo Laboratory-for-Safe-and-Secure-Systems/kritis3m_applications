@@ -184,6 +184,7 @@ error_occured:
 
 void* kritis3m_service_main_thread(void* arg)
 {
+        start_application_manager();
 
         enum appl_state
         {
@@ -469,35 +470,38 @@ void* handle_dataplane_apply_req(void* arg)
 {
         ManagementReturncode ret;
         coordinator.initialized = true;
+        enable_sync(true);
 
         struct pollfd update_pollfd;
         update_pollfd.fd = coordinator.update_socket[THREAD_INT];
         update_pollfd.events = POLLIN | POLLERR;
 
-        // control plane sends NODE_UPDATE_RECEIVED
-        enum apply_states current_state = NODE_UPDATE_RECEIVED;
+        // control plane sends UPDATE_RECEIVED
         if (ret < 0)
         {
                 LOG_ERROR("Failed to send status to server");
                 goto error_occured;
         }
 
-        struct application_manager_config app_config = {0};
-        struct hardware_configs hw_configs = {0};
+        struct application_manager_config* app_config = malloc(
+                sizeof(struct application_manager_config));
+        struct hardware_configs* hw_configs = malloc(sizeof(struct hardware_configs));
 
-        ret = get_dataplane_update(&app_config, &hw_configs);
+        ret = get_application_inactive(app_config, hw_configs);
         if (ret < 0)
         {
                 LOG_ERROR("Failed to get dataplane update");
                 goto error_occured;
         }
-        current_state = NODE_UPDATE_APPLICABLE;
+
+        enum apply_states current_state = UPDATE_APPLICABLE;
+        current_state = UPDATE_APPLICABLE;
         struct policy_status_t policy_msg = {0};
         policy_msg.module = UPDATE_COORDINATOR;
-        policy_msg.state = NODE_UPDATE_APPLICABLE;
+        policy_msg.state = UPDATE_APPLICABLE;
         policy_msg.msg = NULL;
         policy_msg.msg_len = 0;
-        send_policy_status(&policy_msg);
+        ret = send_policy_status(&policy_msg);
 
         while (1)
         {
@@ -508,20 +512,32 @@ void* handle_dataplane_apply_req(void* arg)
                         {
                                 memset(&policy_msg, 0, sizeof(struct policy_status_t));
                                 policy_msg.module = UPDATE_COORDINATOR;
-                                policy_msg.state = NODE_UPDATE_ERROR;
+                                policy_msg.state = UPDATE_ERROR;
                                 policy_msg.msg = "Timeout occured";
-                                policy_msg.msg_len = strlen("Timeout occured");
+                                policy_msg.msg_len = strlen("Timeout occured. Rollback initiated");
                                 send_policy_status(&policy_msg);
-                                if (current_state == NODE_UPDATE_APPLIED)
+                                if (current_state == UPDATE_APPLIED)
                                 {
                                         application_manager_rollback();
+                                        // respond error and return
                                 }
-
+                                send_policy_status(&policy_msg);
                                 goto error_occured;
                         }
                         if (ret < 0)
                         {
-                                LOG_ERROR("Failed to receive signal from server");
+                                memset(&policy_msg, 0, sizeof(struct policy_status_t));
+                                policy_msg.module = UPDATE_COORDINATOR;
+                                policy_msg.state = UPDATE_ERROR;
+                                policy_msg.msg = "Internal error";
+                                policy_msg.msg_len = strlen("Internal error");
+                                send_policy_status(&policy_msg);
+                                if (current_state == UPDATE_APPLIED)
+                                {
+                                        application_manager_rollback();
+                                        // respond error and return
+                                }
+                                send_policy_status(&policy_msg);
                                 goto error_occured;
                         }
                         if (update_pollfd.revents & POLLIN)
@@ -530,57 +546,63 @@ void* handle_dataplane_apply_req(void* arg)
                                 int32_t state = sockpair_read(coordinator.update_socket[THREAD_INT],
                                                               &msg,
                                                               sizeof(struct policy_status_t));
+                                respond_with(coordinator.update_socket[THREAD_EXT], MSG_OK);
+
                                 enum apply_states requested_state = msg.state;
                                 enum module caller_module = msg.module;
 
                                 switch (requested_state)
                                 {
-                                case NODE_UPDATE_ERROR: // application manager
+                                case UPDATE_ERROR: // application manager
                                         {
                                                 send_policy_status(&msg);
+                                                goto error_occured;
                                                 break;
                                         }
-                                case NODE_UPDATE_ABORT: // can be only received from control plane
+                                case UPDATE_ROLLBACK: // can be only received from control plane
                                         {
-                                                if (current_state == NODE_UPDATE_APPLIED)
+                                                if (current_state == UPDATE_APPLIED)
                                                 {
                                                         application_manager_rollback();
                                                 }
-
+                                                goto finish_dataplane_apply_req;
                                                 break;
                                         }
-                                case NODE_UPDATE_APPLYREQUEST: // can only be received form control plane
+                                case UPDATE_APPLYREQUEST: // can only be received form control plane
                                         {
-                                                ret = change_application_config(&app_config,
-                                                                                &hw_configs);
+                                                ret = change_application_config(app_config, hw_configs);
                                                 if (ret < 0)
                                                 {
+                                                        // message couldnt even be processed -> return error
                                                         memset(&policy_msg,
                                                                0,
                                                                sizeof(struct policy_status_t));
                                                         policy_msg.module = UPDATE_COORDINATOR;
-                                                        policy_msg.state = NODE_UPDATE_ERROR;
-                                                        policy_msg.msg = msg.msg;
-                                                        policy_msg.msg_len = msg.msg_len;
+                                                        policy_msg.state = UPDATE_ERROR;
+                                                        policy_msg.msg = "Internal error";
+                                                        policy_msg.msg_len = strlen(
+                                                                "Internal error");
                                                         send_policy_status(&policy_msg);
                                                         goto error_occured;
                                                 }
                                                 break;
                                         }
-                                case NODE_UPDATE_APPLIED: // can only be received from application manager
+                                case UPDATE_APPLIED: // can only be received from application manager
                                         {
-                                                current_state = NODE_UPDATE_APPLIED;
+                                                current_state = UPDATE_APPLIED;
                                                 memset(&policy_msg, 0, sizeof(struct policy_status_t));
-                                                policy_msg.module = UPDATE_COORDINATOR;
-                                                policy_msg.state = NODE_UPDATE_APPLIED;
+                                                policy_msg.module = msg.module;
+                                                policy_msg.state = UPDATE_APPLIED;
                                                 policy_msg.msg = msg.msg;
                                                 policy_msg.msg_len = msg.msg_len;
                                                 send_policy_status(&policy_msg);
                                                 break;
                                         }
-                                case NODE_APPLY_ACK:
+                                case UPDATE_ACK:
                                         {
+                                                // on restarting system, new config will be used
                                                 ack_dataplane_update();
+                                                LOG_INFO("Update applied");
                                                 goto finish_dataplane_apply_req;
                                         }
                                 default:
@@ -591,6 +613,7 @@ void* handle_dataplane_apply_req(void* arg)
                 }
 
         finish_dataplane_apply_req:
+                enable_sync(false);
                 coordinator.initialized = false;
                 closesocket(coordinator.update_socket[THREAD_INT]);
                 closesocket(coordinator.update_socket[THREAD_EXT]);
@@ -599,6 +622,7 @@ void* handle_dataplane_apply_req(void* arg)
                 return NULL;
 
         error_occured:
+                enable_sync(false);
                 coordinator.initialized = false;
                 closesocket(coordinator.update_socket[THREAD_INT]);
                 closesocket(coordinator.update_socket[THREAD_EXT]);

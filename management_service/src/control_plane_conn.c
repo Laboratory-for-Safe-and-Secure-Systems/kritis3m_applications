@@ -48,6 +48,7 @@ struct control_plane_conn_t
         char* topic_config;
         char* topic_cert_mgmt;
         char* topic_cert_prod;
+        char* topic_sync;
         pthread_t conn_thread;
         pthread_attr_t conn_attr;
 };
@@ -59,7 +60,8 @@ static struct control_plane_conn_t conn;
 
 #define TOPIC_FORMAT_LOG "%s/log"
 #define TOPIC_FORMAT_HELLO "%s/control/hello"
-#define TOPIC_FORMAT_POLICY "%s/control/ks_qos"
+#define TOPIC_FORMAT_POLICY "%s/control/qos"
+#define TOPIC_FORMAT_SYNC "%s/control/sync"
 #define TOPIC_FORMAT_CONFIG "%s/config"
 #define TOPIC_FORMAT_CERT_MGMT "%s/cert/management"
 #define TOPIC_FORMAT_CERT_PROD "%s/cert/production"
@@ -77,6 +79,9 @@ void onDisconnectFailure(void* context, MQTTAsync_failureData* response);
 void onSubscribe(void* context, MQTTAsync_successData* response);
 void onSubscribeFailure(void* context, MQTTAsync_failureData* response);
 int msgarrvd(void* context, char* topicName, int topicLen, MQTTAsync_message* message);
+bool control_plane_running();
+
+void handle_enable_sync(bool value);
 
 // Forward declarations for the new functions
 static int subscribe_to_topics(struct control_plane_conn_t* conn);
@@ -98,6 +103,7 @@ enum control_plane_conn_message_type
         CONTROL_PLANE_SEND_HELLO,
         CONTROL_PLANE_SEND_POLICY_STATUS,
         CONTROL_PLANE_SEND_LOG,
+        CONTROL_PLANE_ENABLE_SYNC,
 };
 
 struct control_plane_conn_message
@@ -119,6 +125,7 @@ struct control_plane_conn_message
                 {
                         struct policy_status_t status;
                 } policy;
+                bool enable_sync;
         } data;
 };
 
@@ -176,13 +183,7 @@ int msgarrvd(void* context, char* topicName, int topicLen, MQTTAsync_message* me
         if (strcmp(topicName, conn->topic_config) == 0)
         {
                 LOG_INFO("Received new configuration: %.*s", message->payloadlen, payload);
-                struct policy_status_t policy_msg = {0};
-                policy_msg.module = CONTROL_PLANE_CONNECTION;
-                policy_msg.state = NODE_UPDATE_RECEIVED;
-                policy_msg.msg = "Configuration received";
-                policy_msg.msg_len = strlen(policy_msg.msg);
-                handle_policy_status(conn, &policy_msg);
-                int ret = dataplane_store_config(payload, message->payloadlen);
+                int ret = application_store_inactive(payload, message->payloadlen);
                 if (ret != 0)
                 {
                         LOG_ERROR("Failed to store configuration");
@@ -200,7 +201,7 @@ int msgarrvd(void* context, char* topicName, int topicLen, MQTTAsync_message* me
                 bool value = (strncmp(payload, "true", message->payloadlen) == 0);
                 LOG_INFO("Received cert production status: %s", value ? "true" : "false");
         }
-        else if ((strcmp(topicName, conn->topic_policy) == 0))
+        else if ((strcmp(topicName, conn->topic_sync) == 0))
         {
                 LOG_INFO("Received policy status: %s", payload);
                 cJSON* json = cJSON_ParseWithLength(message->payload, message->payloadlen);
@@ -298,6 +299,13 @@ static int subscribe_to_topics(struct control_plane_conn_t* conn)
         if (rc != MQTTASYNC_SUCCESS)
         {
                 LOG_ERROR("Failed to subscribe to topic %s, rc=%d", conn->topic_config, rc);
+                goto cleanup;
+        }
+
+        rc = MQTTAsync_subscribe(conn->client, conn->topic_sync, QOS, &opts);
+        if (rc != MQTTASYNC_SUCCESS)
+        {
+                LOG_ERROR("Failed to subscribe to topic %s, rc=%d", conn->topic_sync, rc);
                 goto cleanup;
         }
 
@@ -507,7 +515,18 @@ static int handle_management_message(struct control_plane_conn_t* conn)
                         LOG_ERROR("Failed to send policy status: %d", rc);
                         return_code = MSG_ERROR;
                 }
+                else
+                {
+
+                        return_code = MSG_OK;
+                }
                 break;
+        case CONTROL_PLANE_ENABLE_SYNC:
+                {
+                        handle_enable_sync(message.data.enable_sync);
+                        return_code = MSG_OK;
+                        break;
+                }
 
         default:
                 LOG_ERROR("Unknown message type: %d", message.type);
@@ -523,6 +542,8 @@ static int handle_management_message(struct control_plane_conn_t* conn)
 int start_control_plane_conn(struct control_plane_conn_config_t* conn_config)
 {
         int ret = 0;
+
+        LOG_LVL_SET(LOG_LVL_DEBUG);
 
         // Validate configuration
         if (conn_config->serialnumber == NULL || conn_config->endpoint_config == NULL ||
@@ -563,6 +584,7 @@ int start_control_plane_conn(struct control_plane_conn_config_t* conn_config)
         conn.topic_config = create_topic(TOPIC_FORMAT_CONFIG, conn.serialnumber);
         conn.topic_cert_mgmt = create_topic(TOPIC_FORMAT_CERT_MGMT, conn.serialnumber);
         conn.topic_cert_prod = create_topic(TOPIC_FORMAT_CERT_PROD, conn.serialnumber);
+        conn.topic_sync = create_topic(TOPIC_FORMAT_SYNC, conn.serialnumber);
 
         memcpy(conn.endpoint_config, conn_config->endpoint_config, sizeof(asl_endpoint_configuration));
 
@@ -755,33 +777,19 @@ static int handle_policy_status(struct control_plane_conn_t* conn, struct policy
 
 enum MSG_RESPONSE_CODE send_hello_message(bool value)
 {
-        if (!conn.client)
-        {
-                LOG_WARN("Control plane connection not started");
+        if (!control_plane_running())
                 return MSG_ERROR;
-        }
-
         struct control_plane_conn_message message;
         message.type = CONTROL_PLANE_SEND_HELLO;
         message.data.hello.value = value;
-
-        int rc = external_management_request(conn.socket_pair[THREAD_EXT], &message, sizeof(message));
-        if (rc != MSG_OK)
-        {
-                LOG_ERROR("Failed to send hello message: %d", rc);
-        }
-
-        return rc;
+        return external_management_request(conn.socket_pair[THREAD_EXT], &message, sizeof(message));
 }
 
+// #todo not sure about mem management, dyn or static
 enum MSG_RESPONSE_CODE send_log_message(const char* message)
 {
-        if (!conn.client)
-        {
-                LOG_WARN("Control plane connection not started");
+        if (!control_plane_running())
                 return MSG_ERROR;
-        }
-
         if (message == NULL)
         {
                 LOG_WARN("Cannot send NULL log message");
@@ -797,77 +805,61 @@ enum MSG_RESPONSE_CODE send_log_message(const char* message)
                 return MSG_ERROR;
         }
 
-        enum MSG_RESPONSE_CODE rc = external_management_request(conn.socket_pair[THREAD_EXT],
-                                                                &msg,
-                                                                sizeof(msg));
-        if (rc != MSG_OK)
-        {
-                LOG_ERROR("Failed to send log message: %s", strerror(errno));
-                if (msg.data.log.message)
-                {
-                        free(msg.data.log.message);
-                }
-        }
-        return rc;
+        return external_management_request(conn.socket_pair[THREAD_EXT], &msg, sizeof(msg));
 }
 
 enum MSG_RESPONSE_CODE send_policy_status(struct policy_status_t* status)
 {
 
-        if (!conn.client)
-        {
-                LOG_WARN("Control plane connection not started");
+        if (!control_plane_running())
                 return MSG_ERROR;
-        }
 
         struct control_plane_conn_message msg;
         msg.type = CONTROL_PLANE_SEND_POLICY_STATUS;
-
         msg.data.policy.status = *status;
 
-        enum MSG_RESPONSE_CODE rc = external_management_request(conn.socket_pair[THREAD_EXT],
-                                                                &msg,
-                                                                sizeof(msg));
-        if (rc != MSG_OK)
-        {
-                LOG_ERROR("Failed to send policy status: %s", strerror(errno));
-                return rc;
-        }
-
-        return rc;
+        return external_management_request(conn.socket_pair[THREAD_EXT], &msg, sizeof(msg));
 }
 
 enum MSG_RESPONSE_CODE stop_control_plane_conn()
 {
-        if (!conn.client)
-        {
-                LOG_WARN("Control plane connection not started");
+        if (!control_plane_running())
                 return MSG_ERROR;
-        }
 
-        LOG_INFO("Stopping control plane connection");
+        LOG_DEBUG("Stopping control plane connection");
 
         // Create stop message
         struct control_plane_conn_message message;
         message.type = CONTROL_PLANE_CONN_STOP;
 
         // Send stop message to thread
-        enum MSG_RESPONSE_CODE rc = external_management_request(conn.socket_pair[THREAD_EXT],
-                                                                &message,
-                                                                sizeof(message));
-        if (rc != MSG_OK)
-        {
-                LOG_ERROR("Failed to send stop message: %s", strerror(errno));
-                return rc;
-        }
+        return external_management_request(conn.socket_pair[THREAD_EXT], &message, sizeof(message));
+}
 
-        // Wait for thread to exit
-        if (conn.conn_thread)
-        {
-                pthread_join(conn.conn_thread, NULL);
-                conn.conn_thread = 0;
-        }
+enum MSG_RESPONSE_CODE enable_sync(bool value)
+{
+        if (!control_plane_running())
+                return MSG_ERROR;
+        struct control_plane_conn_message message;
+        message.type = CONTROL_PLANE_ENABLE_SYNC;
+        message.data.enable_sync = value;
+        return external_management_request(conn.socket_pair[THREAD_EXT], &message, sizeof(message));
+}
 
-        LOG_INFO("Control plane connection stopped");
-        return rc;
+void handle_enable_sync(bool enable_sync)
+{
+        if (enable_sync)
+        {
+                MQTTAsync_subscribe(conn.client, conn.topic_sync, QOS, &conn.opts);
+        }
+        else
+        {
+                MQTTAsync_unsubscribe(conn.client, conn.topic_sync, &conn.opts);
+        }
+}
+
+bool control_plane_running()
+{
+        return conn.client != NULL && conn.socket_pair[THREAD_INT] != -1 &&
+               conn.socket_pair[THREAD_EXT] != -1;
 }
