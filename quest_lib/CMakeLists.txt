@@ -10,6 +10,7 @@ set(PROJECT_VERSION 1.0.0)
 # Add the library sources
 add_library(kritis3m-quest STATIC
   src/kritis3m_http_request.c 
+  src/kritis3m_http_response.c
   src/quest_endpoint.c
   src/quest_transaction.c
   src/quest.c

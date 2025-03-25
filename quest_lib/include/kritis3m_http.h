@@ -11,7 +11,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #define DEFAULT_BUFFER_LEN 3000
-#define QKD_INFO_MAX_LEN 50
+#define QKD_INFO_MAX_LEN 64
 
 enum http_status_type
 {
@@ -80,6 +80,7 @@ void populate_http_response(struct http_get_response* response,
                             enum http_get_request_type request_type);
 
 /// @brief allocates a reponse object for the http-get call.
+/// @return returns reference to the allocated object or NULL of no memory is available.
 struct http_get_response* allocate_http_response();
 
 /// @brief frees the http_get request struct. As this function only contains standard parameter,
@@ -97,14 +98,17 @@ void deinit_http_request(struct http_request* request, enum http_get_request_typ
 /// @param response reference to the http_get_response object allocated before.
 /// @param hostname hostname of the server, where the http_get call shall be sent.
 /// @param hostport hostport of the server, where the http_get call shall be sent.
+/// @param sae_ID secure application entity identifier used in the request url.
 /// @param key_ID OPTIONAL parameter, if a http_get request for a referenced key_ID is neccessary.
 void populate_http_request(struct http_request* request,
                            struct http_get_response* response,
                            char* hostname,
                            char* hostport,
+                           char* sae_ID,
                            char* key_ID);
 
 /// @brief allocates a request object for the http-get call.
+/// @return returns reference to the allocated object or NULL of no memory is available.
 struct http_request* allocate_http_request();
 
 #endif

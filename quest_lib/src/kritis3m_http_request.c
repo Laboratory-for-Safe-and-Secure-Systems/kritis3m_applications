@@ -1,8 +1,9 @@
-#include "kritis3m_http_request.h"
+#include "kritis3m_http.h"
 #include "logging.h"
 
 LOG_MODULE_CREATE(kritis3m_http_request);
 
+/*------------------------------- request callback -------------------------------*/
 static void manage_request_error(struct http_get_response* response, cJSON* data)
 {
         cJSON* error_msg = cJSON_GetObjectItemCaseSensitive(data, "message");
@@ -114,81 +115,14 @@ static void http_get_cb(struct http_response* rsp, enum http_final_call final_da
         }
 }
 
+/*------------------------------- private functions -------------------------------*/
 
-static struct qkd_key_info* allocate_key_info()
-{
-        /* allocate key_info struct for http get resone */
-        struct qkd_key_info* key_info;
-        key_info = malloc(sizeof(struct qkd_key_info));
-        if (key_info == NULL)
-        {
-                LOG_ERROR("failed to allocate HTTP-GET response key_info parameter.\n");
-                goto ALLOC_ERR;
-        }
-
-        return key_info;
-
-ALLOC_ERR:
-        return NULL;
-}
-
-struct http_request* allocate_http_request()
-{
-        /* allocate actual http_request */
-        struct http_request* request;
-        request = malloc(sizeof(struct http_request));
-        if (request == NULL)
-        {
-                LOG_ERROR("failed to allocate HTTP-GET request.\n");
-                goto ALLOC_ERR;
-        }
-
-        memset(request, 0, sizeof(struct http_request));
-
-        return request;
-
-ALLOC_ERR:
-        return NULL;
-}
-
-struct http_get_response* allocate_http_response()
-{
-        /* allocate response struct for http get request */
-        struct http_get_response* response;
-        response = malloc(sizeof(struct http_get_response));
-        if (response == NULL)
-        {
-                LOG_ERROR("failed to allocate HTTP-GET response.\n");
-                goto ALLOC_ERR;
-        }
-
-        memset(response, 0, sizeof(struct http_get_response));
-
-        return response;
-
-ALLOC_ERR:
-        return NULL;
-}
-
-static void specify_sae_id(struct http_request* request, char** sae_ID)
-{
-        /* set sae_ID relative to the hostname */
-        if (strcmp(request->host, "im-lfd-qkd-bob.othr.de") == 0)
-        {
-                *sae_ID = "alice_sae_etsi_1";
-        }
-        else if (strcmp(request->host, "im-lfd-qkd-alice.othr.de") == 0)
-        {
-                *sae_ID = "bob_sae_etsi_1";
-        }
-        else
-        {
-                LOG_ERROR("invalid host and sae_ID configuration to assemble url\n");
-                return;
-        }
-}
-
-static void populate_url(struct http_request* request, char* sae_ID, char* type_url, char* key_ID)
+/// @brief Dynamically allocates memory and assembles the url for the http_get request. 
+/// @param request reference to the http_request object allocated before.
+/// @param sae_ID secure application entity identifier used in the url.
+/// @param type_url specified url type. (set in populate_request_url() function)
+/// @param key_ID OPTIONAL parameter, if a http_get request for a referenced key_ID is neccessary.
+static void assemble_url(struct http_request* request, char* sae_ID, char* type_url, char* key_ID)
 {
         if((request == NULL) || (sae_ID == NULL) || (type_url == NULL))
         {
@@ -235,25 +169,28 @@ static void populate_url(struct http_request* request, char* sae_ID, char* type_
         }
 }
 
+/// @brief Populate the request url depending on the request type. This function specifies the 
+///        url assembly depending on the type set in the http_get_response.
+/// @param request reference to the http_request object allocated before.
+/// @param response reference to the http_get_response object allocated before.
+/// @param key_ID OPTIONAL parameter, if a http_get request for a referenced key_ID is neccessary.
 static void populate_request_url(struct http_request* request,
                                  struct http_get_response* response,
+                                 char* sae_ID,
                                  char* key_ID)
 {
-        char* sae_ID;
-        specify_sae_id(request, &sae_ID);
-
         switch (response->msg_type)
         {
         case HTTP_STATUS:
-                populate_url(request, sae_ID, "/status", NULL);
+                assemble_url(request, sae_ID, "/status", NULL);
                 break;
 
         case HTTP_KEY_NO_ID:
-                populate_url(request, sae_ID, "/enc_keys?number=1", NULL);
+                assemble_url(request, sae_ID, "/enc_keys?number=1", NULL);
                 break;
 
         case HTTP_KEY_WITH_ID:
-                populate_url(request, sae_ID, "/dec_keys?key_ID=", key_ID);
+                assemble_url(request, sae_ID, "/dec_keys?key_ID=", key_ID);
                 break;
 
         default:
@@ -262,10 +199,31 @@ static void populate_request_url(struct http_request* request,
         }
 }
 
+/*------------------------------- public functions -------------------------------*/
+struct http_request* allocate_http_request()
+{
+        /* allocate actual http_request */
+        struct http_request* request;
+        request = malloc(sizeof(struct http_request));
+        if (request == NULL)
+        {
+                LOG_ERROR("failed to allocate HTTP-GET request.\n");
+                goto ALLOC_ERR;
+        }
+
+        memset(request, 0, sizeof(struct http_request));
+
+        return request;
+
+ALLOC_ERR:
+        return NULL;
+}
+
 void populate_http_request(struct http_request* request,
                            struct http_get_response* response,
                            char* hostname,
                            char* hostport,
+                           char* sae_ID,
                            char* key_ID)
 {
         /* set http protocol information and response callback */
@@ -281,18 +239,7 @@ void populate_http_request(struct http_request* request,
         request->recv_buf = response->buffer;
         request->recv_buf_len = response->buffer_len;
 
-        populate_request_url(request, response, key_ID);
-}
-
-void populate_http_response(struct http_get_response* response, enum http_get_request_type request_type)
-{
-        response->buffer_frag_start = NULL;
-        response->buffer_len = DEFAULT_BUFFER_LEN;
-        response->bytes_received = 0;
-        response->error_code = 0;
-        response->msg_type = request_type;
-
-        response->key_info = allocate_key_info();
+        populate_request_url(request, response, sae_ID, key_ID);
 }
 
 void deinit_http_request(struct http_request* request, enum http_get_request_type msg_type)
@@ -307,17 +254,3 @@ void deinit_http_request(struct http_request* request, enum http_get_request_typ
         free(request);
 }
 
-void deinit_http_response(struct http_get_response* response)
-{
-        if (response == NULL)
-                return;
-
-        if (response->key_info != NULL)
-        {
-                free(response->key_info);
-        }
-
-        free(response);
-
-        return;
-}
