@@ -114,6 +114,7 @@ static void http_get_cb(struct http_response* rsp, enum http_final_call final_da
         }
 }
 
+
 static struct qkd_key_info* allocate_key_info()
 {
         /* allocate key_info struct for http get resone */
@@ -169,32 +170,49 @@ ALLOC_ERR:
         return NULL;
 }
 
-static void populate_key_with_id_url(struct http_request* request, char* key_ID)
+static void specify_sae_id(struct http_request* request, char** sae_ID)
 {
-        /*                                                     Template URL */
-        /* http://im-lfd-qkd-alice.othr.de:9120/api/v1/keys/bob_sae_etsi_1/dec_keys?key_ID=0a6976fa-f096-42e1-8861-e59dfab12caf */
-
-        /* depending on the host configuration the SAE in the base_url differs respectively */
-        char* base_url;
+        /* set sae_ID relative to the hostname */
         if (strcmp(request->host, "im-lfd-qkd-bob.othr.de") == 0)
         {
-                base_url = "/api/v1/keys/alice_sae_etsi_1/dec_keys?key_ID=";
+                *sae_ID = "alice_sae_etsi_1";
         }
         else if (strcmp(request->host, "im-lfd-qkd-alice.othr.de") == 0)
         {
-                base_url = "/api/v1/keys/bob_sae_etsi_1/dec_keys?key_ID=";
+                *sae_ID = "bob_sae_etsi_1";
         }
         else
         {
-                base_url = NULL;
-                LOG_ERROR("invalid host and status configuration to assemble url\n");
+                LOG_ERROR("invalid host and sae_ID configuration to assemble url\n");
+                return;
+        }
+}
+
+static void populate_url(struct http_request* request, char* sae_ID, char* type_url, char* key_ID)
+{
+        if((request == NULL) || (sae_ID == NULL) || (type_url == NULL))
+        {
+                LOG_ERROR("invalid parameter configuration in url assembly\n");
                 return;
         }
 
-        /* Allocate enough space for the base URL, the key, and the null terminator */
+        /* base part of the url, which is identical for all url types. */
+        char* base_url = "/api/v1/keys/";
+
+        /* Allocate enough space for the base URL, the sae_ID, the type_url and the null terminator */
         size_t base_url_len = strlen(base_url);
-        size_t key_id_len = strlen(key_ID);
-        size_t total_len = base_url_len + key_id_len + 1; // +1 for null terminator
+        size_t sae_id_len = strlen(sae_ID);
+        size_t type_url_len = strlen(type_url);
+
+        /* <base_url> + <sae_ID> + <type_url> */
+        size_t total_len = base_url_len + sae_id_len + type_url_len + 1; // +1 for null terminator
+
+        /* If the key_ID parameter is set, we reserve the additional length of the identifier */
+        if(key_ID != NULL)
+        {
+                size_t key_id_len = strlen(key_ID);
+                total_len += key_id_len;
+        }
 
         request->url = (char*) malloc(total_len);
         if (request->url == NULL)
@@ -208,44 +226,12 @@ static void populate_key_with_id_url(struct http_request* request, char* key_ID)
 
         // Copy the base URL and concatenate the key
         strcpy((char*) request->url, base_url);
-        strcat((char*) request->url, key_ID);
-}
+        strcat((char*) request->url, sae_ID);
+        strcat((char*) request->url, type_url);
 
-static void populate_key_no_id_url(struct http_request* request)
-{
-        /*                              Template URL                                         */
-        /* http://im-lfd-qkd-bob.othr.de:9120/api/v1/keys/alice_sae_etsi_1/enc_keys?number=1 */
-
-        if (strcmp(request->host, "im-lfd-qkd-bob.othr.de") == 0)
+        if(key_ID != NULL)
         {
-                request->url = "/api/v1/keys/alice_sae_etsi_1/enc_keys?number=1";
-        }
-        else if (strcmp(request->host, "im-lfd-qkd-alice.othr.de") == 0)
-        {
-                request->url = "/api/v1/keys/bob_sae_etsi_1/enc_keys?number=1";
-        }
-        else
-        {
-                LOG_ERROR("invalid host and status configuration to assemble url\n");
-        }
-}
-
-static void populate_status_url(struct http_request* request)
-{
-        /*                              Template URL                              */
-        /* http://im-lfd-qkd-bob.othr.de:9120/api/v1/keys/alice_sae_etsi_1/status */
-
-        if (strcmp(request->host, "im-lfd-qkd-bob.othr.de") == 0)
-        {
-                request->url = "/api/v1/keys/alice_sae_etsi_1/status";
-        }
-        else if (strcmp(request->host, "im-lfd-qkd-alice.othr.de") == 0)
-        {
-                request->url = "/api/v1/keys/bob_sae_etsi_1/status";
-        }
-        else
-        {
-                LOG_ERROR("invalid host and status configuration to assemble url\n");
+                strcat((char*) request->url, key_ID);
         }
 }
 
@@ -253,26 +239,21 @@ static void populate_request_url(struct http_request* request,
                                  struct http_get_response* response,
                                  char* key_ID)
 {
+        char* sae_ID;
+        specify_sae_id(request, &sae_ID);
+
         switch (response->msg_type)
         {
         case HTTP_STATUS:
-                populate_status_url(request);
+                populate_url(request, sae_ID, "/status", NULL);
                 break;
 
         case HTTP_KEY_NO_ID:
-                populate_key_no_id_url(request);
+                populate_url(request, sae_ID, "/enc_keys?number=1", NULL);
                 break;
 
         case HTTP_KEY_WITH_ID:
-                if (key_ID == NULL)
-                {
-                        LOG_ERROR("invalid key ID parameter");
-                        break;
-                }
-                else
-                {
-                        populate_key_with_id_url(request, key_ID);
-                }
+                populate_url(request, sae_ID, "/dec_keys?key_ID=", key_ID);
                 break;
 
         default:
@@ -319,8 +300,8 @@ void deinit_http_request(struct http_request* request, enum http_get_request_typ
         if (request == NULL)
                 return;
 
-        /* This free shall only be called, if a key with key_ID was requested */
-        if ((request->url != NULL) && (msg_type == HTTP_KEY_WITH_ID))
+        /* Free allocated url */
+        if (request->url != NULL)
                 free((char*) request->url);
 
         free(request);
