@@ -222,7 +222,6 @@ int msgarrvd(void* context, char* topicName, int topicLen, MQTTAsync_message* me
                 policy_msg.module = CONTROL_PLANE_CONNECTION;
                 policy_msg.state = status_value;
                 policy_msg.msg = "Policy status received";
-                policy_msg.msg_len = strlen(policy_msg.msg);
                 dataplane_config_apply_send_status(&policy_msg);
         }
 
@@ -508,7 +507,7 @@ static int handle_management_message(struct control_plane_conn_t* conn)
                 break;
 
         case CONTROL_PLANE_SEND_POLICY_STATUS:
-                LOG_DEBUG("Sending policy status: %s", message.data.policy.status);
+                LOG_DEBUG("Sending policy status: ");
                 rc = handle_policy_status(conn, &message.data.policy.status);
                 if (rc != MQTTASYNC_SUCCESS)
                 {

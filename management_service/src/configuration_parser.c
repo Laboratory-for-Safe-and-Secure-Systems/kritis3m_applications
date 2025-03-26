@@ -424,7 +424,7 @@ int parse_proxy(cJSON* proxy, struct proxy_wrapper* proxy_wrapper, int group_log
         cJSON* client_endpoint_addr = cJSON_GetObjectItem(proxy, "client_endpoint_addr");
         proxy_wrapper->direction = (cJSON_IsNumber(proxy_type) &&
                                     (proxy_type->valueint > PROXY_UNSPECIFIC) &&
-                                    (proxy_type->valueint <= TLS_TLS_PROXY)) ?
+                                    (proxy_type->valueint <= PROXY_TLS_TLS)) ?
                                            proxy_type->valueint :
                                            PROXY_UNSPECIFIC;
 
@@ -447,6 +447,7 @@ int parse_proxy(cJSON* proxy, struct proxy_wrapper* proxy_wrapper, int group_log
         if (colon_pos)
         {
                 proxy_wrapper->proxy_config.listening_port = atoi(colon_pos + 1);
+                *colon_pos = '\0'; // Terminate the string at the colon position
         }
         else
                 goto error_occured;
@@ -456,6 +457,7 @@ int parse_proxy(cJSON* proxy, struct proxy_wrapper* proxy_wrapper, int group_log
         if (colon_pos)
         {
                 proxy_wrapper->proxy_config.target_port = atoi(colon_pos + 1);
+                *colon_pos = '\0'; // Terminate the string at the colon position
         }
         else
                 goto error_occured;

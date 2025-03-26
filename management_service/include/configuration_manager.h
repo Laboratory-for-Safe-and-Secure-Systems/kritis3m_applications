@@ -16,8 +16,9 @@ enum ACTIVE
 enum PROXY_TYPE
 {
         PROXY_UNSPECIFIC = 0,
-        PROXY_FORWARD,
-        PROXY_REVERSE,
+        PROXY_FORWARD = 1,
+        PROXY_REVERSE = 2,
+        PROXY_TLS_TLS = 3,
 };
 
 struct sysconfig

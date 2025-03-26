@@ -82,16 +82,16 @@ int ack_dataplane_update()
                 LOG_ERROR("Configuration manager not initialized");
                 return -1;
         }
-        switch (configuration_manager.sys_config.dataplane_active)
+        switch (configuration_manager.sys_config.application_active)
         {
         case ACTIVE_ONE:
-                configuration_manager.sys_config.dataplane_active = ACTIVE_TWO;
+                configuration_manager.sys_config.application_active = ACTIVE_TWO;
                 break;
         case ACTIVE_TWO:
-                configuration_manager.sys_config.dataplane_active = ACTIVE_ONE;
+                configuration_manager.sys_config.application_active = ACTIVE_ONE;
                 break;
         case ACTIVE_NONE:
-                LOG_ERROR("No active dataplane configuration");
+                LOG_ERROR("No active application configuration");
                 return -1;
         }
 
@@ -743,7 +743,7 @@ int write_sysconfig(void)
         }
 
         // Write directly to the file in one operation
-        ret = write_file(configuration_manager.sys_config_path, json_buffer, strlen(json_buffer), true);
+        ret = write_file(configuration_manager.sys_config_path, json_buffer, strlen(json_buffer), false);
         if (ret != 0)
         {
                 LOG_ERROR("Failed to write sys_config to file: %s",

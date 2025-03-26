@@ -423,7 +423,7 @@ ManagementReturncode handle_svc_message(int socket, service_message* msg, int cf
                                 LOG_ERROR("Failed to create socketpair");
                                 goto error_occured;
                         }
-                        coordinator.timeout_s = 10;
+                        coordinator.timeout_s = 20;
                         pthread_attr_init(&coordinator.thread_attr);
                         pthread_create(&coordinator.mainthread,
                                        &coordinator.thread_attr,
@@ -460,9 +460,20 @@ void cleanup_kritis3m_service()
 }
 
 enum MSG_RESPONSE_CODE dataplane_config_apply_send_status(struct policy_status_t* status)
+
 {
+        if (!coordinator.initialized || coordinator.update_socket[THREAD_EXT] < 0)
+        {
+                LOG_ERROR("coordinator is not initialized");
+                return MSG_ERROR;
+        }
+        LOG_INFO("sending status to coordinator from module: %d", status->module);
+        struct policy_status_t msg = {0};
+        msg.module = status->module;
+        msg.msg = status->msg;
+        msg.state = status->state;
         return external_management_request(coordinator.update_socket[THREAD_EXT],
-                                           status,
+                                           &msg,
                                            sizeof(struct policy_status_t));
 }
 
@@ -476,17 +487,17 @@ void* handle_dataplane_apply_req(void* arg)
         update_pollfd.fd = coordinator.update_socket[THREAD_INT];
         update_pollfd.events = POLLIN | POLLERR;
 
-        // control plane sends UPDATE_RECEIVED
-        if (ret < 0)
-        {
-                LOG_ERROR("Failed to send status to server");
-                goto error_occured;
-        }
-
+        // Initialize application and hardware configs
         struct application_manager_config* app_config = malloc(
                 sizeof(struct application_manager_config));
         struct hardware_configs* hw_configs = malloc(sizeof(struct hardware_configs));
+        if (!app_config || !hw_configs)
+        {
+                LOG_ERROR("Failed to allocate memory for configs");
+                goto error_occured;
+        }
 
+        // Get current dataplane configuration
         ret = get_application_inactive(app_config, hw_configs);
         if (ret < 0)
         {
@@ -494,14 +505,18 @@ void* handle_dataplane_apply_req(void* arg)
                 goto error_occured;
         }
 
+        // Send initial status
         enum apply_states current_state = UPDATE_APPLICABLE;
-        current_state = UPDATE_APPLICABLE;
         struct policy_status_t policy_msg = {0};
         policy_msg.module = UPDATE_COORDINATOR;
         policy_msg.state = UPDATE_APPLICABLE;
         policy_msg.msg = NULL;
-        policy_msg.msg_len = 0;
         ret = send_policy_status(&policy_msg);
+        if (ret < 0)
+        {
+                LOG_ERROR("Failed to send initial policy status");
+                goto error_occured;
+        }
 
         while (1)
         {
@@ -514,23 +529,6 @@ void* handle_dataplane_apply_req(void* arg)
                                 policy_msg.module = UPDATE_COORDINATOR;
                                 policy_msg.state = UPDATE_ERROR;
                                 policy_msg.msg = "Timeout occured";
-                                policy_msg.msg_len = strlen("Timeout occured. Rollback initiated");
-                                send_policy_status(&policy_msg);
-                                if (current_state == UPDATE_APPLIED)
-                                {
-                                        application_manager_rollback();
-                                        // respond error and return
-                                }
-                                send_policy_status(&policy_msg);
-                                goto error_occured;
-                        }
-                        if (ret < 0)
-                        {
-                                memset(&policy_msg, 0, sizeof(struct policy_status_t));
-                                policy_msg.module = UPDATE_COORDINATOR;
-                                policy_msg.state = UPDATE_ERROR;
-                                policy_msg.msg = "Internal error";
-                                policy_msg.msg_len = strlen("Internal error");
                                 send_policy_status(&policy_msg);
                                 if (current_state == UPDATE_APPLIED)
                                 {
@@ -543,24 +541,36 @@ void* handle_dataplane_apply_req(void* arg)
                         if (update_pollfd.revents & POLLIN)
                         {
                                 struct policy_status_t msg = {0};
-                                int32_t state = sockpair_read(coordinator.update_socket[THREAD_INT],
-                                                              &msg,
-                                                              sizeof(struct policy_status_t));
-                                respond_with(coordinator.update_socket[THREAD_EXT], MSG_OK);
+                                int ret = sockpair_read(coordinator.update_socket[THREAD_INT],
+                                                        &msg,
+                                                        sizeof(struct policy_status_t));
+                                if (ret < 0)
+                                {
+                                        LOG_ERROR("can't read fd, %d", errno);
+                                        goto error_occured;
+                                }
 
                                 enum apply_states requested_state = msg.state;
                                 enum module caller_module = msg.module;
-
+                                char* msg_str = (msg.msg) ? msg.msg : "No message";
+                                respond_with(coordinator.update_socket[THREAD_INT], MSG_OK);
                                 switch (requested_state)
                                 {
                                 case UPDATE_ERROR: // application manager
                                         {
+                                                LOG_ERROR("coordinator received error message from "
+                                                          "%d module, with msg: %s",
+                                                          caller_module,
+                                                          msg_str);
                                                 send_policy_status(&msg);
                                                 goto error_occured;
                                                 break;
                                         }
                                 case UPDATE_ROLLBACK: // can be only received from control plane
                                         {
+
+                                                LOG_ERROR("coordinator thread: STATE "
+                                                          "UPDATE_ROLLBACK");
                                                 if (current_state == UPDATE_APPLIED)
                                                 {
                                                         application_manager_rollback();
@@ -570,6 +580,9 @@ void* handle_dataplane_apply_req(void* arg)
                                         }
                                 case UPDATE_APPLYREQUEST: // can only be received form control plane
                                         {
+
+                                                LOG_ERROR("coordinator thread: STATE "
+                                                          "UPDATE_APPLYREQUEST");
                                                 ret = change_application_config(app_config, hw_configs);
                                                 if (ret < 0)
                                                 {
@@ -580,8 +593,6 @@ void* handle_dataplane_apply_req(void* arg)
                                                         policy_msg.module = UPDATE_COORDINATOR;
                                                         policy_msg.state = UPDATE_ERROR;
                                                         policy_msg.msg = "Internal error";
-                                                        policy_msg.msg_len = strlen(
-                                                                "Internal error");
                                                         send_policy_status(&policy_msg);
                                                         goto error_occured;
                                                 }
@@ -589,47 +600,74 @@ void* handle_dataplane_apply_req(void* arg)
                                         }
                                 case UPDATE_APPLIED: // can only be received from application manager
                                         {
+                                                LOG_ERROR(
+                                                        "coordinator thread: STATE UPDATE_APPLIED");
                                                 current_state = UPDATE_APPLIED;
                                                 memset(&policy_msg, 0, sizeof(struct policy_status_t));
                                                 policy_msg.module = msg.module;
                                                 policy_msg.state = UPDATE_APPLIED;
                                                 policy_msg.msg = msg.msg;
-                                                policy_msg.msg_len = msg.msg_len;
                                                 send_policy_status(&policy_msg);
                                                 break;
                                         }
                                 case UPDATE_ACK:
                                         {
+                                                LOG_ERROR("coordinator thread: STATE UPDATE_ACK");
                                                 // on restarting system, new config will be used
                                                 ack_dataplane_update();
-                                                LOG_INFO("Update applied");
                                                 goto finish_dataplane_apply_req;
                                         }
                                 default:
-                                        LOG_ERROR("Invalid module");
-                                        goto error_occured;
+                                        {
+                                                LOG_ERROR("coordinator thread: Invalid module");
+                                                goto error_occured;
+                                        }
                                 }
                         }
+
+                        else if (update_pollfd.revents & POLLERR)
+                        {
+                                LOG_ERROR("coordinator thread: poll error event, %d", errno);
+                                memset(&policy_msg, 0, sizeof(struct policy_status_t));
+                                policy_msg.module = UPDATE_COORDINATOR;
+                                policy_msg.state = UPDATE_ERROR;
+                                policy_msg.msg = "Internal error";
+                                send_policy_status(&policy_msg);
+                                if (current_state == UPDATE_APPLIED)
+                                {
+                                        application_manager_rollback();
+                                        // respond error and return
+                                }
+                                send_policy_status(&policy_msg);
+                                goto error_occured;
+                        }
                 }
+                else
+                {
 
-        finish_dataplane_apply_req:
-                enable_sync(false);
-                coordinator.initialized = false;
-                closesocket(coordinator.update_socket[THREAD_INT]);
-                closesocket(coordinator.update_socket[THREAD_EXT]);
-                coordinator.update_socket[THREAD_INT] = -1;
-                coordinator.update_socket[THREAD_EXT] = -1;
-                return NULL;
-
-        error_occured:
-                enable_sync(false);
-                coordinator.initialized = false;
-                closesocket(coordinator.update_socket[THREAD_INT]);
-                closesocket(coordinator.update_socket[THREAD_EXT]);
-                coordinator.update_socket[THREAD_INT] = -1;
-                coordinator.update_socket[THREAD_EXT] = -1;
-                return NULL;
+                        LOG_ERROR("coordinator thread: poll error, %d", errno);
+                        goto error_occured;
+                }
+                LOG_INFO("new iteration");
         }
+
+finish_dataplane_apply_req:
+        enable_sync(false);
+        coordinator.initialized = false;
+        closesocket(coordinator.update_socket[THREAD_INT]);
+        closesocket(coordinator.update_socket[THREAD_EXT]);
+        coordinator.update_socket[THREAD_INT] = -1;
+        coordinator.update_socket[THREAD_EXT] = -1;
+        return NULL;
+
+error_occured:
+        enable_sync(false);
+        coordinator.initialized = false;
+        closesocket(coordinator.update_socket[THREAD_INT]);
+        closesocket(coordinator.update_socket[THREAD_EXT]);
+        coordinator.update_socket[THREAD_INT] = -1;
+        coordinator.update_socket[THREAD_EXT] = -1;
+        return NULL;
 }
 
 enum MSG_RESPONSE_CODE ctrlplane_cert_get_req()

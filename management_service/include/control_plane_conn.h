@@ -85,10 +85,9 @@ enum module
 };
 struct policy_status_t
 {
-        enum module module;
-        enum apply_states state;
+        int32_t module;
+        int32_t state;
         char* msg;
-        int32_t msg_len;
 };
 
 /**
