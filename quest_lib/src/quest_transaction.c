@@ -185,6 +185,7 @@ struct http_get_response* quest_get_transaction_response(quest_transaction* tran
 
 enum kritis3m_status_info quest_execute_transaction(quest_transaction* qkd_transaction)
 {
+        int total_bytes_sent = 0;
         enum kritis3m_status_info status = E_OK;
         duration timeout = ms_to_duration(TIMEOUT_DURATION);
 
@@ -195,11 +196,12 @@ enum kritis3m_status_info quest_execute_transaction(quest_transaction* qkd_trans
                 LOG_ERROR("establishing host connection was unsuccessful, error code %d\n", errno);
                 goto QKD_CON_ERR;
         }
-
+        
         /* if enable_secure_con is true, we use HTTPS */
         if (qkd_transaction->security_param.enable_secure_con)
         {
-                status = https_client_req(qkd_transaction->endpoint->connection_info.socket_fd,
+                /* function return is the number */
+                total_bytes_sent = https_client_req(qkd_transaction->endpoint->connection_info.socket_fd,
                                           qkd_transaction->security_param.tls_session,
                                           qkd_transaction->request,
                                           timeout,
@@ -207,13 +209,13 @@ enum kritis3m_status_info quest_execute_transaction(quest_transaction* qkd_trans
         }
         else /* otherwise we use standard HTTP */
         {
-                status = http_client_req(qkd_transaction->endpoint->connection_info.socket_fd,
+                total_bytes_sent = http_client_req(qkd_transaction->endpoint->connection_info.socket_fd,
                                          qkd_transaction->request,
                                          timeout,
                                          qkd_transaction->response);
         }
 
-        if (status < 0)
+        if (total_bytes_sent < 0)
         {
                 LOG_ERROR("failed to send HTTP-GET request, error code: %d\n", status);
                 status = CON_ERR;
