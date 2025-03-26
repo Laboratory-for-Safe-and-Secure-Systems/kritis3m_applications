@@ -13,7 +13,7 @@
 
 #include "http_client.h"
 #include "http_method.h"
-#include "kritis3m_http_request.h"
+#include "kritis3m_http.h"
 #include "networking.h"
 
 typedef struct quest_configuration quest_configuration;
@@ -46,6 +46,9 @@ struct quest_configuration
         {
                 /* Hostname of the QKD Server REST-API */
                 char* hostname;
+
+                /* Identifier of the QKD endpoint SAE */
+                char* host_sae_ID;
 
                 /* Hostport of the QKD Server */
                 char* hostport;
@@ -83,6 +86,12 @@ enum kritis3m_status_info quest_deinit(quest_configuration* config);
 /// @return returns reference to the allocated quest_endpoint object or NULL, if an error occured.
 quest_endpoint* quest_setup_endpoint(quest_configuration* config);
 
+/// @brief Get the secure application entity identifier for the quest endpoint.
+/// @param endpoint reference to the quest_endpoint containing the connection and security
+///                 information.
+/// @return returns the sae_ID as a const char reference.
+enum kritis3m_status_info quest_get_own_sae_id(quest_endpoint* endpoint, char* dst_buf);
+
 /// @brief Frees the allocates quest_endpoint.
 /// @param endpoint reference to the endpoint, which shall be freed.
 /// @return returns E_OK if working correctly, otherwise returns an error code less than zero.
@@ -96,10 +105,12 @@ enum kritis3m_status_info quest_free_endpoint(quest_endpoint* endpoint);
 ///                 information.
 /// @param req_type specifies the request type. Currently supported: HTTP_KEY_NO_ID,
 ///                 HTTP_KEY_WITH_ID and HTTP_STATUS.
+/// @param sae_ID   secure application entity identifiert used in the request url.
 /// @param identity if HTTP_KEY_WITH_ID is requested, the key identifier must be referenced here.
 /// @return returns a refernce to the allocated quest_transaction object or NULL, if an error occured.
 quest_transaction* quest_setup_transaction(quest_endpoint* endpoint,
                                            enum http_get_request_type req_type,
+                                           char* sae_ID,
                                            char* identity);
 
 /// @brief Executes the configured transaction by establishing a connection to the QKD KMS and

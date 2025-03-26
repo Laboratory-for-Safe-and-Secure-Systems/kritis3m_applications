@@ -68,17 +68,19 @@ SOCKET_CON_ERR:
 ///        and additional the function parameters.
 /// @param qkd_transaction reference to the quest_transaction, which shall be configured.
 /// @param endpoint reference to the quest_endpoint, which contains the configuration parameter.
-/// @param  req_type specifies the type of HTTP(S) request which shall be sent.
+/// @param req_type specifies the type of HTTP(S) request which shall be sent.
+/// @param sae_ID secure application entity identifier used in the request url.
 /// @param identity OPTIONAL parameter, which must be set, if a key with a specific key identifier 
 ///                 shall be requested (req_type must then be HTTP_KEY_WITH_ID).
 /// @return returns E_OK if working correctly, otherwise returns an error code less than zero. 
 static enum kritis3m_status_info configure_transaction(quest_transaction* qkd_transaction,
                                                        quest_endpoint* endpoint,
                                                        enum http_get_request_type req_type,
+                                                       char* sae_ID,
                                                        char* identity)
 {
         /* sanity check: required parameter */
-        if ((qkd_transaction == NULL) || (endpoint == NULL))
+        if ((qkd_transaction == NULL) || (endpoint == NULL) || (sae_ID == NULL))
                 return PARAM_ERR;
 
         /* sanity check: if a key should be requested with a
@@ -94,11 +96,14 @@ static enum kritis3m_status_info configure_transaction(quest_transaction* qkd_tr
         qkd_transaction->endpoint = endpoint;
         qkd_transaction->security_param.enable_secure_con = endpoint->security_param.enable_secure_con;
 
+        /* set sae_ID in the transaction url parameter */
+        qkd_transaction->url_param.sae_ID = sae_ID;
+
         /* set request type and key identity, if identity is passed to the function. */
         qkd_transaction->request_type = req_type;
         if (identity != NULL)
         {
-                memcpy(qkd_transaction->key_ID, identity, strlen(identity));
+                memcpy(qkd_transaction->url_param.key_ID, identity, strlen(identity));
         }
 
         return E_OK;
@@ -107,6 +112,7 @@ static enum kritis3m_status_info configure_transaction(quest_transaction* qkd_tr
 /*------------------------------- public functions -------------------------------*/
 quest_transaction* quest_setup_transaction(quest_endpoint* endpoint,
                                            enum http_get_request_type req_type,
+                                           char* sae_ID,
                                            char* identity)
 {
         enum kritis3m_status_info status = E_OK;
@@ -128,7 +134,7 @@ quest_transaction* quest_setup_transaction(quest_endpoint* endpoint,
         /* Ensure all buffers of the transaction are zero */
         memset(qkd_transaction, 0, sizeof(struct quest_transaction));
 
-        status = configure_transaction(qkd_transaction, endpoint, req_type, identity);
+        status = configure_transaction(qkd_transaction, endpoint, req_type, sae_ID, identity);
         if (status != E_OK)
         {
                 free(qkd_transaction);
@@ -159,7 +165,8 @@ quest_transaction* quest_setup_transaction(quest_endpoint* endpoint,
                               qkd_transaction->response,
                               qkd_transaction->endpoint->connection_info.hostname,
                               qkd_transaction->endpoint->connection_info.hostport,
-                              qkd_transaction->key_ID);
+                              qkd_transaction->url_param.sae_ID,
+                              qkd_transaction->url_param.key_ID);
 
         return qkd_transaction;
 

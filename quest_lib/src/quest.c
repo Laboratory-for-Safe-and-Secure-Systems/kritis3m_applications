@@ -1,5 +1,5 @@
 #include "quest.h"
-#include "kritis3m_http_request.h"
+#include "kritis3m_http.h"
 
 /*------------------------------ private functions -------------------------------*/
 
@@ -15,6 +15,7 @@ quest_configuration* quest_default_config(void)
         default_config->verbose = false;
 
         default_config->connection_info.hostname = "im-lfd-qkd-bob.othr.de";
+        default_config->connection_info.host_sae_ID = "bob_sae_etsi_1";
         default_config->connection_info.hostport = "9120";
 
         default_config->security_param.enable_secure_con = false;

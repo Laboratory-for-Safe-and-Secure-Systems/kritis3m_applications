@@ -2,7 +2,7 @@
 #define QUEST_TYPES_H
 
 #include "asl.h"
-#include "kritis3m_http_request.h"
+#include "kritis3m_http.h"
 #include "quest.h"
 
 #define KEY_ID_LEN 64
@@ -23,6 +23,17 @@ struct quest_transaction
 
         } security_param;
 
+        struct 
+        {
+                /* Secure Application Entity Identifier */
+                char* sae_ID;
+                
+                /* OPTIONAL parameter for HTTP-GET WITH KEY ID */
+                char key_ID[KEY_ID_LEN];
+        
+        } url_param;
+        
+
         /* Specify which type of HTTP-GET message shall be sent */
         enum http_get_request_type request_type;
 
@@ -31,9 +42,6 @@ struct quest_transaction
 
         /* HTTP-GET Response struct reference */
         struct http_get_response* response;
-
-        /* OPTIONAL parameter for HTTP-GET WITH KEY ID */
-        char key_ID[KEY_ID_LEN];
 };
 
 struct quest_endpoint
@@ -48,6 +56,9 @@ struct quest_endpoint
 
                 /* Hostname of the QKD Server REST-API */
                 char* hostname;
+
+                /* Identifier of the QKD endpoint SAE */
+                char* host_sae_ID;
 
                 /* Hostport of the QKD Server */
                 char* hostport;

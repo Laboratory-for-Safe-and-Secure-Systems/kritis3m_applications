@@ -1,8 +1,9 @@
-#include "kritis3m_http_request.h"
+#include "kritis3m_http.h"
 #include "logging.h"
 
 LOG_MODULE_CREATE(kritis3m_http_request);
 
+/*------------------------------- request callback -------------------------------*/
 static void manage_request_error(struct http_get_response* response, cJSON* data)
 {
         cJSON* error_msg = cJSON_GetObjectItemCaseSensitive(data, "message");
@@ -114,23 +115,91 @@ static void http_get_cb(struct http_response* rsp, enum http_final_call final_da
         }
 }
 
-static struct qkd_key_info* allocate_key_info()
+/*------------------------------- private functions -------------------------------*/
+
+/// @brief Dynamically allocates memory and assembles the url for the http_get request. 
+/// @param request reference to the http_request object allocated before.
+/// @param sae_ID secure application entity identifier used in the url.
+/// @param type_url specified url type. (set in populate_request_url() function)
+/// @param key_ID OPTIONAL parameter, if a http_get request for a referenced key_ID is neccessary.
+static void assemble_url(struct http_request* request, char* sae_ID, char* type_url, char* key_ID)
 {
-        /* allocate key_info struct for http get resone */
-        struct qkd_key_info* key_info;
-        key_info = malloc(sizeof(struct qkd_key_info));
-        if (key_info == NULL)
+        if((request == NULL) || (sae_ID == NULL) || (type_url == NULL))
         {
-                LOG_ERROR("failed to allocate HTTP-GET response key_info parameter.\n");
-                goto ALLOC_ERR;
+                LOG_ERROR("invalid parameter configuration in url assembly\n");
+                return;
         }
 
-        return key_info;
+        /* base part of the url, which is identical for all url types. */
+        char* base_url = "/api/v1/keys/";
 
-ALLOC_ERR:
-        return NULL;
+        /* Allocate enough space for the base URL, the sae_ID, the type_url and the null terminator */
+        size_t base_url_len = strlen(base_url);
+        size_t sae_id_len = strlen(sae_ID);
+        size_t type_url_len = strlen(type_url);
+
+        /* <base_url> + <sae_ID> + <type_url> */
+        size_t total_len = base_url_len + sae_id_len + type_url_len + 1; // +1 for null terminator
+
+        /* If the key_ID parameter is set, we reserve the additional length of the identifier */
+        if(key_ID != NULL)
+        {
+                size_t key_id_len = strlen(key_ID);
+                total_len += key_id_len;
+        }
+
+        request->url = (char*) malloc(total_len);
+        if (request->url == NULL)
+        {
+                LOG_ERROR("memory allocation failed in url assembly\n");
+                return;
+        }
+
+        /* Initialize request url buffer with zero values */
+        memset((char*)request->url, 0, total_len);
+
+        // Copy the base URL and concatenate the key
+        strcpy((char*) request->url, base_url);
+        strcat((char*) request->url, sae_ID);
+        strcat((char*) request->url, type_url);
+
+        if(key_ID != NULL)
+        {
+                strcat((char*) request->url, key_ID);
+        }
 }
 
+/// @brief Populate the request url depending on the request type. This function specifies the 
+///        url assembly depending on the type set in the http_get_response.
+/// @param request reference to the http_request object allocated before.
+/// @param response reference to the http_get_response object allocated before.
+/// @param key_ID OPTIONAL parameter, if a http_get request for a referenced key_ID is neccessary.
+static void populate_request_url(struct http_request* request,
+                                 struct http_get_response* response,
+                                 char* sae_ID,
+                                 char* key_ID)
+{
+        switch (response->msg_type)
+        {
+        case HTTP_STATUS:
+                assemble_url(request, sae_ID, "/status", NULL);
+                break;
+
+        case HTTP_KEY_NO_ID:
+                assemble_url(request, sae_ID, "/enc_keys?number=1", NULL);
+                break;
+
+        case HTTP_KEY_WITH_ID:
+                assemble_url(request, sae_ID, "/dec_keys?key_ID=", key_ID);
+                break;
+
+        default:
+                LOG_ERROR("invalid state of message type\n");
+                break;
+        }
+}
+
+/*------------------------------- public functions -------------------------------*/
 struct http_request* allocate_http_request()
 {
         /* allocate actual http_request */
@@ -150,141 +219,11 @@ ALLOC_ERR:
         return NULL;
 }
 
-struct http_get_response* allocate_http_response()
-{
-        /* allocate response struct for http get request */
-        struct http_get_response* response;
-        response = malloc(sizeof(struct http_get_response));
-        if (response == NULL)
-        {
-                LOG_ERROR("failed to allocate HTTP-GET response.\n");
-                goto ALLOC_ERR;
-        }
-
-        memset(response, 0, sizeof(struct http_get_response));
-
-        return response;
-
-ALLOC_ERR:
-        return NULL;
-}
-
-static void populate_key_with_id_url(struct http_request* request, char* key_ID)
-{
-        /*                                                     Template URL */
-        /* http://im-lfd-qkd-alice.othr.de:9120/api/v1/keys/bob_sae_etsi_1/dec_keys?key_ID=0a6976fa-f096-42e1-8861-e59dfab12caf */
-
-        /* depending on the host configuration the SAE in the base_url differs respectively */
-        char* base_url;
-        if (strcmp(request->host, "im-lfd-qkd-bob.othr.de") == 0)
-        {
-                base_url = "/api/v1/keys/alice_sae_etsi_1/dec_keys?key_ID=";
-        }
-        else if (strcmp(request->host, "im-lfd-qkd-alice.othr.de") == 0)
-        {
-                base_url = "/api/v1/keys/bob_sae_etsi_1/dec_keys?key_ID=";
-        }
-        else
-        {
-                base_url = NULL;
-                LOG_ERROR("invalid host and status configuration to assemble url\n");
-                return;
-        }
-
-        /* Allocate enough space for the base URL, the key, and the null terminator */
-        size_t base_url_len = strlen(base_url);
-        size_t key_id_len = strlen(key_ID);
-        size_t total_len = base_url_len + key_id_len + 1; // +1 for null terminator
-
-        request->url = (char*) malloc(total_len);
-        if (request->url == NULL)
-        {
-                LOG_ERROR("memory allocation failed in url assembly\n");
-                return;
-        }
-
-        /* Initialize request url buffer with zero values */
-        memset((char*)request->url, 0, total_len);
-
-        // Copy the base URL and concatenate the key
-        strcpy((char*) request->url, base_url);
-        strcat((char*) request->url, key_ID);
-}
-
-static void populate_key_no_id_url(struct http_request* request)
-{
-        /*                              Template URL                                         */
-        /* http://im-lfd-qkd-bob.othr.de:9120/api/v1/keys/alice_sae_etsi_1/enc_keys?number=1 */
-
-        if (strcmp(request->host, "im-lfd-qkd-bob.othr.de") == 0)
-        {
-                request->url = "/api/v1/keys/alice_sae_etsi_1/enc_keys?number=1";
-        }
-        else if (strcmp(request->host, "im-lfd-qkd-alice.othr.de") == 0)
-        {
-                request->url = "/api/v1/keys/bob_sae_etsi_1/enc_keys?number=1";
-        }
-        else
-        {
-                LOG_ERROR("invalid host and status configuration to assemble url\n");
-        }
-}
-
-static void populate_status_url(struct http_request* request)
-{
-        /*                              Template URL                              */
-        /* http://im-lfd-qkd-bob.othr.de:9120/api/v1/keys/alice_sae_etsi_1/status */
-
-        if (strcmp(request->host, "im-lfd-qkd-bob.othr.de") == 0)
-        {
-                request->url = "/api/v1/keys/alice_sae_etsi_1/status";
-        }
-        else if (strcmp(request->host, "im-lfd-qkd-alice.othr.de") == 0)
-        {
-                request->url = "/api/v1/keys/bob_sae_etsi_1/status";
-        }
-        else
-        {
-                LOG_ERROR("invalid host and status configuration to assemble url\n");
-        }
-}
-
-static void populate_request_url(struct http_request* request,
-                                 struct http_get_response* response,
-                                 char* key_ID)
-{
-        switch (response->msg_type)
-        {
-        case HTTP_STATUS:
-                populate_status_url(request);
-                break;
-
-        case HTTP_KEY_NO_ID:
-                populate_key_no_id_url(request);
-                break;
-
-        case HTTP_KEY_WITH_ID:
-                if (key_ID == NULL)
-                {
-                        LOG_ERROR("invalid key ID parameter");
-                        break;
-                }
-                else
-                {
-                        populate_key_with_id_url(request, key_ID);
-                }
-                break;
-
-        default:
-                LOG_ERROR("invalid state of message type\n");
-                break;
-        }
-}
-
 void populate_http_request(struct http_request* request,
                            struct http_get_response* response,
                            char* hostname,
                            char* hostport,
+                           char* sae_ID,
                            char* key_ID)
 {
         /* set http protocol information and response callback */
@@ -300,18 +239,7 @@ void populate_http_request(struct http_request* request,
         request->recv_buf = response->buffer;
         request->recv_buf_len = response->buffer_len;
 
-        populate_request_url(request, response, key_ID);
-}
-
-void populate_http_response(struct http_get_response* response, enum http_get_request_type request_type)
-{
-        response->buffer_frag_start = NULL;
-        response->buffer_len = DEFAULT_BUFFER_LEN;
-        response->bytes_received = 0;
-        response->error_code = 0;
-        response->msg_type = request_type;
-
-        response->key_info = allocate_key_info();
+        populate_request_url(request, response, sae_ID, key_ID);
 }
 
 void deinit_http_request(struct http_request* request, enum http_get_request_type msg_type)
@@ -319,24 +247,10 @@ void deinit_http_request(struct http_request* request, enum http_get_request_typ
         if (request == NULL)
                 return;
 
-        /* This free shall only be called, if a key with key_ID was requested */
-        if ((request->url != NULL) && (msg_type == HTTP_KEY_WITH_ID))
+        /* Free allocated url */
+        if (request->url != NULL)
                 free((char*) request->url);
 
         free(request);
 }
 
-void deinit_http_response(struct http_get_response* response)
-{
-        if (response == NULL)
-                return;
-
-        if (response->key_info != NULL)
-        {
-                free(response->key_info);
-        }
-
-        free(response);
-
-        return;
-}

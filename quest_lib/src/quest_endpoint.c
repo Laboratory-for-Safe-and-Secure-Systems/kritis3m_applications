@@ -72,6 +72,7 @@ static enum kritis3m_status_info configure_endpoint(quest_endpoint* endpoint, qu
 
         endpoint->connection_info.hostname = config->connection_info.hostname;
         endpoint->connection_info.hostport = config->connection_info.hostport;
+        endpoint->connection_info.host_sae_ID = config->connection_info.host_sae_ID;
 
         return status;
 
@@ -112,6 +113,16 @@ quest_endpoint* quest_setup_endpoint(quest_configuration* config)
 ENDPOINT_ERR:
         free(endpoint);
         return NULL;
+}
+
+enum kritis3m_status_info quest_get_own_sae_id(quest_endpoint* endpoint, char* dst_buf)
+{
+        if(endpoint->connection_info.host_sae_ID == NULL)
+                return PARAM_ERR;
+
+        /* value copy of the host_sae_id to the buffer */
+        strcpy(dst_buf, endpoint->connection_info.host_sae_ID);
+        return E_OK;
 }
 
 enum kritis3m_status_info quest_free_endpoint(quest_endpoint* endpoint)
