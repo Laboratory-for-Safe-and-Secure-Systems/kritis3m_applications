@@ -5,7 +5,7 @@
 
 #if !defined(__ZEPHYR__) && !defined(_WIN32)
 
-        #include <unistd.h>
+#include <unistd.h>
 
 #endif
 
@@ -39,7 +39,7 @@ static int take_timestamp(struct timespec* ts);
 
 #if defined(_WIN32) && defined(_MSC_VER)
 
-        #include <winsock2.h>
+#include <winsock2.h>
 
 static int take_timestamp(struct timespec* ts)
 {
@@ -223,16 +223,36 @@ void timing_metrics_get_results(timing_metrics* metrics, timing_metrics_results*
 int timing_metrics_prepare_output_file(timing_metrics* metrics, char const* path)
 {
 #if defined(__ZEPHYR__) || defined(_WIN32)
-        /* Not supported on Zephyr */
-        return 0;
-#else
         if (metrics == NULL)
                 return 0; /* No error */
 
         if (path == NULL)
                 return -1;
+        else if (strcmp(path, "stdout") != 0)
+        {
+                LOG_ERROR_EX(*metrics->log_module, "Only stdout is supported on Zephyr.");
+                return -1;
+        }
 
+        metrics->output_file = (char*) malloc(16);
+        if (metrics->output_file == NULL)
+        {
+                LOG_ERROR_EX(*metrics->log_module, "Failed to allocate memory for file path.");
+                return -1;
+        }
+        strcpy(metrics->output_file, path);
+
+        LOG_INFO_EX(*metrics->log_module, "Printing CSV output to %s", metrics->output_file);
+
+        return 0;
+#else
         int ret = 0;
+
+        if (metrics == NULL)
+                return 0; /* No error */
+
+        if (path == NULL)
+                return -1;
 
         if (metrics->output_file != NULL)
                 free(metrics->output_file);
@@ -289,13 +309,48 @@ cleanup:
 int timing_metrics_write_to_file(timing_metrics* metrics)
 {
 #if defined(__ZEPHYR__) || defined(_WIN32)
-        /* Not supported on Zephyr */
-        return 0;
-#else
-        if (metrics == NULL || metrics->output_file == NULL)
+        if (metrics == NULL || metrics->output_file == NULL ||
+            strcmp(metrics->output_file, "stdout") != 0)
                 return 0; /* No error */
 
+        /* Print separator */
+        printf("---------- CSV BEGIN ----------\r\n");
+
+        /* Print CSV content to stdout */
+        printf("# name: %s\n", metrics->name);
+        printf("# all measurements are in microseconds\n");
+        printf("# measurements_count: %d\n", metrics->measurements_count);
+
+        /* Get the results of the measurement */
+        timing_metrics_results results = {0};
+        timing_metrics_get_results(metrics, &results);
+
+        /* Write the results to the file */
+        printf("# minimum: %d\n", results.min);
+        printf("# maximum: %d\n", results.max);
+        printf("# average: %.2f\n", results.avg);
+        printf("# standard deviation: %.2f\n", results.std_dev);
+        printf("# median: %.2f\n", results.median);
+        printf("# 90th percentile: %.0f\n", results.percentile_90);
+        printf("# 99th percentile: %.0f\n", results.percentile_99);
+
+        printf("\nduration\n");
+
+        /* print actual values */
+        for (uint32_t i = 0; i < metrics->measurements_count; i++)
+        {
+                printf("%d\n", metrics->measurements[i]);
+        }
+
+        /* Print separator */
+        printf("---------- CSV END ----------\r\n");
+
+        return 0;
+#else
         int ret = 0;
+
+        if (metrics == NULL || metrics->output_file == NULL)
+                return 0; /* No error */
 
         /* Check if the file still exists */
         if (access(metrics->output_file, F_OK) != 0)
