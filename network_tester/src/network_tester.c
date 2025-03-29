@@ -634,7 +634,7 @@ static int send_management_message(int socket, network_tester_management_message
 static int read_management_message(int socket, network_tester_management_message* msg)
 {
         int ret = recv(socket, (char*) msg, sizeof(network_tester_management_message), 0);
-        if (ret < 0 && errno == EAGAIN)
+        if (ret < 0 && (errno == EAGAIN || errno == 0))
         {
                 /* No message available on the non-blocking socket. This error condition is no
                  * actual error in this application. We indicate that with the +1 return value.
