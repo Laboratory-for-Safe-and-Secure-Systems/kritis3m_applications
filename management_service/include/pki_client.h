@@ -1,27 +1,33 @@
-
 #ifndef PKI_CLIENT_H_
 #define PKI_CLIENT_H_
 
 #include "asl.h"
+#include "configuration_manager.h"
 #include "ipc.h"
 #include "kritis3m_configuration.h"
+#include "kritis3m_pki_client.h"
 
 struct pki_client_config_t
 {
         asl_endpoint_configuration* endpoint_config;
         char* serialnumber;
         char* host;
-        char* port;
+        int16_t port;
 };
+enum CERT_TYPE
+{
+        CERT_TYPE_DATAPLANE,
+        CERT_TYPE_CONTROLPLANE,
+};
+// define callback function
+typedef int (*pki_callback_t)(char* buffer, size_t size);
 
-int start_pki_client(struct pki_client_config_t* config);
-void cleanup_pki_client();
+int cert_request(struct pki_client_config_t* config,
+                 enum CERT_TYPE cert_type,
+                 bool include_ca_certs,
+                 pki_callback_t callback);
 
-enum MSG_RESPONSE_CODE stop_pki_client();
-enum MSG_RESPONSE_CODE dataplane_cert_request();
-enum MSG_RESPONSE_CODE controlplane_cert_request();
-
-enum MSG_RESPONSE_CODE dataplane_enroll_request();
-enum MSG_RESPONSE_CODE controlplane_enroll_request();
+// New function to fetch the certificate chain
+int fetch_ca_cert_chain(struct pki_client_config_t* config, pki_callback_t callback);
 
 #endif /* PKI_CLIENT_H_ */
