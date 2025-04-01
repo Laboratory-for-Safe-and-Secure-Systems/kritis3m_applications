@@ -934,3 +934,56 @@ void cleanup_hardware_configs(struct hardware_configs* hw_configs)
         }
         hw_configs->number_of_hw_configs = 0;
 }
+
+int store_alt_ctrl_cert(char* cert_buffer, size_t cert_size)
+{
+        int ret = 0;
+        if (!cert_buffer || cert_size == 0)
+        {
+                LOG_ERROR("Invalid buffer or size");
+                return -1;
+        }
+        //? append yes or no?
+        switch (configuration_manager.sys_config.controlplane_active)
+        {
+        case ACTIVE_ONE:
+                ret = write_file(configuration_manager.controlplane_2_chain_path,
+                                 cert_buffer,
+                                 cert_size,
+                                 false);
+                ret = 0;
+                break;
+        case ACTIVE_TWO:
+                ret = write_file(configuration_manager.controlplane_1_chain_path,
+                                 cert_buffer,
+                                 cert_size,
+                                 false);
+                ret = 0;
+                break;
+        case ACTIVE_NONE:
+                LOG_ERROR("No active controlplane configuration");
+                ret = write_file(configuration_manager.controlplane_1_chain_path,
+                                 cert_buffer,
+                                 cert_size,
+                                 false);
+                ret = 0;
+                break;
+
+        default:
+                LOG_ERROR("Invalid controlplane active configuration");
+                ret = -1;
+                break;
+        }
+        return ret;
+}
+
+int store_alt_data_cert(char* buffer, size_t size)
+{
+        if (!buffer || size == 0)
+        {
+                LOG_ERROR("Invalid buffer or size");
+                return -1;
+        }
+
+        return 0;
+}

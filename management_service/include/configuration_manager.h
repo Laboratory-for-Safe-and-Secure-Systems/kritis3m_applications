@@ -95,6 +95,9 @@ int dataplane_set_certificate(char* buffer, size_t size);
 int controlplane_set_certificate(char* buffer, size_t size);
 int application_store_inactive(char* buffer, size_t size);
 
+int store_controlplane_certificate(char* buffer, size_t size);
+int store_dataplane_certificate(char* buffer, size_t size);
+
 void cleanup_application_config(struct application_manager_config* config);
 void cleanup_hardware_configs(struct hardware_configs* hw_configs);
 
