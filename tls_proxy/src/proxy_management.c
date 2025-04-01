@@ -1,16 +1,15 @@
 
 #include <errno.h>
-#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 
 #if defined(_WIN32)
-        #include <winsock2.h>
+#include <winsock2.h>
 #else
-        #include <netinet/tcp.h>
-        #include <sys/socket.h>
+#include <netinet/tcp.h>
+#include <sys/socket.h>
 #endif
 
 #include "proxy_backend.h"

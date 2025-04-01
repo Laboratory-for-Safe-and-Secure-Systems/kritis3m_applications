@@ -36,13 +36,13 @@
 #include "logging.h"
 #include "networking.h"
 
+LOG_MODULE_CREATE(networking);
+
 #define ERROR_OUT(...)                                                                             \
         {                                                                                          \
                 LOG_ERROR(__VA_ARGS__);                                                            \
                 goto cleanup;                                                                      \
         }
-
-LOG_MODULE_CREATE(networking);
 
 static struct network_interfaces ifaces = {
         .management = NULL,

@@ -1,5 +1,4 @@
 #include <errno.h>
-#include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
@@ -17,6 +16,7 @@
 #include "logging.h"
 #include "networking.h"
 #include "poll_set.h"
+#include "threading.h"
 
 LOG_MODULE_CREATE(echo_server);
 
@@ -72,8 +72,7 @@ typedef struct echo_server
         asl_endpoint* tls_endpoint;
         int management_socket_pair[2];
         pthread_t thread;
-        pthread_attr_t thread_attr;
-        struct poll_set poll_set;
+        poll_set poll_set;
 } echo_server;
 
 typedef struct echo_client
@@ -107,9 +106,18 @@ Z_KERNEL_STACK_DEFINE_IN(echo_server_stack,
                          STACK_SIZE,
                          __attribute__((section(CONFIG_RAM_SECTION_STACKS_1))));
 
+#define ECHO_SERVER_STACK echo_server_stack
+#define ECHO_SERVER_STACK_SIZE K_THREAD_STACK_SIZEOF(echo_server_stack)
+
 #else
 
 static echo_client client_pool[MAX_CLIENTS];
+
+#ifdef ENABLE_STACK_USAGE_REPORTING
+
+#else
+
+#endif
 
 #endif
 
@@ -338,13 +346,7 @@ static void* echo_server_main_thread(void* ptr)
 cleanup:
         /* Cleanup */
         echo_server_cleanup(server);
-
-        LOG_DEBUG("Echo server thread terminated");
-
-        /* Detach the thread here, as it is terminating by itself. With that,
-         * the thread resources are freed immediatelly. */
-        pthread_detach(pthread_self());
-
+        terminate_thread(LOG_MODULE_GET());
         return NULL;
 }
 
@@ -907,22 +909,15 @@ int echo_server_run(echo_server_config const* config)
                   the_server.management_socket_pair[0],
                   the_server.management_socket_pair[1]);
 
-        /* Init main backend */
-        pthread_attr_init(&the_server.thread_attr);
-        pthread_attr_setdetachstate(&the_server.thread_attr, PTHREAD_CREATE_JOINABLE);
-
-#if defined(__ZEPHYR__)
-        /* We have to properly set the attributes with the stack to use for Zephyr. */
-        pthread_attr_setstack(&the_server.thread_attr,
-                              echo_server_stack,
-                              K_THREAD_STACK_SIZEOF(echo_server_stack));
-#endif
-
         /* Create the new thread */
-        ret = pthread_create(&the_server.thread,
-                             &the_server.thread_attr,
-                             echo_server_main_thread,
-                             &the_server);
+        thread_attibutes attr = {0};
+        attr.function = echo_server_main_thread;
+        attr.argument = &the_server;
+#if defined(__ZEPHYR__)
+        attr.stack_size = K_THREAD_STACK_SIZEOF(echo_server_stack);
+        attr.stack = echo_server_stack;
+#endif
+        ret = start_thread(&the_server.thread, &attr);
         if (ret != 0)
                 ERROR_OUT("Error starting TCP echo server thread: %s", strerror(ret));
 
@@ -1010,44 +1005,40 @@ int echo_server_get_status(echo_server_status* status)
  */
 int echo_server_terminate(void)
 {
-        if ((the_server.running == false) || (the_server.management_socket_pair[0] < 0) ||
-            (the_server.management_socket_pair[1] < 0))
+        if ((the_server.management_socket_pair[0] > 0) && (the_server.management_socket_pair[1] > 0))
         {
-                LOG_DEBUG("TCP echo server is not running");
-                return 0;
-        }
+                /* Send shutdown message to the management socket */
+                echo_server_management_message msg = {0};
+                msg.type = MANAGEMENT_MSG_SHUTDOWN;
+                msg.payload.dummy_unused = 0;
 
-        /* Send shutdown message to the management socket */
-        echo_server_management_message msg = {0};
-        msg.type = MANAGEMENT_MSG_SHUTDOWN;
-        msg.payload.dummy_unused = 0;
+                /* Send request */
+                int ret = send_management_message(the_server.management_socket_pair[0], &msg);
+                if (ret < 0)
+                {
+                        return -1;
+                }
 
-        /* Send request */
-        int ret = send_management_message(the_server.management_socket_pair[0], &msg);
-        if (ret < 0)
-        {
-                return -1;
-        }
-
-        /* Wait for response */
-        ret = read_management_message(the_server.management_socket_pair[0], &msg);
-        if (ret < 0)
-        {
-                return -1;
-        }
-        else if (msg.type != MANAGEMENT_RESPONSE)
-        {
-                LOG_ERROR("Received invalid response");
-                return -1;
-        }
-        else if (msg.payload.response_code < 0)
-        {
-                LOG_ERROR("Error stopping backend (error %d)", msg.payload.response_code);
-                return -1;
+                /* Wait for response */
+                ret = read_management_message(the_server.management_socket_pair[0], &msg);
+                if (ret < 0)
+                {
+                        return -1;
+                }
+                else if (msg.type != MANAGEMENT_RESPONSE)
+                {
+                        LOG_ERROR("Received invalid response");
+                        return -1;
+                }
+                else if (msg.payload.response_code < 0)
+                {
+                        LOG_ERROR("Error stopping backend (error %d)", msg.payload.response_code);
+                        return -1;
+                }
         }
 
         /* Wait until the main thread is terminated */
-        pthread_join(the_server.thread, NULL);
+        wait_for_thread(the_server.thread);
 
         return 0;
 }

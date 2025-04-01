@@ -1,6 +1,5 @@
 
 #include <errno.h>
-#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -26,6 +25,7 @@
 #include "logging.h"
 #include "networking.h"
 #include "poll_set.h"
+#include "threading.h"
 
 #include "asl.h"
 
@@ -107,25 +107,7 @@ int proxy_backend_init(proxy_backend* backend, proxy_backend_config const* confi
         backend->management_socket_pair[0] = -1;
         backend->management_socket_pair[1] = -1;
 
-        pthread_attr_init(&backend->thread_attr);
-        pthread_attr_setdetachstate(&backend->thread_attr, PTHREAD_CREATE_JOINABLE);
-
         poll_set_init(&backend->poll_set);
-
-#if defined(__ZEPHYR__)
-        /* We have to properly set the attributes with the stack to use for Zephyr. */
-        pthread_attr_setstack(&backend->thread_attr,
-                              &backend_stack,
-                              K_THREAD_STACK_SIZEOF(backend_stack));
-#endif
-
-        /* Set the priority of the client handler thread to be one higher than the backend thread.
-         * This priorizes active connections before handshakes of new ones. */
-        // struct sched_param param = {
-        // 	.sched_priority = BACKEND_THREAD_PRIORITY,
-        // };
-        // pthread_attr_setschedparam(&backend->thread_attr, &param);
-        // pthread_attr_setschedpolicy(&backend->thread_attr, SCHED_RR);
 
         /* Set the log level */
         LOG_LVL_SET(config->log_level);
@@ -142,7 +124,14 @@ int proxy_backend_init(proxy_backend* backend, proxy_backend_config const* confi
                   backend->management_socket_pair[1]);
 
         /* Create the new thread */
-        ret = pthread_create(&backend->thread, &backend->thread_attr, proxy_backend_thread, backend);
+        thread_attibutes attr = {0};
+        attr.function = proxy_backend_thread;
+        attr.argument = backend;
+#if defined(__ZEPHYR__)
+        attr.stack_size = K_THREAD_STACK_SIZEOF(backend_stack);
+        attr.stack = backend_stack;
+#endif
+        ret = start_thread(&backend->thread, &attr);
         if (ret != 0)
         {
                 LOG_ERROR("Error starting TLS proxy thread: %d (%s)", errno, strerror(errno));
@@ -213,7 +202,8 @@ static int add_new_proxy(enum tls_proxy_direction direction, proxy_config const*
         /* Create the TCP sockets for the incoming connections (IPv4 and IPv6).
          * Do a DNS lookup to make sure we have an IP address. If we already have an IP, this
          * results in a noop. */
-        if (address_lookup_server(config->own_ip_address, config->listening_port, &bind_addr, AF_UNSPEC) < 0)
+        if (address_lookup_server(config->own_ip_address, config->listening_port, &bind_addr, AF_UNSPEC) <
+            0)
                 ERROR_OUT_EX(proxy->log_module, "Error looking up bind IP address");
 
         /* Iterate over the linked-list of results */
@@ -247,7 +237,10 @@ static int add_new_proxy(enum tls_proxy_direction direction, proxy_config const*
 
         /* Do a DNS lookup to make sure we have an IP address. If we already have an IP, this
          * results in a noop. */
-        if (address_lookup_client(config->target_ip_address, config->target_port, &proxy->target_addr, AF_UNSPEC) < 0)
+        if (address_lookup_client(config->target_ip_address,
+                                  config->target_port,
+                                  &proxy->target_addr,
+                                  AF_UNSPEC) < 0)
                 ERROR_OUT_EX(proxy->log_module, "Error looking up target IP address");
 
         LOG_DEBUG_EX(proxy->log_module,
@@ -329,12 +322,10 @@ static void kill_proxy(proxy* proxy)
         {
                 if (proxy->connections[i] != NULL)
                 {
+                        LOG_DEBUG("Killing proxy connection %d", i);
+
                         /* Stop the running thread. */
-                        if (proxy->connections[i]->in_use == true)
-                        {
-                                LOG_DEBUG("Killing proxy connection %d", i);
-                                proxy_connection_stop_handling(proxy->connections[i]);
-                        }
+                        proxy_connection_stop_handling(proxy->connections[i]);
 
                         /* Cleanup the client */
                         proxy_connection_cleanup(proxy->connections[i]);
@@ -848,15 +839,8 @@ void* proxy_backend_thread(void* ptr)
                 }
         }
 
-        LOG_DEBUG("Proxy backend thread terminated");
-
         proxy_backend_cleanup(backend);
-
         asl_cleanup();
-
-        /* Detach the thread here, as it is terminating by itself. With that,
-         * the thread resources are freed immediatelly. */
-        pthread_detach(pthread_self());
-
-        pthread_exit(NULL);
+        terminate_thread(LOG_MODULE_GET());
+        return NULL;
 }

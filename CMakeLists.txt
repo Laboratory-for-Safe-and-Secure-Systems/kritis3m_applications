@@ -7,6 +7,8 @@ option(ENABLE_HTTP_LIBS "Enable HTTP(S) libraries" ON) # required for Scale Serv
 option(ENABLE_MANAGEMENT "Enable Scale management" ON)
 option(ENABLE_QUEST_LIB "Enable QUEST lib" ON)
 
+option(ENABLE_STACK_USAGE_REPORTING "Enable stack usage reporting" OFF)
+
 
 # Common files
 add_subdirectory(common)

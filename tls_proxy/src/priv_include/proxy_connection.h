@@ -28,6 +28,7 @@ typedef struct proxy proxy;
 typedef struct proxy_connection
 {
         bool in_use;
+        bool detached;
         enum tls_proxy_direction direction;
         int tunnel_sock;
         int asset_sock;
@@ -40,7 +41,6 @@ typedef struct proxy_connection
         int management_socket_pair[2];
 
         pthread_t thread;
-        pthread_attr_t thread_attr;
 
         uint8_t tun2ass_buffer[RECV_BUFFER_SIZE];
         size_t num_of_bytes_in_tun2ass_buffer;

@@ -1,5 +1,4 @@
 #include <errno.h>
-#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -19,6 +18,7 @@
 #include "logging.h"
 #include "networking.h"
 #include "poll_set.h"
+#include "threading.h"
 
 // LOG_MODULE_CREATE(proxy_backend);
 
@@ -64,6 +64,7 @@ void init_proxy_connection_pool(void)
         for (int i = 0; i < MAX_CONNECTIONS_PER_PROXY; i++)
         {
                 proxy_connection_pool[i].in_use = false;
+                proxy_connection_pool[i].detached = false;
                 proxy_connection_pool[i].direction = REVERSE_PROXY;
                 proxy_connection_pool[i].tunnel_sock = -1;
                 proxy_connection_pool[i].asset_sock = -1;
@@ -76,9 +77,6 @@ void init_proxy_connection_pool(void)
                 proxy_connection_pool[i].management_socket_pair[1] = -1;
                 proxy_connection_pool[i].num_of_bytes_in_tun2ass_buffer = 0;
                 proxy_connection_pool[i].num_of_bytes_in_ass2tun_buffer = 0;
-                pthread_attr_init(&proxy_connection_pool[i].thread_attr);
-                pthread_attr_setdetachstate(&proxy_connection_pool[i].thread_attr,
-                                            PTHREAD_CREATE_JOINABLE);
         }
 }
 
@@ -122,6 +120,7 @@ proxy_connection* add_new_connection_to_proxy(proxy* proxy,
 
         /* Store new client data */
         connection->in_use = true;
+        connection->detached = false;
         connection->direction = proxy->direction;
         connection->slot = freeSlotConnectionPool;
         connection->target_addr = proxy->target_addr;
@@ -330,22 +329,6 @@ cleanup:
 
 int proxy_connection_detach_handling(proxy_connection* connection)
 {
-#if defined(__ZEPHYR__)
-        /* Store the pointer to the related stack for the client handler thread
-         * (started after the TLS handshake). */
-        pthread_attr_setstack(&connection->thread_attr,
-                              connection_handler_stack_pool[connection->slot],
-                              K_THREAD_STACK_SIZEOF(connection_handler_stack_pool[connection->slot]));
-#endif
-
-        /* Set the priority of the client handler thread to be one higher than the backend thread.
-         * This priorizes active connections before handshakes of new ones. */
-        // struct sched_param param = {
-        // 	.sched_priority = HANDLER_THREAD_PRIORITY,
-        // };
-        // pthread_attr_setschedparam(&connection->thread_attr, &param);
-        // pthread_attr_setschedpolicy(&connection->thread_attr, SCHED_RR);
-
         /* Create the socket pair for external management */
         int ret = create_socketpair(connection->management_socket_pair);
         if (ret < 0)
@@ -362,67 +345,66 @@ int proxy_connection_detach_handling(proxy_connection* connection)
                      connection->management_socket_pair[0],
                      connection->management_socket_pair[1]);
 
+        connection->detached = true;
+
         /* Start the thread */
-        ret = pthread_create(&connection->thread,
-                             &connection->thread_attr,
-                             connection_handler_thread,
-                             connection);
+        thread_attibutes attr = {0};
+        attr.function = connection_handler_thread;
+        attr.argument = connection;
+#if defined(__ZEPHYR__)
+        attr.stack_size = K_THREAD_STACK_SIZEOF(connection_handler_stack_pool[connection->slot]);
+        attr.stack = connection_handler_stack_pool[connection->slot];
+#endif
+        ret = start_thread(&connection->thread, &attr);
 
         return ret;
 }
 
 int proxy_connection_stop_handling(proxy_connection* connection)
 {
-        if ((connection->management_socket_pair[0] < 0) || (connection->management_socket_pair[0] < 0))
+        if ((connection->management_socket_pair[0] > 0) && (connection->management_socket_pair[1] > 0))
         {
                 LOG_DEBUG_EX(*connection->log_module,
-                             "Connection %d/%d background task is not running",
+                             "Stopping connection on slot %d/%d",
                              connection->slot + 1,
                              MAX_CONNECTIONS_PER_PROXY);
 
-                /* Nothing to do */
-                return 0;
-        }
+                /* Send a stop request to the connection handler thread */
+                proxy_management_message msg = {
+                        .type = CONNECTION_STOP_REQUEST,
+                        .payload.dummy_unused = 0,
+                };
+                int ret = send_management_message(connection->management_socket_pair[0], &msg);
+                if (ret < 0)
+                {
+                        LOG_ERROR_EX(*connection->log_module,
+                                     "Error sending stop request to connection handler thread");
+                        return -1;
+                }
 
-        LOG_DEBUG_EX(*connection->log_module,
-                     "Stopping connection on slot %d/%d",
-                     connection->slot + 1,
-                     MAX_CONNECTIONS_PER_PROXY);
-
-        /* Send a stop request to the connection handler thread */
-        proxy_management_message msg = {
-                .type = CONNECTION_STOP_REQUEST,
-                .payload.dummy_unused = 0,
-        };
-        int ret = send_management_message(connection->management_socket_pair[0], &msg);
-        if (ret < 0)
-        {
-                LOG_ERROR_EX(*connection->log_module,
-                             "Error sending stop request to connection handler thread");
-                return -1;
-        }
-
-        /* Wait for response */
-        ret = read_management_message(connection->management_socket_pair[0], &msg);
-        if (ret < 0)
-        {
-                return -1;
-        }
-        else if (msg.type != RESPONSE)
-        {
-                LOG_ERROR_EX(*connection->log_module, "Received invalid response");
-                return -1;
-        }
-        else if (msg.payload.response_code < 0)
-        {
-                LOG_ERROR_EX(*connection->log_module,
-                             "Error stopping proxy backend (error %d)",
-                             msg.payload.response_code);
-                return -1;
+                /* Wait for response */
+                ret = read_management_message(connection->management_socket_pair[0], &msg);
+                if (ret < 0)
+                {
+                        return -1;
+                }
+                else if (msg.type != RESPONSE)
+                {
+                        LOG_ERROR_EX(*connection->log_module, "Received invalid response");
+                        return -1;
+                }
+                else if (msg.payload.response_code < 0)
+                {
+                        LOG_ERROR_EX(*connection->log_module,
+                                     "Error stopping proxy backend (error %d)",
+                                     msg.payload.response_code);
+                        return -1;
+                }
         }
 
         /* Wait for the backend thread to be terminated */
-        pthread_join(connection->thread, NULL);
+        if (connection->detached)
+                wait_for_thread(connection->thread);
 
         return 0;
 }
@@ -469,7 +451,6 @@ void proxy_connection_cleanup(proxy_connection* connection)
         connection->num_of_bytes_in_tun2ass_buffer = 0;
         connection->num_of_bytes_in_ass2tun_buffer = 0;
         connection->target_addr = NULL;
-        connection->log_module = NULL;
         connection->slot = -1;
         connection->proxy = NULL;
 
@@ -849,10 +830,6 @@ static void* connection_handler_thread(void* ptr)
         asl_close_session(connection->tls_session);
 
         proxy_connection_cleanup(connection);
-
-        /* Detach the thread here, as it is terminating by itself. With that,
-         * the thread resources are freed immediatelly. */
-        pthread_detach(pthread_self());
-
-        pthread_exit(NULL);
+        terminate_thread(connection->log_module);
+        return NULL;
 }

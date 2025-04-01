@@ -1,7 +1,6 @@
 
 #include <errno.h>
 #include <limits.h>
-#include <pthread.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -22,6 +21,7 @@
 
 #include "logging.h"
 #include "networking.h"
+#include "threading.h"
 #include "timing_metrics.h"
 
 #include "network_tester.h"
@@ -81,7 +81,6 @@ typedef struct network_tester
         uint8_t* tx_buffer;
         uint8_t* rx_buffer;
         pthread_t thread;
-        pthread_attr_t thread_attr;
         int management_socket_pair[2];
 } network_tester;
 
@@ -195,7 +194,8 @@ static int network_init(network_tester* tester)
          * results in a noop. */
         if (address_lookup_client(tester->config->target_ip,
                                   tester->config->target_port,
-                                  &tester->target_addr, AF_UNSPEC) < 0)
+                                  &tester->target_addr,
+                                  AF_UNSPEC) < 0)
                 ERROR_OUT("Error looking up target IP address");
 
         tester->current_target = tester->target_addr;
@@ -584,13 +584,7 @@ cleanup:
 
         /* Cleanup */
         tester_cleanup(tester);
-
-        LOG_DEBUG("Network tester thread terminated");
-
-        /* Detach the thread here, as it is terminating by itself. With that,
-         * the thread resources are freed immediatelly. */
-        pthread_detach(pthread_self());
-
+        terminate_thread(LOG_MODULE_GET());
         return NULL;
 }
 
@@ -803,16 +797,6 @@ int network_tester_run(network_tester_config const* config)
         the_tester.management_socket_pair[0] = -1;
         the_tester.management_socket_pair[1] = -1;
 
-        pthread_attr_init(&the_tester.thread_attr);
-        pthread_attr_setdetachstate(&the_tester.thread_attr, PTHREAD_CREATE_JOINABLE);
-
-#if defined(__ZEPHYR__)
-        /* We have to properly set the attributes with the stack to use for Zephyr. */
-        pthread_attr_setstack(&the_tester.thread_attr,
-                              &tester_stack,
-                              K_THREAD_STACK_SIZEOF(tester_stack));
-#endif
-
         /* Create the socket pair for external management */
         int ret = create_socketpair(the_tester.management_socket_pair);
         if (ret < 0)
@@ -823,10 +807,14 @@ int network_tester_run(network_tester_config const* config)
                   the_tester.management_socket_pair[1]);
 
         /* Create the new thread */
-        ret = pthread_create(&the_tester.thread,
-                             &the_tester.thread_attr,
-                             network_tester_main_thread,
-                             &the_tester);
+        thread_attibutes attr = {0};
+        attr.function = network_tester_main_thread;
+        attr.argument = &the_tester;
+#if defined(__ZEPHYR__)
+        attr.stack_size = K_THREAD_STACK_SIZEOF(tester_stack);
+        attr.stack = tester_stack;
+#endif
+        ret = start_thread(&the_tester.thread, &attr);
         if (ret != 0)
                 ERROR_OUT("Error starting network tester thread: %d (%s)", errno, strerror(errno));
 
@@ -921,43 +909,40 @@ int network_tester_get_status(network_tester_status* status)
  */
 int network_tester_terminate(void)
 {
-        if ((the_tester.management_socket_pair[0] < 0) || (the_tester.management_socket_pair[0] < 0))
+        if ((the_tester.management_socket_pair[0] > 0) && (the_tester.management_socket_pair[1] > 0))
         {
-                LOG_DEBUG("Tester thread not running");
-                return -1;
-        }
+                /* Send shutdown message to the management socket */
+                network_tester_management_message msg = {0};
+                msg.type = MANAGEMENT_MSG_SHUTDOWN;
+                msg.payload.dummy_unused = 0;
 
-        /* Send shutdown message to the management socket */
-        network_tester_management_message msg = {0};
-        msg.type = MANAGEMENT_MSG_SHUTDOWN;
-        msg.payload.dummy_unused = 0;
+                /* Send request */
+                int ret = send_management_message(the_tester.management_socket_pair[0], &msg);
+                if (ret < 0)
+                {
+                        return -1;
+                }
 
-        /* Send request */
-        int ret = send_management_message(the_tester.management_socket_pair[0], &msg);
-        if (ret < 0)
-        {
-                return -1;
-        }
-
-        /* Wait for response */
-        ret = read_management_message(the_tester.management_socket_pair[0], &msg);
-        if (ret < 0)
-        {
-                return -1;
-        }
-        else if (msg.type != MANAGEMENT_RESPONSE)
-        {
-                LOG_ERROR("Received invalid response");
-                return -1;
-        }
-        else if (msg.payload.response_code < 0)
-        {
-                LOG_ERROR("Error stopping bridge (error %d)", msg.payload.response_code);
-                return -1;
+                /* Wait for response */
+                ret = read_management_message(the_tester.management_socket_pair[0], &msg);
+                if (ret < 0)
+                {
+                        return -1;
+                }
+                else if (msg.type != MANAGEMENT_RESPONSE)
+                {
+                        LOG_ERROR("Received invalid response");
+                        return -1;
+                }
+                else if (msg.payload.response_code < 0)
+                {
+                        LOG_ERROR("Error stopping bridge (error %d)", msg.payload.response_code);
+                        return -1;
+                }
         }
 
         /* Wait until the main thread is terminated */
-        pthread_join(the_tester.thread, NULL);
+        wait_for_thread(the_tester.thread);
 
         return 0;
 }

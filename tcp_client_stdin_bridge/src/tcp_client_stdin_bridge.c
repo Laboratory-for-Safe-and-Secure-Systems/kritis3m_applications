@@ -1,5 +1,4 @@
 #include <errno.h>
-#include <pthread.h>
 #include <stdint.h>
 #include <string.h>
 #include <unistd.h>
@@ -16,6 +15,7 @@
 #include "logging.h"
 #include "networking.h"
 #include "poll_set.h"
+#include "threading.h"
 
 LOG_MODULE_CREATE(tcp_client_stdin_bridge);
 
@@ -54,7 +54,6 @@ typedef struct tcp_client_stdin_bridge
         int tcp_socket;
         struct addrinfo* target_addr;
         pthread_t thread;
-        pthread_attr_t thread_attr;
         poll_set poll_set;
         int management_socket_pair[2];
         size_t num_of_bytes_in_recv_buffer;
@@ -212,8 +211,7 @@ static void* tcp_client_stdin_bridge_main_thread(void* ptr)
 
         /* Cleanup */
         bridge_cleanup(bridge);
-
-        return NULL;
+        terminate_thread(LOG_MODULE_GET());
 }
 
 static int send_management_message(int socket, tcp_client_stdin_bridge_management_message const* msg)
@@ -405,7 +403,8 @@ int tcp_client_stdin_bridge_run(tcp_client_stdin_bridge_config const* config)
          * results in a noop. */
         if (address_lookup_client(config->target_ip_address,
                                   config->target_port,
-                                  &client_stdin_bridge.target_addr, AF_UNSPEC) < 0)
+                                  &client_stdin_bridge.target_addr,
+                                  AF_UNSPEC) < 0)
                 ERROR_OUT("Error looking up target IP address");
 
         /* Create the TCP socket for the outgoing connection */
@@ -439,15 +438,11 @@ int tcp_client_stdin_bridge_run(tcp_client_stdin_bridge_config const* config)
         if (ret != 0)
                 ERROR_OUT("Error adding stdin to poll_set");
 
-        /* Init main backend */
-        pthread_attr_init(&client_stdin_bridge.thread_attr);
-        pthread_attr_setdetachstate(&client_stdin_bridge.thread_attr, PTHREAD_CREATE_JOINABLE);
-
         /* Create the new thread */
-        ret = pthread_create(&client_stdin_bridge.thread,
-                             &client_stdin_bridge.thread_attr,
-                             tcp_client_stdin_bridge_main_thread,
-                             &client_stdin_bridge);
+        thread_attibutes attr = {0};
+        attr.function = tcp_client_stdin_bridge_main_thread;
+        attr.argument = &client_stdin_bridge;
+        ret = start_thread(&client_stdin_bridge.thread, &attr);
         if (ret != 0)
                 ERROR_OUT("Error starting TCP client stdin bridge thread: %s", strerror(ret));
 
@@ -521,44 +516,41 @@ int tcp_client_stdin_bridge_terminate(void)
         LOG_ERROR("TCP client stdin bridge not supported on Zephyr");
         return -1;
 #else
-        if ((client_stdin_bridge.management_socket_pair[0] < 0) ||
-            (client_stdin_bridge.management_socket_pair[0] < 0))
+        if ((client_stdin_bridge.management_socket_pair[0] > 0) &&
+            (client_stdin_bridge.management_socket_pair[1] > 0))
         {
-                LOG_DEBUG("Bridge thread not running");
-                return -1;
-        }
+                /* Send shutdown message to the management socket */
+                tcp_client_stdin_bridge_management_message msg = {0};
+                msg.type = MANAGEMENT_MSG_SHUTDOWN;
+                msg.payload.dummy_unused = 0;
 
-        /* Send shutdown message to the management socket */
-        tcp_client_stdin_bridge_management_message msg = {0};
-        msg.type = MANAGEMENT_MSG_SHUTDOWN;
-        msg.payload.dummy_unused = 0;
+                /* Send request */
+                int ret = send_management_message(client_stdin_bridge.management_socket_pair[0], &msg);
+                if (ret < 0)
+                {
+                        return -1;
+                }
 
-        /* Send request */
-        int ret = send_management_message(client_stdin_bridge.management_socket_pair[0], &msg);
-        if (ret < 0)
-        {
-                return -1;
-        }
-
-        /* Wait for response */
-        ret = read_management_message(client_stdin_bridge.management_socket_pair[0], &msg);
-        if (ret < 0)
-        {
-                return -1;
-        }
-        else if (msg.type != MANAGEMENT_RESPONSE)
-        {
-                LOG_ERROR("Received invalid response");
-                return -1;
-        }
-        else if (msg.payload.response_code < 0)
-        {
-                LOG_ERROR("Error stopping bridge (error %d)", msg.payload.response_code);
-                return -1;
+                /* Wait for response */
+                ret = read_management_message(client_stdin_bridge.management_socket_pair[0], &msg);
+                if (ret < 0)
+                {
+                        return -1;
+                }
+                else if (msg.type != MANAGEMENT_RESPONSE)
+                {
+                        LOG_ERROR("Received invalid response");
+                        return -1;
+                }
+                else if (msg.payload.response_code < 0)
+                {
+                        LOG_ERROR("Error stopping bridge (error %d)", msg.payload.response_code);
+                        return -1;
+                }
         }
 
         /* Wait until the main thread is terminated */
-        pthread_join(client_stdin_bridge.thread, NULL);
+        wait_for_thread(client_stdin_bridge.thread);
 
         return 0;
 #endif

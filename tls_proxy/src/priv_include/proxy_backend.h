@@ -1,6 +1,7 @@
 #ifndef PROXY_H
 #define PROXY_H
 
+#include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -14,11 +15,11 @@
 #include "proxy_connection.h"
 
 #if defined(__ZEPHYR__)
-        #define MAX_PROXYS 2
-        #define BACKEND_THREAD_PRIORITY 8
+#define MAX_PROXYS 2
+#define BACKEND_THREAD_PRIORITY 8
 #else
-        #define MAX_PROXYS 10
-        #define BACKEND_THREAD_PRIORITY 10
+#define MAX_PROXYS 10
+#define BACKEND_THREAD_PRIORITY 10
 #endif
 
 /* Structure declarations */
@@ -27,7 +28,6 @@ typedef struct proxy_backend
         bool running;
         int management_socket_pair[2];
         pthread_t thread;
-        pthread_attr_t thread_attr;
         poll_set poll_set;
 } proxy_backend;
 

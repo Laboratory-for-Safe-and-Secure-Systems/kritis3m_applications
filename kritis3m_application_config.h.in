@@ -10,6 +10,8 @@
 #cmakedefine ENABLE_MANAGEMENT
 #cmakedefine ENABLE_QUEST_LIB
 
+#cmakedefine ENABLE_STACK_USAGE_REPORTING
+
 #if defined(ENABLE_MANAGEMENT)
 
 #define USE_MANAGEMENT
