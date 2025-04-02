@@ -37,8 +37,10 @@ typedef struct
         bool cleanup_requested;
         pthread_mutex_t mutex;
         // Add flag to track if we have a CA chain
+        bool include_ca_certs;
         bool has_ca_chain;
         uint8_t* ca_chain_buffer;
+        size_t ca_chain_buffer_size;
         size_t ca_chain_size;
         bool message_complete; // Flag to track if HTTP message is complete
 } cert_thread_data_t;
@@ -49,18 +51,10 @@ static cert_thread_data_t* active_threads[MAX_ACTIVE_THREADS] = {NULL};
 static pthread_mutex_t active_threads_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 // HTTP response callback data structure
-typedef struct
-{
-        uint8_t* cert_buffer;
-        size_t cert_buffer_size;
-        size_t* cert_size;
-        pki_callback_t callback;
-        cert_thread_data_t* thread_data;
-        bool is_ca_chain; // Flag to indicate if this is a CA chain request
-} http_callback_data_t;
 
 static int fetch_ca_certificates(cert_thread_data_t* thread_data,
                                  uint8_t* response_buffer,
+                                 size_t response_buffer_size,
                                  bool direct_request);
 
 // Add thread to active threads list
@@ -98,8 +92,8 @@ static void http_response_callback(struct http_response* rsp,
                                    enum http_final_call final_data,
                                    void* user_data)
 {
-        http_callback_data_t* callback_data = (http_callback_data_t*) user_data;
-        cert_thread_data_t* thread_data = callback_data->thread_data;
+        cert_thread_data_t* thread_data = (cert_thread_data_t*) user_data;
+        int ret = 0;
 
         // Check if thread is still active (not cleanup requested)
         pthread_mutex_lock(&thread_data->mutex);
@@ -114,58 +108,105 @@ static void http_response_callback(struct http_response* rsp,
 
         if (rsp->http_status_code == 200)
         {
-                // Copy certificate data from body fragment
-                if (rsp->body_frag_len > 0 && callback_data->cert_buffer != NULL)
+                if (rsp->body_frag_len > 0)
                 {
-                        size_t copy_size = AT_LEAST(callback_data->cert_buffer_size,
-                                                    rsp->body_frag_len);
-                        memcpy(callback_data->cert_buffer, rsp->body_frag_start, copy_size);
-                        *callback_data->cert_size = copy_size;
 
-                        if (final_data == HTTP_DATA_FINAL && callback_data->callback)
+                        write_file("/tmp/tmp_cert.txt", rsp->body_frag_start, rsp->body_frag_len, false);
+                        size_t cert_size = 0;
+                        pthread_mutex_lock(&thread_data->mutex);
+                        cert_size = thread_data->cert_size;
+                        pthread_mutex_unlock(&thread_data->mutex);
+
+                        // we have a complete ca chain
+                        if (cert_size == 0 && final_data == HTTP_DATA_FINAL)
                         {
-                                // Call the user's callback function with the certificate data only if callback is set
-                                // This lets us handle concatenation ourselves in the cert_request_thread
-                                callback_data->callback((char*) callback_data->cert_buffer,
-                                                        *callback_data->cert_size);
+                                rsp->body_frag_start[rsp->body_frag_len] = '\0';
+                                int to_be_added = snprintf(NULL, 0, "-----BEGIN CERTIFICATE-----\n%s-----END CERTIFICATE-----\n", rsp->body_frag_start);
+                                if (to_be_added < 0)
+                                {
+                                        LOG_ERROR("Failed to calculate size of certificate");
+                                        goto error_occured;
+                                }
 
-                                // Mark thread as completed only if callback was directly called
+                                // Allocate memory including null terminator
+                                uint8_t* temp_buffer = (uint8_t*) malloc(to_be_added + 1);
+                                if (!temp_buffer)
+                                {
+                                        LOG_ERROR("Failed to allocate memory for CA chain");
+                                        goto error_occured;
+                                }
+                                memset(temp_buffer, 0, to_be_added + 1);
+
+                                int ret = snprintf((char*) temp_buffer,
+                                                   to_be_added + 1,
+                                                   "-----BEGIN CERTIFICATE-----\n%s-----END "
+                                                   "CERTIFICATE-----\n",
+                                                   rsp->body_frag_start);
+                                if (ret < 0)
+                                {
+                                        LOG_ERROR("Failed to format CA chain");
+                                        free(temp_buffer);
+                                        goto error_occured;
+                                }
+                                printf("temp_buffer: %s\n", temp_buffer);
+
                                 pthread_mutex_lock(&thread_data->mutex);
-                                thread_data->completed = true;
-                                pthread_mutex_unlock(&thread_data->mutex);
-                        }
 
-                        // Mark message as complete
-                        if (final_data == HTTP_DATA_FINAL)
+                                // Free old buffer if necessary
+                                if (thread_data->cert_buffer)
+                                {
+                                        free(thread_data->cert_buffer);
+                                }
+
+                                thread_data->cert_size = ret;
+                                thread_data->cert_buffer = temp_buffer;
+                                thread_data->cert_buffer_size = to_be_added + 1;
+
+                                pthread_mutex_unlock(&thread_data->mutex);
+
+                                LOG_INFO("CSR successfully fetched");
+                                LOG_INFO("CSR Sucesfully fetched");
+                        }
+                        else
                         {
-                                pthread_mutex_lock(&thread_data->mutex);
-                                thread_data->message_complete = true;
-                                pthread_mutex_unlock(&thread_data->mutex);
+                                LOG_ERROR(
+                                        "we assumed that a fragment contains a whole certificate. "
+                                        "If displayed, we need to concatinate fragments and add "
+                                        "end certificates ");
                         }
+                }
+                else
+                {
+                        LOG_ERROR("we assumed that a fragment contains a whole ca "
+                                  "chain. "
+                                  "If displayed, we need to concatinate fragments "
+                                  "and add "
+                                  "end certificates ");
                 }
         }
         else
         {
-                LOG_ERROR("HTTP error: %d %s", rsp->http_status_code, rsp->http_status);
-                if (final_data == HTTP_DATA_FINAL && callback_data->callback)
+                LOG_ERROR("HTTP error when fetching certificate: %d %s",
+                          rsp->http_status_code,
+                          rsp->http_status);
+
+                // Mark that we don't have the CA chain
+                pthread_mutex_lock(&thread_data->mutex);
+                thread_data->has_ca_chain = false;
+                pthread_mutex_unlock(&thread_data->mutex);
+
+                if (final_data == HTTP_DATA_FINAL && thread_data->callback)
                 {
-                        // Call the callback with NULL to indicate failure, only if callback is set
-                        callback_data->callback(NULL, 0);
+                        thread_data->callback(NULL, 0);
 
                         // Mark thread as completed
                         pthread_mutex_lock(&thread_data->mutex);
                         thread_data->completed = true;
                         pthread_mutex_unlock(&thread_data->mutex);
                 }
-
-                // Mark message as complete regardless of callback
-                if (final_data == HTTP_DATA_FINAL)
-                {
-                        pthread_mutex_lock(&thread_data->mutex);
-                        thread_data->message_complete = true;
-                        pthread_mutex_unlock(&thread_data->mutex);
-                }
         }
+error_occured:
+        LOG_INFO("Error occured, freeing memory");
 }
 
 // HTTP response callback for CA certificate chain
@@ -173,8 +214,7 @@ static void http_ca_chain_callback(struct http_response* rsp,
                                    enum http_final_call final_data,
                                    void* user_data)
 {
-        http_callback_data_t* callback_data = (http_callback_data_t*) user_data;
-        cert_thread_data_t* thread_data = callback_data->thread_data;
+        cert_thread_data_t* thread_data = (cert_thread_data_t*) user_data;
 
         // Check if thread is still active (not cleanup requested)
         pthread_mutex_lock(&thread_data->mutex);
@@ -183,55 +223,83 @@ static void http_ca_chain_callback(struct http_response* rsp,
 
         if (!is_active)
         {
-                LOG_WARN("Certificate chain request thread was cleaned up before response was "
+                LOG_WARN("Certificate chain request thread was cleaned up before response "
+                         "was "
                          "received");
                 return;
         }
 
         if (rsp->http_status_code == 200)
         {
-                // Copy certificate chain data from body fragment
-                if (rsp->body_frag_len > 0 && callback_data->cert_buffer != NULL)
+                if (rsp->body_frag_len > 0)
                 {
-                        size_t copy_size = AT_LEAST(callback_data->cert_buffer_size,
-                                                    rsp->body_frag_len);
-                        memcpy(callback_data->cert_buffer, rsp->body_frag_start, copy_size);
-                        *callback_data->cert_size = copy_size;
+                        size_t chain_size = 0;
+                        pthread_mutex_lock(&thread_data->mutex);
+                        chain_size = thread_data->ca_chain_size;
+                        pthread_mutex_unlock(&thread_data->mutex);
 
-                        if (final_data == HTTP_DATA_FINAL)
+                        // we have a complete ca chain
+                        if (chain_size == 0 && final_data == HTTP_DATA_FINAL)
                         {
-                                // Store CA chain in thread data
-                                pthread_mutex_lock(&thread_data->mutex);
-                                thread_data->has_ca_chain = true;
-                                thread_data->ca_chain_buffer = malloc(*callback_data->cert_size);
-                                if (thread_data->ca_chain_buffer)
+                                // write body_frag_start - body_frag_len to file tmp
+                                write_file("/tmp/tmp_chain.txt",
+                                           rsp->body_frag_start,
+                                           rsp->body_frag_len,
+                                           false);
+
+                                rsp->body_frag_start[rsp->body_frag_len] = '\0';
+                                int to_be_added = snprintf(NULL, 0, "-----BEGIN CERTIFICATE-----\n%s-----END CERTIFICATE-----\n", rsp->body_frag_start);
+                                if (to_be_added < 0)
                                 {
-                                        memcpy(thread_data->ca_chain_buffer,
-                                               callback_data->cert_buffer,
-                                               *callback_data->cert_size);
-                                        thread_data->ca_chain_size = *callback_data->cert_size;
-                                        LOG_INFO("CA chain received, size: %zu bytes",
-                                                 thread_data->ca_chain_size);
+                                        LOG_ERROR("Failed to calculate size of CA chain");
+                                        goto error_occured;
                                 }
-                                else
+
+                                uint8_t* temp_buffer = (uint8_t*) malloc(to_be_added +
+                                                                         1); // +1 to be extra safe
+                                if (!temp_buffer)
                                 {
                                         LOG_ERROR("Failed to allocate memory for CA chain");
-                                        thread_data->has_ca_chain = false;
+                                        goto error_occured;
                                 }
-                                pthread_mutex_unlock(&thread_data->mutex);
+                                memset(temp_buffer, 0, to_be_added + 1);
 
-                                // If this was a direct request for CA chain, call the callback
-                                if (callback_data->is_ca_chain && callback_data->callback)
+                                int ret = snprintf((char*) temp_buffer,
+                                                   to_be_added + 1,
+                                                   "-----BEGIN CERTIFICATE-----\n%s-----END "
+                                                   "CERTIFICATE-----\n",
+                                                   rsp->body_frag_start);
+                                if (ret < 0 || ret >= to_be_added + 1)
                                 {
-                                        callback_data->callback(callback_data->cert_buffer,
-                                                                *callback_data->cert_size);
-
-                                        // Mark thread as completed if this was a direct CA chain request
-                                        pthread_mutex_lock(&thread_data->mutex);
-                                        thread_data->completed = true;
-                                        pthread_mutex_unlock(&thread_data->mutex);
+                                        LOG_ERROR("Failed to format CA chain");
+                                        free(temp_buffer); // Free memory on error
+                                        goto error_occured;
                                 }
+
+                                printf("temp_buffer: %s\n", temp_buffer);
+
+                                pthread_mutex_lock(&thread_data->mutex);
+                                thread_data->ca_chain_size = ret; // Size without null terminator
+                                thread_data->ca_chain_buffer = temp_buffer;
+                                thread_data->ca_chain_buffer_size = to_be_added +
+                                                                    1; // Total allocated size
+                                thread_data->has_ca_chain = true;
+                                pthread_mutex_unlock(&thread_data->mutex);
                         }
+                        else
+                        {
+                                LOG_ERROR("we assumed that a fragment contains a whole ca "
+                                          "chain. "
+                                          "If displayed, we need to concatinate fragments "
+                                          "and add "
+                                          "end certificates ");
+                        }
+                }
+                else
+                {
+                        LOG_ERROR("status code is: %d\n status: %s\n, but frag len is 0 ",
+                                  rsp->http_status_code,
+                                  rsp->http_status);
                 }
         }
         else
@@ -245,18 +313,15 @@ static void http_ca_chain_callback(struct http_response* rsp,
                 thread_data->has_ca_chain = false;
                 pthread_mutex_unlock(&thread_data->mutex);
 
-                // If this was a direct request for CA chain, call the callback with failure
-                if (final_data == HTTP_DATA_FINAL && callback_data->is_ca_chain &&
-                    callback_data->callback)
+                if (final_data == HTTP_DATA_FINAL && thread_data->callback)
                 {
-                        callback_data->callback(NULL, 0);
-
-                        // Mark thread as completed
                         pthread_mutex_lock(&thread_data->mutex);
                         thread_data->completed = true;
                         pthread_mutex_unlock(&thread_data->mutex);
                 }
         }
+error_occured:
+        LOG_INFO("Error occured, freeing memory");
 }
 
 // Check if the server is reachable with a simple ping
@@ -336,7 +401,7 @@ static void* ca_chain_thread(void* arg)
         }
 
         // Fetch CA certificates directly
-        int ret = fetch_ca_certificates(data, response_buffer, true);
+        int ret = fetch_ca_certificates(data, response_buffer, HTTP_BUFFER_SIZE, true);
 
         free(response_buffer);
 
@@ -365,18 +430,17 @@ void* cert_request_thread(void* arg)
         asl_session* session = NULL;
         SigningRequest* request = NULL;
         uint8_t* csr_buffer = NULL;
+        bool include_ca_certs = false;
         size_t csr_buffer_size = 4096;
         size_t csr_size = 0;
         PrivateKey* private_key = NULL;
         uint8_t* response_buffer = NULL;
-        http_callback_data_t callback_data = {0};
         char* port_str = NULL;
-        bool include_ca_certs = false;
 
         // Check if cleanup was requested
         pthread_mutex_lock(&thread_data->mutex);
         bool cleanup_requested = thread_data->cleanup_requested;
-        include_ca_certs = thread_data->has_ca_chain; // Not using ca_chain buffer yet, using this flag to indicate if we should fetch CA certs
+        include_ca_certs = thread_data->include_ca_certs; // Not using ca_chain buffer yet, using this flag to indicate if we should fetch CA certs
         hostname = strdup(thread_data->host);
         port = thread_data->port;
         pthread_mutex_unlock(&thread_data->mutex);
@@ -401,10 +465,11 @@ void* cert_request_thread(void* arg)
         if (include_ca_certs)
         {
                 LOG_INFO("Fetching CA certificate chain from EST server");
-                ret = fetch_ca_certificates(thread_data, response_buffer, false);
+                ret = fetch_ca_certificates(thread_data, response_buffer, HTTP_BUFFER_SIZE, false);
                 if (ret != ASL_SUCCESS)
                 {
-                        LOG_WARN("Failed to fetch CA certificate chain, continuing with CSR");
+                        LOG_WARN("Failed to fetch CA certificate chain, continuing with "
+                                 "CSR");
                         // We continue even if CA chain fetch fails
                 }
         }
@@ -510,7 +575,8 @@ void* cert_request_thread(void* arg)
                 goto cleanup;
         }
         csr_size = csr_buffer_size;
-        write_file("/home/philipp/development/kritis3m_workspace/certificates/test_certs/secp384/"
+        write_file("/home/philipp/development/kritis3m_workspace/certificates/test_certs/"
+                   "secp384/"
                    "csr.txt",
                    csr_buffer,
                    csr_size,
@@ -595,33 +661,16 @@ void* cert_request_thread(void* arg)
                                  "Connection: close\r\n",
                                  NULL};
         req.header_fields = headers;
-
-        // Setup response callback for device certificate
-        callback_data.cert_buffer = thread_data->cert_buffer;
-        callback_data.cert_buffer_size = thread_data->cert_buffer_size;
-        callback_data.cert_size = &thread_data->cert_size;
-        callback_data.callback = NULL; // We'll handle callback ourselves after combining certs
-        callback_data.thread_data = thread_data;
-        callback_data.is_ca_chain = false;
         req.response = http_response_callback;
 
         // Send HTTP request with proper timeout struct
         struct duration timeout = ms_to_duration(HTTP_TIMEOUT_MS);
-        ret = https_client_req(sock_fd, session, &req, timeout, &callback_data);
+        ret = https_client_req(sock_fd, session, &req, timeout, thread_data);
         if (ret < 0)
         {
                 LOG_ERROR("HTTP request failed: %d", ret);
                 ret = ASL_INTERNAL_ERROR;
                 goto cleanup;
-        }
-
-        bool request_completed = false;
-        pthread_mutex_lock(&thread_data->mutex);
-        request_completed = thread_data->message_complete;
-        pthread_mutex_unlock(&thread_data->mutex);
-        if (!request_completed)
-        {
-                LOG_ERROR("it isnt ready yet\n");
         }
 
         pthread_mutex_lock(&thread_data->mutex);
@@ -641,7 +690,8 @@ void* cert_request_thread(void* arg)
                                thread_data->ca_chain_buffer,
                                thread_data->ca_chain_size);
 
-                        LOG_INFO("Combined certificate chain created, total size: %zu bytes",
+                        LOG_INFO("Combined certificate chain created, total size: %zu "
+                                 "bytes",
                                  combined_size);
 
                         // Call the callback with combined chain
@@ -836,10 +886,11 @@ int cert_request(struct pki_client_config_t* config,
         thread_data->callback = callback;
         thread_data->completed = false;
         thread_data->cleanup_requested = false;
-        thread_data->has_ca_chain = include_ca_certs; // Set flag based on parameter
+        thread_data->has_ca_chain = false; // Set flag based on parameter
         thread_data->ca_chain_buffer = NULL;
         thread_data->ca_chain_size = 0;
         thread_data->message_complete = false;
+        thread_data->include_ca_certs = include_ca_certs;
 
         // Check for allocation failures
         if (!thread_data->host || !thread_data->serial_number || !thread_data->cert_buffer)
@@ -868,17 +919,18 @@ int cert_request(struct pki_client_config_t* config,
 // Helper function to fetch CA certificate chain
 static int fetch_ca_certificates(cert_thread_data_t* thread_data,
                                  uint8_t* response_buffer,
+                                 size_t response_buffer_size,
                                  bool direct_request)
 {
         int ret = 0;
         char* hostname = NULL;
-        uint16_t port = 8443; // Default HTTPS port
+        uint16_t port = 0; // Default HTTPS port
+
         struct addrinfo* addr_info = NULL;
         int sock_fd = -1;
         asl_endpoint* endpoint = NULL;
         asl_session* session = NULL;
         char* port_str = NULL;
-        http_callback_data_t callback_data = {0};
 
         // mutex
         pthread_mutex_lock(&thread_data->mutex);
@@ -962,28 +1014,25 @@ static int fetch_ca_certificates(cert_thread_data_t* thread_data,
         req.payload_len = 0;
 
         req.recv_buf = response_buffer;
-        req.recv_buf_len = HTTP_BUFFER_SIZE;
+        req.recv_buf_len = response_buffer_size;
         const char* headers[] = {"Accept: application/pkcs7-mime\r\n", "Connection: close\r\n", NULL};
         req.header_fields = headers;
 
-        // Setup response callback
-        callback_data.cert_buffer = thread_data->cert_buffer;
-        callback_data.cert_buffer_size = thread_data->cert_buffer_size;
-        callback_data.cert_size = &thread_data->cert_size;
-        callback_data.callback = thread_data->callback;
-        callback_data.thread_data = thread_data;
-        callback_data.is_ca_chain = direct_request; // Flag if this is a direct CA chain request
         req.response = http_ca_chain_callback;
 
         // Send HTTP request with proper timeout struct
         struct duration timeout = ms_to_duration(HTTP_TIMEOUT_MS);
-        ret = https_client_req(sock_fd, session, &req, timeout, &callback_data);
+        ret = https_client_req(sock_fd, session, &req, timeout, thread_data);
         if (ret < 0)
         {
                 LOG_ERROR("HTTP request for CA chain failed: %d", ret);
                 ret = ASL_INTERNAL_ERROR;
+                if (direct_request)
+                        thread_data->callback(NULL, 0);
                 goto cleanup;
         }
+        if (direct_request)
+                thread_data->callback(thread_data->ca_chain_buffer, thread_data->ca_chain_size);
 
         LOG_INFO("CA certificate chain request sent successfully");
         ret = ASL_SUCCESS;
