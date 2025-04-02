@@ -13,6 +13,7 @@
 #include "networking.h"
 #include "poll_set.h"
 #include "proxy_connection.h"
+#include "threading.h"
 
 #if defined(__ZEPHYR__)
 #define MAX_PROXYS 2
@@ -27,7 +28,7 @@ typedef struct proxy_backend
 {
         bool running;
         int management_socket_pair[2];
-        pthread_t thread;
+        thread_info thread;
         poll_set poll_set;
 } proxy_backend;
 

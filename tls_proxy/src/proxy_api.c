@@ -293,7 +293,7 @@ int tls_proxy_backend_terminate(void)
         }
 
         /* Wait for the backend thread to be terminated */
-        wait_for_thread(the_backend.thread);
+        wait_for_thread(&the_backend.thread);
 
         return 0;
 }

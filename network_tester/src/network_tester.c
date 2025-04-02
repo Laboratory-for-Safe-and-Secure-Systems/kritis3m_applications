@@ -80,7 +80,7 @@ typedef struct network_tester
         timing_metrics* messsage_latency_times;
         uint8_t* tx_buffer;
         uint8_t* rx_buffer;
-        pthread_t thread;
+        thread_info thread;
         int management_socket_pair[2];
 } network_tester;
 
@@ -584,7 +584,7 @@ cleanup:
 
         /* Cleanup */
         tester_cleanup(tester);
-        terminate_thread(LOG_MODULE_GET());
+        terminate_thread(&tester->thread, LOG_MODULE_GET());
         return NULL;
 }
 
@@ -942,7 +942,7 @@ int network_tester_terminate(void)
         }
 
         /* Wait until the main thread is terminated */
-        wait_for_thread(the_tester.thread);
+        wait_for_thread(&the_tester.thread);
 
         return 0;
 }

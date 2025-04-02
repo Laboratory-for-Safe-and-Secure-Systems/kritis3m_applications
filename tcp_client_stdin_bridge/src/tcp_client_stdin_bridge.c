@@ -53,7 +53,7 @@ typedef struct tcp_client_stdin_bridge
         bool running;
         int tcp_socket;
         struct addrinfo* target_addr;
-        pthread_t thread;
+        thread_info thread;
         poll_set poll_set;
         int management_socket_pair[2];
         size_t num_of_bytes_in_recv_buffer;
@@ -211,7 +211,7 @@ static void* tcp_client_stdin_bridge_main_thread(void* ptr)
 
         /* Cleanup */
         bridge_cleanup(bridge);
-        terminate_thread(LOG_MODULE_GET());
+        terminate_thread(&bridge->thread, LOG_MODULE_GET());
 }
 
 static int send_management_message(int socket, tcp_client_stdin_bridge_management_message const* msg)
@@ -550,7 +550,7 @@ int tcp_client_stdin_bridge_terminate(void)
         }
 
         /* Wait until the main thread is terminated */
-        wait_for_thread(client_stdin_bridge.thread);
+        wait_for_thread(&client_stdin_bridge.thread);
 
         return 0;
 #endif

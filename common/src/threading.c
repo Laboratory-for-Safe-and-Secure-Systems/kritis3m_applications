@@ -26,7 +26,7 @@ LOG_MODULE_CREATE(threading);
  *
  * Returns 0 on success, -1 on failure (error message is printed to console).
  */
-int start_thread(pthread_t* thread, thread_attibutes* attributes)
+int start_thread(thread_info* thread, thread_attibutes* attributes)
 {
         int ret = 0;
         pthread_attr_t thread_attr;
@@ -51,6 +51,8 @@ int start_thread(pthread_t* thread, thread_attibutes* attributes)
                         ERROR_OUT("posix_memalign failed");
         }
 #endif
+        thread->stack = attributes->stack;
+        thread->stack_size = attributes->stack_size;
 
         /* Fill the stack with our check value */
         memset(attributes->stack, STACK_CHECK_VAL, attributes->stack_size);
@@ -72,7 +74,7 @@ int start_thread(pthread_t* thread, thread_attibutes* attributes)
         // pthread_attr_setschedpolicy(&thread_attr, SCHED_RR);
 
         /* Create the new thread */
-        ret = pthread_create(thread, &thread_attr, attributes->function, attributes->argument);
+        ret = pthread_create(&thread->id, &thread_attr, attributes->function, attributes->argument);
         if (ret != 0)
                 ERROR_OUT("Error starting new thread: %d (%s)", errno, strerror(errno));
 
@@ -83,41 +85,39 @@ cleanup:
 }
 
 /* Wait for the thread to finish */
-void wait_for_thread(pthread_t thread)
+void wait_for_thread(thread_info* thread)
 {
         /* Wait for the thread to be terminated */
-        pthread_join(thread, NULL);
+        if (thread != NULL)
+                pthread_join(thread->id, NULL);
 }
 
 /* Terminate the thread by itself */
-void terminate_thread(log_module const* module)
+void terminate_thread(thread_info* thread, log_module const* module)
 {
         pthread_t this = pthread_self();
+        if (thread == NULL || (thread != NULL && thread->id != this))
+        {
+                LOG_ERROR("Thread %ld is terminating, but it is not the one that is referenced", this);
+                pthread_exit(NULL);
+        }
 
 #ifdef ENABLE_STACK_USAGE_REPORTING
-        // size_t unused = 0;
-        // uint8_t* stack = NULL;
-        // size_t stack_size = 0;
-        // pthread_attr_t this_attr;
+        size_t unused = 0;
 
-        /* Get the stack size and check if it is valid */
-        // if (pthread_getattr_np(this, &this_attr) == 0 &&
-        //     pthread_attr_getstack(&this_attr, (void**) &stack, &stack_size) == 0)
-        // {
-        //         /* Check the stack usage */
-        //         for (unused = 0; unused < stack_size; unused++)
-        //         {
-        //                 if (stack[unused] != STACK_CHECK_VAL)
-        //                 {
-        //                         break;
-        //                 }
-        //         }
+        /* Check the stack usage */
+        uint8_t* stack = (uint8_t*) thread->stack;
+        for (unused = 0; unused < thread->stack_size; unused++)
+        {
+                if (stack[unused] != STACK_CHECK_VAL)
+                {
+                        break;
+                }
+        }
 
-        //         if (module != NULL)
-        //                 LOG_INFO_EX(*module, "Max stack usage: %ld bytes", stack_size - unused);
-        // }
+        if (module != NULL)
+                LOG_INFO_EX(*module, "Max stack usage: %ld bytes", thread->stack_size - unused);
 
-        // pthread_attr_destroy(&this_attr);
 #endif
 
         if (module != NULL)
@@ -128,4 +128,5 @@ void terminate_thread(log_module const* module)
         pthread_detach(this);
 
         pthread_exit(NULL);
+        /* This should never be reached */
 }

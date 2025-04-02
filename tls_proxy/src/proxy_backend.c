@@ -841,6 +841,6 @@ void* proxy_backend_thread(void* ptr)
 
         proxy_backend_cleanup(backend);
         asl_cleanup();
-        terminate_thread(LOG_MODULE_GET());
+        terminate_thread(&backend->thread, LOG_MODULE_GET());
         return NULL;
 }

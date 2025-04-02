@@ -9,6 +9,7 @@
 
 #include "logging.h"
 #include "networking.h"
+#include "threading.h"
 
 #include "asl.h"
 
@@ -40,7 +41,7 @@ typedef struct proxy_connection
 
         int management_socket_pair[2];
 
-        pthread_t thread;
+        thread_info thread;
 
         uint8_t tun2ass_buffer[RECV_BUFFER_SIZE];
         size_t num_of_bytes_in_tun2ass_buffer;

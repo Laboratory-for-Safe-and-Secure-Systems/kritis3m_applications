@@ -71,7 +71,7 @@ typedef struct echo_server
         uint16_t num_clients;
         asl_endpoint* tls_endpoint;
         int management_socket_pair[2];
-        pthread_t thread;
+        thread_info thread;
         poll_set poll_set;
 } echo_server;
 
@@ -346,7 +346,7 @@ static void* echo_server_main_thread(void* ptr)
 cleanup:
         /* Cleanup */
         echo_server_cleanup(server);
-        terminate_thread(LOG_MODULE_GET());
+        terminate_thread(&server->thread, LOG_MODULE_GET());
         return NULL;
 }
 
@@ -1038,7 +1038,7 @@ int echo_server_terminate(void)
         }
 
         /* Wait until the main thread is terminated */
-        wait_for_thread(the_server.thread);
+        wait_for_thread(&the_server.thread);
 
         return 0;
 }

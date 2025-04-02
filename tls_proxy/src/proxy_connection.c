@@ -404,7 +404,7 @@ int proxy_connection_stop_handling(proxy_connection* connection)
 
         /* Wait for the backend thread to be terminated */
         if (connection->detached)
-                wait_for_thread(connection->thread);
+                wait_for_thread(&connection->thread);
 
         return 0;
 }
@@ -830,6 +830,6 @@ static void* connection_handler_thread(void* ptr)
         asl_close_session(connection->tls_session);
 
         proxy_connection_cleanup(connection);
-        terminate_thread(connection->log_module);
+        terminate_thread(&connection->thread, connection->log_module);
         return NULL;
 }
