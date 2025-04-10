@@ -1,14 +1,10 @@
 #include "pki_client.h"
 #include "asl.h"
-#include "cJSON.h"
 #include "file_io.h"
 #include "http_client.h"
-#include "ipc.h"
 #include "kritis3m_pki_client.h"
-#include "kritis3m_scale_service.h"
 #include "logging.h"
 #include "networking.h"
-#include "poll_set.h"
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -111,61 +107,53 @@ static void http_response_callback(struct http_response* rsp,
                 if (rsp->body_frag_len > 0)
                 {
 
-                        write_file("/tmp/tmp_cert.txt", rsp->body_frag_start, rsp->body_frag_len, false);
-                        size_t cert_size = 0;
-                        pthread_mutex_lock(&thread_data->mutex);
-                        cert_size = thread_data->cert_size;
-                        pthread_mutex_unlock(&thread_data->mutex);
-
                         // we have a complete ca chain
-                        if (cert_size == 0 && final_data == HTTP_DATA_FINAL)
+                        if (final_data == HTTP_DATA_FINAL)
                         {
-                                rsp->body_frag_start[rsp->body_frag_len] = '\0';
-                                int to_be_added = snprintf(NULL, 0, "-----BEGIN CERTIFICATE-----\n%s-----END CERTIFICATE-----\n", rsp->body_frag_start);
-                                if (to_be_added < 0)
+                                uint8_t* temp_buffer = NULL;
+                                int temp_buffer_size = 0;
+
+                                ret = write_file("/tmp/cert.p7b",
+                                                 rsp->body_frag_start,
+                                                 rsp->body_frag_len,
+                                                 false);
+
+                                ret = parseESTResponse(rsp->body_frag_start,
+                                                       rsp->body_frag_len,
+                                                       &temp_buffer,
+                                                       &temp_buffer_size);
+                                if (ret != 0)
                                 {
-                                        LOG_ERROR("Failed to calculate size of certificate");
+                                        LOG_ERROR("Failed to parse EST response");
+                                        goto error_occured;
+                                }
+                                if (temp_buffer != NULL && temp_buffer_size > 0)
+                                {
+                                        pthread_mutex_lock(&thread_data->mutex);
+
+                                        ret = write_file("/tmp/cert.pem",
+                                                         temp_buffer,
+                                                         temp_buffer_size,
+                                                         false);
+                                        if (ret != 0)
+                                        {
+                                                LOG_ERROR("Failed to write certificate to file");
+                                        }
+                                        thread_data->cert_size = temp_buffer_size;
+                                        thread_data->cert_buffer = temp_buffer;
+                                        pthread_mutex_unlock(&thread_data->mutex);
+                                }
+                                else
+                                {
+                                        LOG_ERROR("Failed to parse EST response");
+                                        pthread_mutex_lock(&thread_data->mutex);
+                                        thread_data->cert_size = 0;
+                                        thread_data->cert_buffer = NULL;
+                                        pthread_mutex_unlock(&thread_data->mutex);
                                         goto error_occured;
                                 }
 
-                                // Allocate memory including null terminator
-                                uint8_t* temp_buffer = (uint8_t*) malloc(to_be_added + 1);
-                                if (!temp_buffer)
-                                {
-                                        LOG_ERROR("Failed to allocate memory for CA chain");
-                                        goto error_occured;
-                                }
-                                memset(temp_buffer, 0, to_be_added + 1);
-
-                                int ret = snprintf((char*) temp_buffer,
-                                                   to_be_added + 1,
-                                                   "-----BEGIN CERTIFICATE-----\n%s-----END "
-                                                   "CERTIFICATE-----\n",
-                                                   rsp->body_frag_start);
-                                if (ret < 0)
-                                {
-                                        LOG_ERROR("Failed to format CA chain");
-                                        free(temp_buffer);
-                                        goto error_occured;
-                                }
-                                printf("temp_buffer: %s\n", temp_buffer);
-
-                                pthread_mutex_lock(&thread_data->mutex);
-
-                                // Free old buffer if necessary
-                                if (thread_data->cert_buffer)
-                                {
-                                        free(thread_data->cert_buffer);
-                                }
-
-                                thread_data->cert_size = ret;
-                                thread_data->cert_buffer = temp_buffer;
-                                thread_data->cert_buffer_size = to_be_added + 1;
-
-                                pthread_mutex_unlock(&thread_data->mutex);
-
-                                LOG_INFO("CSR successfully fetched");
-                                LOG_INFO("CSR Sucesfully fetched");
+                                LOG_DEBUG("CSR successfully fetched");
                         }
                         else
                         {
@@ -173,15 +161,13 @@ static void http_response_callback(struct http_response* rsp,
                                         "we assumed that a fragment contains a whole certificate. "
                                         "If displayed, we need to concatinate fragments and add "
                                         "end certificates ");
+                                goto error_occured;
                         }
                 }
                 else
                 {
-                        LOG_ERROR("we assumed that a fragment contains a whole ca "
-                                  "chain. "
-                                  "If displayed, we need to concatinate fragments "
-                                  "and add "
-                                  "end certificates ");
+                        LOG_ERROR("frag len is 0");
+                        goto error_occured;
                 }
         }
         else
@@ -189,27 +175,33 @@ static void http_response_callback(struct http_response* rsp,
                 LOG_ERROR("HTTP error when fetching certificate: %d %s",
                           rsp->http_status_code,
                           rsp->http_status);
-
-                // Mark that we don't have the CA chain
-                pthread_mutex_lock(&thread_data->mutex);
-                thread_data->has_ca_chain = false;
-                pthread_mutex_unlock(&thread_data->mutex);
-
-                if (final_data == HTTP_DATA_FINAL && thread_data->callback)
-                {
-                        thread_data->callback(NULL, 0);
-
-                        // Mark thread as completed
-                        pthread_mutex_lock(&thread_data->mutex);
-                        thread_data->completed = true;
-                        pthread_mutex_unlock(&thread_data->mutex);
-                }
+                goto error_occured;
         }
+        return;
 error_occured:
+
+        if (final_data == HTTP_DATA_FINAL && thread_data->callback)
+        {
+
+                thread_data->callback(NULL, 0);
+                pthread_mutex_lock(&thread_data->mutex);
+                thread_data->callback = NULL;
+
+                thread_data->completed = true;
+                if (thread_data->cert_buffer)
+                {
+
+                        free(thread_data->cert_buffer);
+                        thread_data->cert_buffer = NULL;
+                }
+                thread_data->cert_size = 0;
+
+                pthread_mutex_unlock(&thread_data->mutex);
+        }
         LOG_INFO("Error occured, freeing memory");
 }
 
-// HTTP response callback for CA certificate chain
+// to be used as standalone call, thread data should be specific for ca_chain or cert. As a workaround we dont use the callback here
 static void http_ca_chain_callback(struct http_response* rsp,
                                    enum http_final_call final_data,
                                    void* user_data)
@@ -233,58 +225,44 @@ static void http_ca_chain_callback(struct http_response* rsp,
         {
                 if (rsp->body_frag_len > 0)
                 {
-                        size_t chain_size = 0;
-                        pthread_mutex_lock(&thread_data->mutex);
-                        chain_size = thread_data->ca_chain_size;
-                        pthread_mutex_unlock(&thread_data->mutex);
-
                         // we have a complete ca chain
-                        if (chain_size == 0 && final_data == HTTP_DATA_FINAL)
+                        if (final_data == HTTP_DATA_FINAL)
                         {
-                                // write body_frag_start - body_frag_len to file tmp
-                                write_file("/tmp/tmp_chain.txt",
+                                uint8_t* temp_buffer = NULL;
+                                int temp_buffer_size = 0;
+
+                                write_file("/tmp/cacerts.p7b",
                                            rsp->body_frag_start,
                                            rsp->body_frag_len,
                                            false);
-
-                                rsp->body_frag_start[rsp->body_frag_len] = '\0';
-                                int to_be_added = snprintf(NULL, 0, "-----BEGIN CERTIFICATE-----\n%s-----END CERTIFICATE-----\n", rsp->body_frag_start);
-                                if (to_be_added < 0)
+                                // write body_frag_start - body_frag_len to file tmp
+                                int ret = parseESTResponse(rsp->body_frag_start,
+                                                           rsp->body_frag_len,
+                                                           &temp_buffer,
+                                                           &temp_buffer_size);
+                                if (ret != 0)
                                 {
-                                        LOG_ERROR("Failed to calculate size of CA chain");
+                                        LOG_ERROR("Failed to parse PKCS7 response");
                                         goto error_occured;
                                 }
-
-                                uint8_t* temp_buffer = (uint8_t*) malloc(to_be_added +
-                                                                         1); // +1 to be extra safe
-                                if (!temp_buffer)
+                                if (temp_buffer != NULL && temp_buffer_size > 0)
                                 {
-                                        LOG_ERROR("Failed to allocate memory for CA chain");
+                                        pthread_mutex_lock(&thread_data->mutex);
+                                        thread_data->ca_chain_size = temp_buffer_size;
+                                        thread_data->ca_chain_buffer = temp_buffer;
+                                        thread_data->has_ca_chain = true;
+                                        write_file("/tmp/chain.pem",
+                                                   thread_data->ca_chain_buffer,
+                                                   thread_data->ca_chain_size,
+                                                   false);
+                                        pthread_mutex_unlock(&thread_data->mutex);
+                                }
+                                else
+                                {
+                                        LOG_ERROR("Failed to parse PKCS7 response");
                                         goto error_occured;
                                 }
-                                memset(temp_buffer, 0, to_be_added + 1);
-
-                                int ret = snprintf((char*) temp_buffer,
-                                                   to_be_added + 1,
-                                                   "-----BEGIN CERTIFICATE-----\n%s-----END "
-                                                   "CERTIFICATE-----\n",
-                                                   rsp->body_frag_start);
-                                if (ret < 0 || ret >= to_be_added + 1)
-                                {
-                                        LOG_ERROR("Failed to format CA chain");
-                                        free(temp_buffer); // Free memory on error
-                                        goto error_occured;
-                                }
-
-                                printf("temp_buffer: %s\n", temp_buffer);
-
-                                pthread_mutex_lock(&thread_data->mutex);
-                                thread_data->ca_chain_size = ret; // Size without null terminator
-                                thread_data->ca_chain_buffer = temp_buffer;
-                                thread_data->ca_chain_buffer_size = to_be_added +
-                                                                    1; // Total allocated size
-                                thread_data->has_ca_chain = true;
-                                pthread_mutex_unlock(&thread_data->mutex);
+                                LOG_DEBUG("CA chain successfully fetched %s ", temp_buffer);
                         }
                         else
                         {
@@ -297,9 +275,8 @@ static void http_ca_chain_callback(struct http_response* rsp,
                 }
                 else
                 {
-                        LOG_ERROR("status code is: %d\n status: %s\n, but frag len is 0 ",
-                                  rsp->http_status_code,
-                                  rsp->http_status);
+                        LOG_ERROR("frag len is 0");
+                        goto error_occured;
                 }
         }
         else
@@ -307,21 +284,28 @@ static void http_ca_chain_callback(struct http_response* rsp,
                 LOG_ERROR("HTTP error when fetching CA chain: %d %s",
                           rsp->http_status_code,
                           rsp->http_status);
-
-                // Mark that we don't have the CA chain
-                pthread_mutex_lock(&thread_data->mutex);
-                thread_data->has_ca_chain = false;
-                pthread_mutex_unlock(&thread_data->mutex);
-
-                if (final_data == HTTP_DATA_FINAL && thread_data->callback)
-                {
-                        pthread_mutex_lock(&thread_data->mutex);
-                        thread_data->completed = true;
-                        pthread_mutex_unlock(&thread_data->mutex);
-                }
+                goto error_occured;
         }
+
+        return;
 error_occured:
+        // check if thread_data
         LOG_INFO("Error occured, freeing memory");
+        if (thread_data)
+        {
+                pthread_mutex_lock(&thread_data->mutex);
+                // only clean chain specific
+                if (thread_data->ca_chain_buffer)
+                {
+                        free(thread_data->ca_chain_buffer);
+                        thread_data->ca_chain_buffer = NULL;
+                }
+                thread_data->ca_chain_size = 0;
+                thread_data->has_ca_chain = false;
+                thread_data->ca_chain_buffer_size = 0;
+                thread_data->completed = true;
+                pthread_mutex_unlock(&thread_data->mutex);
+        }
 }
 
 // Check if the server is reachable with a simple ping
@@ -403,7 +387,11 @@ static void* ca_chain_thread(void* arg)
         // Fetch CA certificates directly
         int ret = fetch_ca_certificates(data, response_buffer, HTTP_BUFFER_SIZE, true);
 
-        free(response_buffer);
+        if (!response_buffer)
+        {
+                free(response_buffer);
+                response_buffer = NULL;
+        }
 
         // If fetch failed, call callback with error
         if (ret != ASL_SUCCESS && !data->completed)
@@ -536,7 +524,7 @@ void* cert_request_thread(void* arg)
         }
 
         // Prepare metadata for CSR
-        SigningRequestMetadata metadata = {.commonName = "KRITIS3M Test Entity", // thread_data->serial_number,
+        SigningRequestMetadata metadata = {.commonName = thread_data->serial_number, // thread_data->serial_number,
                                            .org = "OTH Regensburg",
                                            .country = "DE",
                                            .unit = "LaS3",
@@ -607,7 +595,7 @@ void* cert_request_thread(void* arg)
                 goto cleanup;
         }
 
-        // Create ASL session
+        // Create ASL sessio            if (ret == 0 && wc_GetContentType(pkiMsg, &idx, &outerContentType,
         if (connect(sock_fd, addr_info->ai_addr, addr_info->ai_addrlen) < 0)
         {
                 LOG_ERROR("Failed to connect to EST server");
@@ -645,7 +633,7 @@ void* cert_request_thread(void* arg)
         struct http_request req = {0};
 
         req.method = HTTP_POST;
-        req.url = "/.well-known/est/simplereenroll";
+        req.url = "/.well-known/est/dataplane/simpleenroll";
         req.protocol = "HTTP/1.1";
         req.host = hostname;
         req.port = port_str;
@@ -935,6 +923,7 @@ static int fetch_ca_certificates(cert_thread_data_t* thread_data,
         // mutex
         pthread_mutex_lock(&thread_data->mutex);
         hostname = thread_data->host;
+
         port = thread_data->port;
         pthread_mutex_unlock(&thread_data->mutex);
 
@@ -1004,7 +993,7 @@ static int fetch_ca_certificates(cert_thread_data_t* thread_data,
         // Setup HTTP request for EST cacerts
         struct http_request req = {0};
         req.method = HTTP_GET;
-        req.url = "/.well-known/est/cacerts";
+        req.url = "/.well-known/est/dataplane/cacerts";
         req.protocol = "HTTP/1.1";
         req.host = hostname;
         req.port = port_str;
@@ -1032,7 +1021,7 @@ static int fetch_ca_certificates(cert_thread_data_t* thread_data,
                 goto cleanup;
         }
         if (direct_request)
-                thread_data->callback(thread_data->ca_chain_buffer, thread_data->ca_chain_size);
+                thread_data->callback((char*) thread_data->ca_chain_buffer, thread_data->ca_chain_size);
 
         LOG_INFO("CA certificate chain request sent successfully");
         ret = ASL_SUCCESS;

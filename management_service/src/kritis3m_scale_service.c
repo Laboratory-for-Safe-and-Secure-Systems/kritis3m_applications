@@ -1,7 +1,6 @@
 #include <errno.h>
 #include <poll.h>
 #include <pthread.h>
-#include <signal.h>
 #include <string.h>
 #include <sys/timerfd.h>
 #include <time.h>
@@ -13,9 +12,6 @@
 #include "networking.h"
 #include "pki_client.h"
 #include "poll_set.h"
-
-#include "cJSON.h"
-#include "http_client.h"
 
 #include "kritis3m_application_manager.h"
 #include "kritis3m_scale_service.h"
@@ -160,6 +156,19 @@ int start_kritis3m_service(char* config_file, int log_level)
         conn_config.serialnumber = sys_config->serial_number;
         conn_config.endpoint_config = sys_config->endpoint_config;
         conn_config.mqtt_broker_host = sys_config->broker_host;
+
+        struct pki_client_config_t config = {0};
+        config.serialnumber = sys_config->serial_number;
+        config.host = sys_config->est_host;
+        config.port = sys_config->est_port;
+        config.endpoint_config = sys_config->endpoint_config;
+
+        cert_request(&config, CERT_TYPE_CONTROLPLANE, true, controlplane_set_certificate);
+        while (1)
+        {
+
+                sleep(20);
+        }
 
         start_control_plane_conn(&conn_config);
 
@@ -376,8 +385,9 @@ ManagementReturncode handle_svc_message(int socket, service_message* msg, int cf
                 {
                         LOG_INFO("Received control plane certificate get request");
                         response_code = MSG_OK;
+                        // cert_request(endpoint_config, config, CERT_TYPE_CONTROLPLANE, callback);
                         svc_respond_with(socket, response_code);
-                        ret = controlplane_cert_request();
+                        // ret = controlplane_cert_request();
                         if (ret < 0)
                         {
                                 LOG_ERROR("Failed to send ctrlplane cert get request");
@@ -389,8 +399,8 @@ ManagementReturncode handle_svc_message(int socket, service_message* msg, int cf
                 {
                         LOG_INFO("Received data plane certificate get request");
                         response_code = MSG_OK;
+                        // cert_request(endpoint_config, config, CERT_TYPE_DATAPLANE, callback);
                         svc_respond_with(socket, response_code);
-                        ret = dataplane_cert_request();
                         if (ret < 0)
                         {
                                 LOG_ERROR("Failed to send dataplane cert get request");
@@ -511,8 +521,8 @@ void* handle_dataplane_apply_req(void* arg)
         policy_msg.module = UPDATE_COORDINATOR;
         policy_msg.state = UPDATE_APPLICABLE;
         policy_msg.msg = NULL;
-        ret = send_policy_status(&policy_msg);
-        if (ret < 0)
+        enum MSG_RESPONSE_CODE status = send_policy_status(&policy_msg);
+        if (status < 0)
         {
                 LOG_ERROR("Failed to send initial policy status");
                 goto error_occured;

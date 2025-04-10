@@ -1,7 +1,6 @@
 #include "ipc.h"
 #include "errno.h"
 #include "logging.h"
-#include "networking.h"
 #include <poll.h>
 #include <string.h>
 
@@ -19,7 +18,7 @@ enum MSG_RESPONSE_CODE sockpair_read(int socket, void* buffer, size_t length)
         fds[0].fd = socket;
         fds[0].events = POLLIN | POLLERR | POLLHUP;
 
-        int ret = poll(fds, 1, 5000);
+        int ret = poll(fds, 1, 100000);
         if (ret < 0)
         {
                 LOG_ERROR("Failed to read response from external management request");

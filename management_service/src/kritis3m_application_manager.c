@@ -8,14 +8,10 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "asl.h"
-#include "echo_server.h"
 #include "ipc.h"
 #include "kritis3m_application_manager.h"
 #include "kritis3m_scale_service.h"
 #include "networking.h"
-#include "poll_set.h"
-#include "tcp_client_stdin_bridge.h"
 #include "tls_proxy.h"
 
 #include "logging.h"
@@ -311,6 +307,15 @@ int handle_management_message(struct application_manager* manager)
 
         case CHANGE_APPLICATION_CONFIG_REQUEST:
                 {
+
+                        respond_with(manager->management_pair[THREAD_INT], MSG_OK);
+                        LOG_INFO("update applied");
+                        policy_msg.state = UPDATE_APPLIED;
+                        policy_msg.module = APPLICATION_MANAGER;
+                        policy_msg.msg = "Update applied";
+                        ret = dataplane_config_apply_send_status(&policy_msg);
+                        return 0;
+
                         LOG_INFO("Received change application config request");
                         struct application_manager_config* new_config = msg.data.change_config.application_config;
                         struct hardware_configs* new_hw_configs = msg.data.change_config.hw_configs;
@@ -404,9 +409,9 @@ int handle_management_message(struct application_manager* manager)
                                                           "configuration");
                                                 // signal update_coordinator error occured
                                                 policy_msg.state = UPDATE_ERROR;
+                                                policy_msg.module = APPLICATION_MANAGER;
                                                 policy_msg.msg = "Failed to rollback to backup "
                                                                  "configuration";
-                                                policy_msg.msg_len = strlen(policy_msg.msg);
                                                 ret = dataplane_config_apply_send_status(&policy_msg);
                                         }
                                         else
@@ -415,28 +420,26 @@ int handle_management_message(struct application_manager* manager)
                                                 policy_msg.state = UPDATE_ROLLBACK;
                                                 policy_msg.msg = "Rollback to backup "
                                                                  "configuration ";
-                                                policy_msg.msg_len = strlen(policy_msg.msg);
                                                 ret = dataplane_config_apply_send_status(&policy_msg);
                                         }
                                 }
                                 else
                                 {
                                         // no rollback possible
+                                        LOG_ERROR("no backup config available application manager "
+                                                  "stop");
                                         // send error
-                                        ret = dataplane_config_apply_send_status(UPDATE_ERROR);
+                                        // ret = dataplane_config_apply_send_status(UPDATE_ERROR);
                                 }
                                 cleanup_application_config(new_config);
                                 cleanup_hardware_configs(new_hw_configs);
                         }
                         else
                         {
-                                LOG_ERROR("no backup config available application manager stop");
-                                // signal update_coordinator error occured
-                                policy_msg.state = UPDATE_ERROR;
-                                policy_msg.msg = "no backup config available application manager "
-                                                 "stop";
-                                policy_msg.msg_len = strlen(policy_msg.msg);
-                                ret = dataplane_config_apply_send_status(&policy_msg);
+                                policy_msg.state = UPDATE_APPLIED;
+                                policy_msg.module = APPLICATION_MANAGER;
+                                policy_msg.msg = "Sucesfully applied new configuration";
+                                // ret = dataplane_config_apply_send_status(&policy_msg);
                         }
                         break;
                 }
@@ -576,14 +579,14 @@ int start_application_config(struct application_manager* manager,
         LOG_INFO("Preparing network interfaces");
         if (hw_configs->hw_configs != NULL && hw_configs->number_of_hw_configs > 0)
         {
-                ret = prepare_all_interfaces(hw_configs->hw_configs, hw_configs->number_of_hw_configs);
-                if (ret < 0)
-                {
-                        LOG_ERROR("Failed to prepare network interfaces");
-                        return ret;
-                }
-                LOG_INFO("Successfully prepared %d network interfaces",
-                         hw_configs->number_of_hw_configs);
+                // ret = prepare_all_interfaces(hw_configs->hw_configs,
+                // hw_configs->number_of_hw_configs); if (ret < 0)
+                // {
+                //         LOG_ERROR("Failed to prepare network interfaces");
+                //         return ret;
+                // }
+                // LOG_INFO("Successfully prepared %d network interfaces",
+                //          hw_configs->number_of_hw_configs);
         }
         else
         {
@@ -617,17 +620,17 @@ int start_application_config(struct application_manager* manager,
                         // Start the proxy based on its direction
                         switch (group->proxy_wrapper[j].direction)
                         {
-                        case FORWARD_PROXY:
+                        case PROXY_FORWARD:
                                 proxy_id = tls_forward_proxy_start(
                                         &group->proxy_wrapper[j].proxy_config);
                                 break;
 
-                        case REVERSE_PROXY:
+                        case PROXY_REVERSE:
                                 proxy_id = tls_reverse_proxy_start(
                                         &group->proxy_wrapper[j].proxy_config);
                                 break;
 
-                        case TLS_TLS_PROXY:
+                        case PROXY_TLS_TLS:
                                 LOG_ERROR("TLS-TLS proxy is not implemented yet");
                                 proxy_id = -1;
                                 break;
@@ -744,8 +747,9 @@ bool is_running()
 // respond with a MSG_RESPONSE_CODE to a management request
 int respond_with(int socket, enum MSG_RESPONSE_CODE response_code)
 {
-        int32_t return_code = response_code;
-        return sockpair_write(socket, &return_code, sizeof(int32_t), NULL);
+        common_response_t return_code = response_code;
+
+        return sockpair_write(socket, &return_code, sizeof(common_response_t), NULL);
 }
 
 // Implementation of the stop_application_manager function
@@ -895,17 +899,7 @@ int change_application_config(struct application_manager_config* new_config,
         msg.data.change_config.application_config = new_config;
         msg.data.change_config.hw_configs = hw_configs;
 
-        enum MSG_RESPONSE_CODE resp = external_management_request(manager.management_pair[THREAD_EXT],
-                                                                  &msg,
-                                                                  sizeof(msg));
-
-        if (resp != MSG_OK)
-        {
-                LOG_ERROR("Failed to change application configuration");
-                return -1;
-        }
-
-        return 0;
+        return external_management_request(manager.management_pair[THREAD_EXT], &msg, sizeof(msg));
 }
 
 /**

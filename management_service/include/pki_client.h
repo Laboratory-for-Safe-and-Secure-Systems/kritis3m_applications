@@ -2,10 +2,6 @@
 #define PKI_CLIENT_H_
 
 #include "asl.h"
-#include "configuration_manager.h"
-#include "ipc.h"
-#include "kritis3m_configuration.h"
-#include "kritis3m_pki_client.h"
 
 struct pki_client_config_t
 {
