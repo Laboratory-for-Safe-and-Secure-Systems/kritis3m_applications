@@ -169,7 +169,7 @@ int get_application_inactive(struct application_manager_config* config,
 
                 // Determine which dataplane certificate chain to use based on active configuration
                 char* chain_path = NULL;
-                switch (configuration_manager.sys_config.dataplane_active)
+                switch (configuration_manager.sys_config.dataplane_cert_active)
                 {
                 case ACTIVE_ONE:
                         chain_path = configuration_manager.dataplane_1_chain_path;
@@ -242,7 +242,7 @@ int application_store_inactive(char* buffer, size_t size)
                 return -1;
         }
 
-        int ret = write_file(destination, buffer, size, false);
+        int ret = write_file(destination, (const uint8_t*) buffer, size, false);
         if (ret != 0)
         {
                 LOG_ERROR("Failed to write configuration to %s", destination);
@@ -313,7 +313,7 @@ int init_configuration_manager(char* base_path)
                 goto error;
         }
 
-        switch (configuration_manager.sys_config.controlplane_active)
+        switch (configuration_manager.sys_config.controlplane_cert_active)
         {
         case ACTIVE_ONE:
                 ret = load_endpoint_certificates(configuration_manager.sys_config.endpoint_config,
@@ -346,6 +346,165 @@ error:
 
         cleanup_configuration_manager();
         return -1;
+}
+static struct config_state config_states[3] = {0};
+
+int init_config_update(struct config_update* update, enum CONFIG_TYPE type, char* config, size_t size)
+{
+        if (!update || !config || size == 0)
+        {
+                LOG_ERROR("Invalid update parameters");
+                return -1;
+        }
+
+        update->type = type;
+        update->new_config = config;
+        update->config_size = size;
+        update->validation_callback = NULL;
+        update->validation_context = NULL;
+
+        return 0;
+}
+
+int prepare_config_update(struct config_update* update)
+{
+        if (!update || !configuration_manager.initialized)
+        {
+                LOG_ERROR("Invalid update or configuration manager not initialized");
+                return -1;
+        }
+
+        struct config_state* state = &config_states[update->type];
+        char* target_path = NULL;
+
+        // Determine target path based on current active state
+        switch (state->active_path)
+        {
+        case ACTIVE_ONE:
+                target_path = state->path_2;
+                break;
+        case ACTIVE_TWO:
+                target_path = state->path_1;
+                break;
+        case ACTIVE_NONE:
+                target_path = state->path_1;
+                break;
+        default:
+                LOG_ERROR("Invalid active path state");
+                return -1;
+        }
+
+        // Write new configuration to target path
+        int ret = write_file(target_path, (const uint8_t*) update->new_config, update->config_size, false);
+        if (ret != 0)
+        {
+                LOG_ERROR("Failed to write configuration to %s", target_path);
+                return -1;
+        }
+
+        state->is_validating = true;
+        return 0;
+}
+
+int validate_config_update(struct config_update* update)
+{
+        if (!update || !configuration_manager.initialized)
+        {
+                LOG_ERROR("Invalid update or configuration manager not initialized");
+                return -1;
+        }
+
+        struct config_state* state = &config_states[update->type];
+        if (!state->is_validating)
+        {
+                LOG_ERROR("No update in validation state");
+                return -1;
+        }
+
+        // If no validation callback is set, consider it valid
+        if (!update->validation_callback)
+        {
+                state->validation_success = true;
+                return 0;
+        }
+
+        // Perform validation
+        state->validation_success = update->validation_callback(update->validation_context);
+        if (!state->validation_success)
+        {
+                LOG_ERROR("Validation failed for configuration update");
+                return -1;
+        }
+
+        return 0;
+}
+
+int commit_config_update(struct config_update* update)
+{
+        if (!update || !configuration_manager.initialized)
+        {
+                LOG_ERROR("Invalid update or configuration manager not initialized");
+                return -1;
+        }
+
+        struct config_state* state = &config_states[update->type];
+        if (!state->is_validating || !state->validation_success)
+        {
+                LOG_ERROR("Cannot commit invalid or non-validating update");
+                return -1;
+        }
+
+        // Switch active state
+        switch (state->active_path)
+        {
+        case ACTIVE_ONE:
+                state->active_path = ACTIVE_TWO;
+                break;
+        case ACTIVE_TWO:
+                state->active_path = ACTIVE_ONE;
+                break;
+        case ACTIVE_NONE:
+                state->active_path = ACTIVE_ONE;
+                break;
+        default:
+                LOG_ERROR("Invalid active path state");
+                return -1;
+        }
+
+        // Update sysconfig and persist
+        int ret = write_sysconfig();
+        if (ret != 0)
+        {
+                LOG_ERROR("Failed to persist configuration update");
+                return -1;
+        }
+
+        state->is_validating = false;
+        state->validation_success = false;
+        return 0;
+}
+
+int rollback_config_update(struct config_update* update)
+{
+        if (!update || !configuration_manager.initialized)
+        {
+                LOG_ERROR("Invalid update or configuration manager not initialized");
+                return -1;
+        }
+
+        struct config_state* state = &config_states[update->type];
+        if (!state->is_validating)
+        {
+                LOG_ERROR("No update in validation state to rollback");
+                return -1;
+        }
+
+        // Clear validation state
+        state->is_validating = false;
+        state->validation_success = false;
+
+        // The old configuration remains active, no need to switch paths
+        return 0;
 }
 
 int test_server_conn(char* host, asl_endpoint_configuration* endpoint_config)
@@ -454,7 +613,7 @@ int dataplane_set_certificate(char* buffer, size_t size)
         }
         int ret = 0;
 
-        switch (configuration_manager.sys_config.dataplane_active)
+        switch (configuration_manager.sys_config.dataplane_cert_active)
         {
         case ACTIVE_ONE:
                 destination = configuration_manager.application_2_path;
@@ -476,7 +635,7 @@ int dataplane_set_certificate(char* buffer, size_t size)
         }
 
         // store certificates in file
-        ret = write_file(destination, buffer, size, false);
+        ret = write_file(destination, (const uint8_t*) buffer, size, false);
         if (ret != 0)
         {
                 LOG_ERROR("Failed to write controlplane certificate");
@@ -504,7 +663,7 @@ int controlplane_set_certificate(char* buffer, size_t size)
         }
         int ret = 0;
 
-        switch (configuration_manager.sys_config.controlplane_active)
+        switch (configuration_manager.sys_config.controlplane_cert_active)
         {
         case ACTIVE_ONE:
                 destination = configuration_manager.controlplane_2_chain_path;
@@ -526,7 +685,7 @@ int controlplane_set_certificate(char* buffer, size_t size)
         }
 
         // store certificates in file
-        ret = write_file(destination, buffer, size, false);
+        ret = write_file(destination, (const uint8_t*) buffer, size, false);
         if (ret != 0)
         {
                 LOG_ERROR("Failed to write controlplane certificate");
@@ -553,6 +712,7 @@ int controlplane_set_certificate(char* buffer, size_t size)
                 LOG_ERROR("Failed to test controlplane certificate");
                 goto error;
         }
+
         // we switchout endpointconfig, to make sure that the buffers are freed later
         asl_endpoint_configuration* old_endpoint_config = configuration_manager.sys_config.endpoint_config;
         configuration_manager.sys_config.endpoint_config = endpoint_config;
@@ -560,16 +720,16 @@ int controlplane_set_certificate(char* buffer, size_t size)
 
         LOG_INFO("Controlplane certificate test successful");
         // switching to new certificate
-        switch (configuration_manager.sys_config.controlplane_active)
+        switch (configuration_manager.sys_config.controlplane_cert_active)
         {
         case ACTIVE_ONE:
-                configuration_manager.sys_config.controlplane_active = ACTIVE_TWO;
+                configuration_manager.sys_config.controlplane_cert_active = ACTIVE_TWO;
                 break;
         case ACTIVE_TWO:
-                configuration_manager.sys_config.controlplane_active = ACTIVE_ONE;
+                configuration_manager.sys_config.controlplane_cert_active = ACTIVE_ONE;
                 break;
         case ACTIVE_NONE:
-                configuration_manager.sys_config.controlplane_active = ACTIVE_ONE;
+                configuration_manager.sys_config.controlplane_cert_active = ACTIVE_ONE;
         default:
                 LOG_ERROR("Invalid controlplane active configuration");
                 goto error;
@@ -580,6 +740,7 @@ int controlplane_set_certificate(char* buffer, size_t size)
                 LOG_ERROR("Failed to write sysconfig");
                 goto error;
         }
+        // notify kritis3m_scale service restart
 
         if (endpoint_config->root_certificate.buffer)
                 free((void*) endpoint_config->root_certificate.buffer);
@@ -610,7 +771,7 @@ int load_endpoint_certificates(asl_endpoint_configuration* endpoint_config,
         }
 
         // Check if controlplane is active
-        if (configuration_manager.sys_config.controlplane_active == ACTIVE_NONE)
+        if (configuration_manager.sys_config.controlplane_cert_active == ACTIVE_NONE)
         {
                 LOG_ERROR("No active controlplane configuration");
                 return -1;
@@ -743,7 +904,10 @@ int write_sysconfig(void)
         }
 
         // Write directly to the file in one operation
-        ret = write_file(configuration_manager.sys_config_path, json_buffer, strlen(json_buffer), false);
+        ret = write_file(configuration_manager.sys_config_path,
+                         (const uint8_t*) json_buffer,
+                         strlen(json_buffer),
+                         false);
         if (ret != 0)
         {
                 LOG_ERROR("Failed to write sys_config to file: %s",
@@ -771,7 +935,7 @@ int get_active_hardware_config(struct application_manager_config* app_config,
         char* source_path = NULL;
 
         // Determine which application config to read based on active dataplane
-        switch (configuration_manager.sys_config.dataplane_active)
+        switch (configuration_manager.sys_config.application_active)
         {
         case ACTIVE_ONE:
                 source_path = configuration_manager.application_1_path;
@@ -827,7 +991,7 @@ int get_active_hardware_config(struct application_manager_config* app_config,
 
                 // Determine which dataplane certificate chain to use
                 char* chain_path = NULL;
-                switch (configuration_manager.sys_config.dataplane_active)
+                switch (configuration_manager.sys_config.dataplane_cert_active)
                 {
                 case ACTIVE_ONE:
                         chain_path = configuration_manager.dataplane_1_chain_path;
@@ -944,18 +1108,18 @@ int store_alt_ctrl_cert(char* cert_buffer, size_t cert_size)
                 return -1;
         }
         //? append yes or no?
-        switch (configuration_manager.sys_config.controlplane_active)
+        switch (configuration_manager.sys_config.controlplane_cert_active)
         {
         case ACTIVE_ONE:
                 ret = write_file(configuration_manager.controlplane_2_chain_path,
-                                 cert_buffer,
+                                 (const uint8_t*) cert_buffer,
                                  cert_size,
                                  false);
                 ret = 0;
                 break;
         case ACTIVE_TWO:
                 ret = write_file(configuration_manager.controlplane_1_chain_path,
-                                 cert_buffer,
+                                 (const uint8_t*) cert_buffer,
                                  cert_size,
                                  false);
                 ret = 0;
@@ -963,7 +1127,7 @@ int store_alt_ctrl_cert(char* cert_buffer, size_t cert_size)
         case ACTIVE_NONE:
                 LOG_ERROR("No active controlplane configuration");
                 ret = write_file(configuration_manager.controlplane_1_chain_path,
-                                 cert_buffer,
+                                 (const uint8_t*) cert_buffer,
                                  cert_size,
                                  false);
                 ret = 0;
@@ -986,4 +1150,199 @@ int store_alt_data_cert(char* buffer, size_t size)
         }
 
         return 0;
+}
+
+// Worker thread function
+static void* transaction_worker(void* arg)
+{
+        struct config_transaction* transaction = (struct config_transaction*) arg;
+        char* new_config = NULL;
+        size_t config_size = 0;
+        int ret = 0;
+
+        // Lock transaction
+        pthread_mutex_lock(&transaction->mutex);
+        transaction->state = TRANSACTION_PENDING;
+        pthread_mutex_unlock(&transaction->mutex);
+
+        // Fetch new configuration
+        ret = transaction->fetch(transaction->context, &new_config, &config_size);
+        if (ret != 0)
+        {
+                LOG_ERROR("Failed to fetch new configuration");
+                goto error;
+        }
+
+        // Update state to validating
+        pthread_mutex_lock(&transaction->mutex);
+        transaction->state = TRANSACTION_VALIDATING;
+        pthread_mutex_unlock(&transaction->mutex);
+
+        // Validate new configuration
+        ret = transaction->validate(transaction->context, new_config, config_size);
+        if (ret != 0)
+        {
+                LOG_ERROR("Configuration validation failed");
+                goto error;
+        }
+
+        // Prepare update
+        struct config_update update;
+        if (init_config_update(&update, transaction->type, new_config, config_size) != 0)
+        {
+                LOG_ERROR("Failed to initialize update");
+                goto error;
+        }
+
+        // Write to inactive path
+        if (prepare_config_update(&update) != 0)
+        {
+                LOG_ERROR("Failed to prepare update");
+                goto error;
+        }
+
+        // Commit the update
+        if (commit_config_update(&update) != 0)
+        {
+                LOG_ERROR("Failed to commit update");
+                goto error;
+        }
+
+        // Update successful
+        pthread_mutex_lock(&transaction->mutex);
+        transaction->state = TRANSACTION_COMMITTED;
+        pthread_mutex_unlock(&transaction->mutex);
+
+        // Notify caller
+        if (transaction->notify)
+        {
+                transaction->notify(transaction->context, TRANSACTION_COMMITTED);
+        }
+
+cleanup:
+        if (new_config)
+        {
+                free(new_config);
+        }
+        return NULL;
+
+error:
+        pthread_mutex_lock(&transaction->mutex);
+        transaction->state = TRANSACTION_FAILED;
+        pthread_mutex_unlock(&transaction->mutex);
+
+        if (transaction->notify)
+        {
+                transaction->notify(transaction->context, TRANSACTION_FAILED);
+        }
+        goto cleanup;
+}
+
+int init_config_transaction(struct config_transaction* transaction,
+                            enum CONFIG_TYPE type,
+                            void* context,
+                            config_fetch_callback fetch,
+                            config_validate_callback validate,
+                            config_notify_callback notify)
+{
+        if (!transaction || !fetch || !validate)
+        {
+                LOG_ERROR("Invalid transaction parameters");
+                return -1;
+        }
+
+        memset(transaction, 0, sizeof(struct config_transaction));
+        transaction->type = type;
+        transaction->context = context;
+        transaction->fetch = fetch;
+        transaction->validate = validate;
+        transaction->notify = notify;
+        transaction->state = TRANSACTION_IDLE;
+        transaction->thread_running = false;
+
+        if (pthread_mutex_init(&transaction->mutex, NULL) != 0)
+        {
+                LOG_ERROR("Failed to initialize mutex");
+                return -1;
+        }
+
+        if (pthread_cond_init(&transaction->cond, NULL) != 0)
+        {
+                LOG_ERROR("Failed to initialize condition variable");
+                pthread_mutex_destroy(&transaction->mutex);
+                return -1;
+        }
+
+        return 0;
+}
+
+int start_config_transaction(struct config_transaction* transaction)
+{
+        if (!transaction)
+        {
+                LOG_ERROR("Invalid transaction");
+                return -1;
+        }
+
+        pthread_mutex_lock(&transaction->mutex);
+        if (transaction->thread_running)
+        {
+                pthread_mutex_unlock(&transaction->mutex);
+                LOG_ERROR("Transaction already running");
+                return -1;
+        }
+
+        transaction->thread_running = true;
+        pthread_mutex_unlock(&transaction->mutex);
+
+        if (pthread_create(&transaction->worker_thread, NULL, transaction_worker, transaction) != 0)
+        {
+                LOG_ERROR("Failed to create worker thread");
+                pthread_mutex_lock(&transaction->mutex);
+                transaction->thread_running = false;
+                pthread_mutex_unlock(&transaction->mutex);
+                return -1;
+        }
+
+        return 0;
+}
+
+int cancel_config_transaction(struct config_transaction* transaction)
+{
+        if (!transaction)
+        {
+                LOG_ERROR("Invalid transaction");
+                return -1;
+        }
+
+        pthread_mutex_lock(&transaction->mutex);
+        if (!transaction->thread_running)
+        {
+                pthread_mutex_unlock(&transaction->mutex);
+                return 0;
+        }
+
+        // Signal the thread to stop
+        transaction->thread_running = false;
+        pthread_cond_signal(&transaction->cond);
+        pthread_mutex_unlock(&transaction->mutex);
+
+        // Wait for thread to finish
+        pthread_join(transaction->worker_thread, NULL);
+
+        return 0;
+}
+
+void cleanup_config_transaction(struct config_transaction* transaction)
+{
+        if (!transaction)
+        {
+                return;
+        }
+
+        // Cancel if still running
+        cancel_config_transaction(transaction);
+
+        pthread_mutex_destroy(&transaction->mutex);
+        pthread_cond_destroy(&transaction->cond);
 }
