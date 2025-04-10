@@ -26,4 +26,10 @@ int cert_request(struct pki_client_config_t* config,
 // New function to fetch the certificate chain
 int fetch_ca_cert_chain(struct pki_client_config_t* config, pki_callback_t callback);
 
+int get_blocking_cert(struct pki_client_config_t* config,
+                      enum CERT_TYPE cert_type,
+                      bool include_ca_certs,
+                      char** response_buffer,
+                      size_t* response_buffer_size);
+
 #endif /* PKI_CLIENT_H_ */
