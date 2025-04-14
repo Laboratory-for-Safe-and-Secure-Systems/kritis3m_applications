@@ -6,6 +6,7 @@
 #include "kritis3m_pki_common.h"
 #include "logging.h"
 #include "networking.h"
+#include <errno.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -62,9 +63,9 @@ static int pki_establish_connection(pki_request_context_t* ctx,
         }
 
         // Connect to the server
-        if (connect(*sock_fd, addr_info->ai_addr, addr_info->ai_addrlen) < 0)
+        if (ret = connect(*sock_fd, addr_info->ai_addr, addr_info->ai_addrlen), ret < 0)
         {
-                LOG_ERROR("Failed to connect to server");
+                LOG_ERROR("Failed to connect to server %d, with errno %d", ret, errno);
                 closesocket(*sock_fd);
                 freeaddrinfo(addr_info);
                 return ASL_INTERNAL_ERROR;

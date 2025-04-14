@@ -181,9 +181,4 @@ int start_config_transaction(struct config_transaction* transaction);
 int cancel_config_transaction(struct config_transaction* transaction);
 void cleanup_config_transaction(struct config_transaction* transaction);
 
-// Timeout management
-int set_transaction_timeout(struct config_transaction* transaction,
-                            unsigned int seconds,
-                            void (*timeout_callback)(void* context));
-
 #endif // CONFIGURATION_MANAGER_H

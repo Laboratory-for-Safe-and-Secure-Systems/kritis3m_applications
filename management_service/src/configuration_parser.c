@@ -35,8 +35,8 @@ int parse_sysconfig_to_json(struct sysconfig* config, char* json_buffer, int jso
                            "  \"controlplane_active\": %d,\n"
                            "  \"application_active\": %d,\n",
                            config->serial_number,
-                           config->dataplane_active,
-                           config->controlplane_active,
+                           config->dataplane_cert_active,
+                           config->controlplane_cert_active,
                            config->application_active);
 
         if (written < 0 || written >= remaining)
@@ -215,7 +215,7 @@ int parse_buffer_to_sysconfig(char* json_buffer, int json_buffer_size, struct sy
                 LOG_ERROR("Invalid or missing dataplane_active");
                 goto error;
         }
-        config->dataplane_active = dataplane_active->valueint;
+        config->dataplane_cert_active = dataplane_active->valueint;
 
         cJSON* controlplane_active = cJSON_GetObjectItem(root, "controlplane_active");
         if (!controlplane_active || !cJSON_IsNumber(controlplane_active))
@@ -223,7 +223,7 @@ int parse_buffer_to_sysconfig(char* json_buffer, int json_buffer_size, struct sy
                 LOG_ERROR("Invalid or missing controlplane_active");
                 goto error;
         }
-        config->controlplane_active = controlplane_active->valueint;
+        config->controlplane_cert_active = controlplane_active->valueint;
 
         cJSON* application_active = cJSON_GetObjectItem(root, "application_active");
         if (!application_active || !cJSON_IsNumber(application_active))

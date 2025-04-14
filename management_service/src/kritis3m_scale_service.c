@@ -6,6 +6,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "asl.h"
 #include "configuration_manager.h"
 #include "control_plane_conn.h"
 #include "logging.h"
@@ -55,11 +56,17 @@ enum service_message_type
         SVC_MSG_RESPONSE,
         SVC_MSG_KRITIS3M_SERVICE_STOP,
         SVC_MSG_APPLICATION_MANGER_STATUS_REQ,
+
         SVC_MSG_CTRLPLANE_CERT_GET_REQ,
         SVC_MSG_DATAPLANE_CERT_GET_REQ,
+
         SVC_MSG_DATAPLANE_CERT_APPLY_REQ,
         SVC_MSG_CTRLPLANE_CERT_APPLY_REQ,
-        SVC_MSG_DATAPLANE_CONFIG_APPLY_REQ,
+
+        SVC_RELOAD_DATAPLANE,    // new dataplane certificates
+        SVC_RELOAD_CONTROLPLANE, // new control plane certificate
+
+        SVC_MSG_DATAPLANE_CONFIG_APPLY_REQ, // new dataplane config, start update coordinator thread
 } __attribute__((aligned(4)));
 
 /**
@@ -78,8 +85,8 @@ typedef struct service_message
                 } appl_status;
                 struct cert_apply_req
                 {
-                        char* buffer;
-                        int buffer_len;
+                        enum CERT_TYPE cert_type;
+                        bool timeout;
                 } cert_apply;
         } payload;
 } service_message;
@@ -145,6 +152,10 @@ int start_kritis3m_service(char* config_file, int log_level)
                 LOG_ERROR("Failed to initialize configuration manager");
                 goto error_occured;
         }
+        asl_configuration asl_config = asl_default_config();
+        asl_config.log_level = LOG_LVL_INFO;
+
+        asl_init(&asl_config);
         ret = init_hello_timer(&svc);
         if (ret < 0)
         {
@@ -157,13 +168,61 @@ int start_kritis3m_service(char* config_file, int log_level)
         conn_config.endpoint_config = sys_config->endpoint_config;
         conn_config.mqtt_broker_host = sys_config->broker_host;
 
-        struct pki_client_config_t config = {0};
-        config.serialnumber = sys_config->serial_number;
-        config.host = sys_config->est_host;
-        config.port = sys_config->est_port;
-        config.endpoint_config = sys_config->endpoint_config;
+        struct pki_client_config_t config = {
+                .serialnumber = sys_config->serial_number,
+                .host = sys_config->est_host,
+                .port = sys_config->est_port,
+                .endpoint_config = sys_config->endpoint_config,
+        };
 
-        cert_request(&config, CERT_TYPE_CONTROLPLANE, true, controlplane_set_certificate);
+        uint8_t* cert_buffer;
+        size_t cert_buf_size;
+        // start example transaction to get new control plane certificate
+        get_blocking_cert(&config, CERT_TYPE_CONTROLPLANE, true, (char**) &cert_buffer, &cert_buf_size);
+        write_file("/tmp/controlplane_cert.pem", cert_buffer, cert_buf_size, false);
+
+        if (sys_config->controlplane_cert_active == ACTIVE_ONE)
+        {
+                LOG_INFO("control plane is not bootsrapped yet, we request new certificates");
+                // ret = cert_request(&config, CERT_TYPE_CONTROLPLANE, true,
+                // controlplane_set_certificate); if (ret < 0)
+                // {
+                //         LOG_ERROR("Failed to bootstrap control plane during initialization, "
+                //                   "shutting down!");
+                //         goto error_occured;
+                // }
+
+                ret = get_blocking_cert(&config,
+                                        CERT_TYPE_CONTROLPLANE,
+                                        true,
+                                        (char**) &cert_buffer,
+                                        &cert_buf_size);
+                write_file("/tmp/controlplane_cert.pem", cert_buffer, cert_buf_size, false);
+                free(cert_buffer);
+        }
+
+        if (sys_config->dataplane_cert_active == ACTIVE_ONE)
+        {
+                LOG_INFO("dataplane is not bootsrapped yet, we request new certificates");
+                // ret = cert_request(&config, CERT_TYPE_DATAPLANE, true,
+                // dataplane_set_certificate); if (ret < 0)
+                // {
+                //         LOG_ERROR("Failed to bootstrap dataplane during initialization, "
+                //                   "shutting down!");
+                //         goto error_occured;
+                // }
+
+                ret = get_blocking_cert(&config,
+                                        CERT_TYPE_DATAPLANE,
+                                        true,
+                                        (char**) &cert_buffer,
+                                        &cert_buf_size);
+                write_file("/tmp/dataplane_cert.pem", cert_buffer, cert_buf_size, false);
+                free(cert_buffer);
+        }
+
+        // after certificate bootstrap, we can start the control plane
+
         while (1)
         {
 
@@ -385,7 +444,6 @@ ManagementReturncode handle_svc_message(int socket, service_message* msg, int cf
                 {
                         LOG_INFO("Received control plane certificate get request");
                         response_code = MSG_OK;
-                        // cert_request(endpoint_config, config, CERT_TYPE_CONTROLPLANE, callback);
                         svc_respond_with(socket, response_code);
                         // ret = controlplane_cert_request();
                         if (ret < 0)
@@ -417,7 +475,7 @@ ManagementReturncode handle_svc_message(int socket, service_message* msg, int cf
         case SVC_MSG_CTRLPLANE_CERT_APPLY_REQ:
                 {
                         LOG_INFO("Received control plane certificate apply request");
-                        LOG_INFO("Buffer length: %d", msg->payload.cert_apply.buffer_len);
+                        // LOG_INFO("Buffer length: %d", msg->payload.cert_apply.buffer_len);
                         response_code = MSG_OK;
                         svc_respond_with(socket, response_code);
                         break;
@@ -722,8 +780,8 @@ enum MSG_RESPONSE_CODE dataplane_cert_apply_req(char* buffer, int buffer_len)
 
         service_message request = {0};
         request.msg_type = SVC_MSG_DATAPLANE_CERT_APPLY_REQ;
-        request.payload.cert_apply.buffer = buffer;
-        request.payload.cert_apply.buffer_len = buffer_len;
+        // request.payload.cert_apply.buffer = buffer;
+        // request.payload.cert_apply.buffer_len = buffer_len;
         return external_management_request(svc.management_socket[THREAD_EXT], &request, sizeof(request));
 }
 
@@ -743,8 +801,8 @@ enum MSG_RESPONSE_CODE ctrlplane_cert_apply_req(char* buffer, int buffer_len)
 
         service_message request = {0};
         request.msg_type = SVC_MSG_CTRLPLANE_CERT_APPLY_REQ;
-        request.payload.cert_apply.buffer = buffer;
-        request.payload.cert_apply.buffer_len = buffer_len;
+        // request.payload.cert_apply.buffer = buffer;
+        // request.payload.cert_apply.buffer_len = buffer_len;
         return external_management_request(svc.management_socket[THREAD_EXT], &request, sizeof(request));
 }
 
