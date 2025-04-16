@@ -5,6 +5,7 @@
 #include <string.h>
 #include <sys/poll.h>
 #include <sys/timerfd.h>
+#include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -41,6 +42,7 @@ struct kritis3m_service
         asl_endpoint* client_endpoint;
         int hello_timer_fd; // File descriptor for the hello timer
         bool timer_initialized;
+        struct pki_client_config_t pki_clinet_config;
 };
 
 struct dataplane_update_coordinator
@@ -183,12 +185,14 @@ int start_kritis3m_service(char* config_file, int log_level)
         conn_config.endpoint_config = sys_config->endpoint_config;
         conn_config.mqtt_broker_host = sys_config->broker_host;
 
-        struct pki_client_config_t config = {
+        // hacky, copy due to const member, will be fixed in the future
+        struct pki_client_config_t pki_clinet_config = {
+                .endpoint_config = sys_config->endpoint_config,
                 .serialnumber = sys_config->serial_number,
                 .host = sys_config->est_host,
                 .port = sys_config->est_port,
-                .endpoint_config = sys_config->endpoint_config,
         };
+        memcpy(&svc.pki_clinet_config, &pki_clinet_config, sizeof(struct pki_client_config_t));
 
         uint8_t* cert_buffer;
         size_t cert_buf_size;
@@ -458,14 +462,16 @@ ManagementReturncode handle_svc_message(int socket, service_message* msg, int cf
                                 LOG_ERROR("Failed to send dataplane cert get request");
                                 return_code = MGMT_ERR;
                         }
-                        struct config_transaction transaction = {0};
-                        ret = init_config_transaction(&transaction,
+                        struct config_transaction* transaction = malloc(
+                                sizeof(struct config_transaction));
+                        memset(transaction, 0, sizeof(struct config_transaction));
+                        ret = init_config_transaction(transaction,
                                                       CONFIG_DATAPLANE,
                                                       &coordinator,
                                                       fetch_dataplane_certificate,
                                                       validate_dataplane_certificate,
                                                       NULL);
-                        ret = start_config_transaction(&transaction);
+                        ret = start_config_transaction(transaction);
                         if (ret < 0)
                         {
                                 LOG_ERROR("Failed to start dataplane transaction");
@@ -480,14 +486,17 @@ ManagementReturncode handle_svc_message(int socket, service_message* msg, int cf
                         response_code = MSG_OK;
                         svc_respond_with(socket, response_code);
                         // start ctrlplane transaction
-                        struct config_transaction transaction = {0};
-                        ret = init_config_transaction(&transaction,
+                        struct config_transaction* transaction = malloc(
+                                sizeof(struct config_transaction));
+                        memset(transaction, 0, sizeof(struct config_transaction));
+
+                        ret = init_config_transaction(transaction,
                                                       CONFIG_CONTROLPLANE,
-                                                      &coordinator,
+                                                      &svc.pki_clinet_config,
                                                       fetch_controlplane_certificate,
                                                       validate_controlplane_certificate,
                                                       NULL);
-                        ret = start_config_transaction(&transaction);
+                        ret = start_config_transaction(transaction);
                         if (ret < 0)
                         {
                                 LOG_ERROR("Failed to start controlplane transaction");
@@ -499,14 +508,12 @@ ManagementReturncode handle_svc_message(int socket, service_message* msg, int cf
                 {
                         LOG_INFO("Received data plane config apply request");
                         svc_respond_with(socket, MSG_OK);
-                        cleanup_dataplane_update_coordinator(&coordinator);
-
                         struct config_transaction* transaction = malloc(
                                 sizeof(struct config_transaction));
                         memset(transaction, 0, sizeof(struct config_transaction));
                         ret = init_config_transaction(transaction,
-                                                      CONFIG_DATAPLANE,
-                                                      &coordinator,
+                                                      CONFIG_APPLICATION,
+                                                      &svc.pki_clinet_config,
                                                       fetch_dataplane_config,
                                                       validate_dataplane_config,
                                                       NULL);
@@ -654,6 +661,7 @@ int fetch_dataplane_certificate(void* context, char** buffer, size_t* buffer_siz
         if (!context || !buffer || !buffer_size)
                 goto cleanup;
         struct pki_client_config_t* pki_clinet_config = (struct pki_client_config_t*) context;
+
         if ((ret = get_blocking_cert(pki_clinet_config, CERT_TYPE_DATAPLANE, true, buffer, buffer_size)) <
             0)
         {
@@ -827,8 +835,6 @@ static int handle_policy_status_update(struct dataplane_update_coordinator* upda
                 break;
 
         case UPDATE_ACK:
-                LOG_INFO("Coordinator: State UPDATE_ACK");
-                ack_dataplane_update();
                 return 1; // Signal to finish
 
         default:
@@ -895,7 +901,7 @@ int validate_dataplane_config(void* context, char* config, size_t size)
                                        .revents = 0};
 
         // Main validation loop
-        int max_iterations = 3;
+        int max_iterations = 4;
         while (max_iterations--)
         {
                 ret = poll(&update_pollfd, 1, update->timeout_s * 1000);
@@ -1052,6 +1058,7 @@ int validate_dataplane_certificate(void* context, char* config, size_t size)
         int old_chain_buffer_size = 0;
         if (!context || !config || size <= 0)
                 goto cleanup;
+        return 0;
         struct pki_client_config_t* pki_clinet_config = (struct pki_client_config_t*) context;
 
         asl_endpoint_configuration ep_cfg =

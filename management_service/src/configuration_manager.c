@@ -3,9 +3,11 @@
 #include "file_io.h"
 #include "logging.h"
 #include "networking.h"
+#include <complex.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 LOG_MODULE_CREATE(configuration_manager);
 
@@ -347,7 +349,6 @@ error:
         cleanup_configuration_manager();
         return -1;
 }
-static struct config_state config_states[3] = {0};
 
 int init_config_update(struct config_update* update, enum CONFIG_TYPE type, char* config, size_t size)
 {
@@ -363,77 +364,67 @@ int init_config_update(struct config_update* update, enum CONFIG_TYPE type, char
         update->validation_callback = NULL;
         update->validation_context = NULL;
 
+        switch (type)
+        {
+        case CONFIG_APPLICATION:
+                update->active_path = &configuration_manager.sys_config.application_active;
+                // hacky workaround since application data is sent via a push msg and is not directly requested
+                update->path_1 = NULL;
+                update->path_2 = NULL;
+                break;
+        case CONFIG_DATAPLANE:
+                update->active_path = &configuration_manager.sys_config.dataplane_cert_active;
+                update->path_1 = configuration_manager.dataplane_1_chain_path;
+                update->path_2 = configuration_manager.dataplane_2_chain_path;
+                break;
+        case CONFIG_CONTROLPLANE:
+                update->active_path = &configuration_manager.sys_config.controlplane_cert_active;
+                update->path_1 = configuration_manager.controlplane_1_chain_path;
+                update->path_2 = configuration_manager.controlplane_2_chain_path;
+                break;
+        default:
+                LOG_ERROR("Invalid config type");
+                return -1;
+        }
+
         return 0;
 }
 
 int prepare_config_update(struct config_update* update)
 {
-        if (!update || !configuration_manager.initialized)
-        {
-                LOG_ERROR("Invalid update or configuration manager not initialized");
-                return -1;
-        }
-
-        struct config_state* state = &config_states[update->type];
+        int ret = 0;
         char* target_path = NULL;
-
-        // Determine target path based on current active state
-        switch (state->active_path)
-        {
-        case ACTIVE_ONE:
-                target_path = state->path_2;
-                break;
-        case ACTIVE_TWO:
-                target_path = state->path_1;
-                break;
-        case ACTIVE_NONE:
-                target_path = state->path_1;
-                break;
-        default:
-                LOG_ERROR("Invalid active path state");
-                return -1;
-        }
-
-        // Write new configuration to target path
-        int ret = write_file(target_path, (const uint8_t*) update->new_config, update->config_size, false);
-        if (ret != 0)
-        {
-                LOG_ERROR("Failed to write configuration to %s", target_path);
-                return -1;
-        }
-
-        state->is_validating = true;
-        return 0;
-}
-
-int validate_config_update(struct config_update* update)
-{
         if (!update || !configuration_manager.initialized)
         {
                 LOG_ERROR("Invalid update or configuration manager not initialized");
                 return -1;
         }
 
-        struct config_state* state = &config_states[update->type];
-        if (!state->is_validating)
+        if (update->type != CONFIG_APPLICATION)
         {
-                LOG_ERROR("No update in validation state");
-                return -1;
-        }
-
-        // If no validation callback is set, consider it valid
-        if (!update->validation_callback)
-        {
-                state->validation_success = true;
-                return 0;
-        }
-
-        // Perform validation
-        state->validation_success = update->validation_callback(update->validation_context);
-        if (!state->validation_success)
-        {
-                LOG_ERROR("Validation failed for configuration update");
-                return -1;
+                switch (*update->active_path)
+                {
+                case ACTIVE_ONE:
+                        target_path = update->path_1;
+                        break;
+                case ACTIVE_TWO:
+                        target_path = update->path_2;
+                        break;
+                case ACTIVE_NONE:
+                        break;
+                default:
+                        target_path = NULL;
+                        LOG_ERROR("Invalid active path");
+                        return -1;
+                }
+                if ((ret = write_file(target_path,
+                                      (const uint8_t*) update->new_config,
+                                      update->config_size,
+                                      false)) < 0)
+                {
+                        LOG_ERROR("Failed to write configuration to %s", target_path);
+                        return -1;
+                }
         }
 
         return 0;
@@ -441,70 +432,30 @@ int validate_config_update(struct config_update* update)
 
 int commit_config_update(struct config_update* update)
 {
+        int ret = 0;
+        char* target_path = NULL;
         if (!update || !configuration_manager.initialized)
         {
                 LOG_ERROR("Invalid update or configuration manager not initialized");
                 return -1;
         }
 
-        struct config_state* state = &config_states[update->type];
-        if (!state->is_validating || !state->validation_success)
-        {
-                LOG_ERROR("Cannot commit invalid or non-validating update");
-                return -1;
-        }
-
-        // Switch active state
-        switch (state->active_path)
+        switch (*update->active_path)
         {
         case ACTIVE_ONE:
-                state->active_path = ACTIVE_TWO;
+                *update->active_path = ACTIVE_TWO;
                 break;
         case ACTIVE_TWO:
-                state->active_path = ACTIVE_ONE;
+                *update->active_path = ACTIVE_ONE;
                 break;
         case ACTIVE_NONE:
-                state->active_path = ACTIVE_ONE;
+                *update->active_path = ACTIVE_ONE;
                 break;
         default:
-                LOG_ERROR("Invalid active path state");
+                LOG_ERROR("Invalid active path");
                 return -1;
         }
-
-        // Update sysconfig and persist
-        int ret = write_sysconfig();
-        if (ret != 0)
-        {
-                LOG_ERROR("Failed to persist configuration update");
-                return -1;
-        }
-
-        state->is_validating = false;
-        state->validation_success = false;
-        return 0;
-}
-
-int rollback_config_update(struct config_update* update)
-{
-        if (!update || !configuration_manager.initialized)
-        {
-                LOG_ERROR("Invalid update or configuration manager not initialized");
-                return -1;
-        }
-
-        struct config_state* state = &config_states[update->type];
-        if (!state->is_validating)
-        {
-                LOG_ERROR("No update in validation state to rollback");
-                return -1;
-        }
-
-        // Clear validation state
-        state->is_validating = false;
-        state->validation_success = false;
-
-        // The old configuration remains active, no need to switch paths
-        return 0;
+        return write_sysconfig();
 }
 
 int test_server_conn(char* host, asl_endpoint_configuration* endpoint_config)
@@ -944,7 +895,8 @@ int get_active_hardware_config(struct application_manager_config* app_config,
                 source_path = configuration_manager.application_2_path;
                 break;
         case ACTIVE_NONE:
-                LOG_INFO("No active dataplane configuration, using application_1_path as default");
+                LOG_INFO("No active dataplane configuration, using application_1_path as "
+                         "default");
                 source_path = configuration_manager.application_1_path;
                 break;
         default:
@@ -1185,29 +1137,34 @@ static void* transaction_worker(void* arg)
                 LOG_ERROR("Configuration validation failed");
                 goto error;
         }
-
+        LOG_INFO("Configuration validation successful");
         // Prepare update
-        struct config_update update;
+        struct config_update update = {0};
+        /**
+         * control plane update is currently bit hacky, since there is no buffer
+         * obtained from an http request, but the request is already obtained
+         * from the filesystem
+         * the current approach is to modify sysconfig accordingly
+         * @TODO: fetch_dataplane_config could be modified to return a buffer, so that only validated configs are in mem
+         */
+        // hacky as well
+
         if (init_config_update(&update, transaction->type, new_config, config_size) != 0)
         {
                 LOG_ERROR("Failed to initialize update");
                 goto error;
         }
-
-        // Write to inactive path
         if (prepare_config_update(&update) != 0)
         {
                 LOG_ERROR("Failed to prepare update");
                 goto error;
         }
-
         // Commit the update
         if (commit_config_update(&update) != 0)
         {
                 LOG_ERROR("Failed to commit update");
                 goto error;
         }
-
         // Update successful
         pthread_mutex_lock(&transaction->mutex);
         transaction->state = TRANSACTION_COMMITTED;
@@ -1224,6 +1181,12 @@ cleanup:
         {
                 free(new_config);
         }
+        if (transaction)
+        {
+
+                free(transaction);
+                transaction = NULL;
+        }
         return NULL;
 
 error:
@@ -1235,6 +1198,13 @@ error:
         {
                 transaction->notify(transaction->context, TRANSACTION_FAILED);
         }
+        if (transaction)
+        {
+
+                free(transaction);
+                transaction = NULL;
+        }
+
         goto cleanup;
 }
 

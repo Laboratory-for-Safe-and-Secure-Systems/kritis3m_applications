@@ -118,6 +118,12 @@ struct config_update
         size_t config_size;
         bool (*validation_callback)(void* config);
         void* validation_context;
+
+        enum ACTIVE* active_path;
+        char* path_1;
+        char* path_2;
+        bool is_validating;
+        bool validation_success;
 };
 
 struct config_state
@@ -132,9 +138,7 @@ struct config_state
 // New functions for improved update management
 int init_config_update(struct config_update* update, enum CONFIG_TYPE type, char* config, size_t size);
 int prepare_config_update(struct config_update* update);
-int validate_config_update(struct config_update* update);
 int commit_config_update(struct config_update* update);
-int rollback_config_update(struct config_update* update);
 
 // Transaction states
 enum TRANSACTION_STATE
