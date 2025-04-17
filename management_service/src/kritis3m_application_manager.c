@@ -8,6 +8,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "control_plane_conn.h"
 #include "ipc.h"
 #include "kritis3m_application_manager.h"
 #include "kritis3m_scale_service.h"
@@ -70,6 +71,7 @@ typedef struct application_management_message
                 {
                         struct application_manager_config* application_config;
                         struct hardware_configs* hw_configs;
+                        int (*callback)(struct coordinator_status*);
                 } change_config;
 
         } data;
@@ -293,7 +295,7 @@ int handle_management_message(struct application_manager* manager)
                 LOG_ERROR("Failed to read message from socket");
                 return ret;
         }
-        struct policy_status_t policy_msg = {0};
+        struct coordinator_status policy_msg = {0};
         policy_msg.module = APPLICATION_MANAGER;
 
         switch (msg.msg_type)
@@ -313,12 +315,14 @@ int handle_management_message(struct application_manager* manager)
                         policy_msg.state = UPDATE_APPLIED;
                         policy_msg.module = APPLICATION_MANAGER;
                         policy_msg.msg = "Update applied";
-                        ret = dataplane_config_apply_send_status(&policy_msg);
-                        return 0;
 
                         LOG_INFO("Received change application config request");
                         struct application_manager_config* new_config = msg.data.change_config.application_config;
                         struct hardware_configs* new_hw_configs = msg.data.change_config.hw_configs;
+                        int (*callback)(struct coordinator_status*) = msg.data.change_config.callback;
+                        if (callback)
+                                ret = callback(&policy_msg);
+                        return 0;
 
                         if (new_config == NULL || new_hw_configs == NULL)
                         {
@@ -412,7 +416,10 @@ int handle_management_message(struct application_manager* manager)
                                                 policy_msg.module = APPLICATION_MANAGER;
                                                 policy_msg.msg = "Failed to rollback to backup "
                                                                  "configuration";
-                                                ret = dataplane_config_apply_send_status(&policy_msg);
+                                                if (callback)
+                                                {
+                                                        ret = callback(&policy_msg);
+                                                }
                                         }
                                         else
                                         {
@@ -420,7 +427,10 @@ int handle_management_message(struct application_manager* manager)
                                                 policy_msg.state = UPDATE_ROLLBACK;
                                                 policy_msg.msg = "Rollback to backup "
                                                                  "configuration ";
-                                                ret = dataplane_config_apply_send_status(&policy_msg);
+                                                if (callback)
+                                                {
+                                                        ret = callback(&policy_msg);
+                                                }
                                         }
                                 }
                                 else
@@ -884,7 +894,8 @@ void cleanup_application_manager(void)
  * @return int Returns 0 on success, or an error code on failure.
  */
 int change_application_config(struct application_manager_config* new_config,
-                              struct hardware_configs* hw_configs)
+                              struct hardware_configs* hw_configs,
+                              int (*coordinator_callback)(struct coordinator_status*))
 {
         int ret = 0;
 
@@ -904,7 +915,7 @@ int change_application_config(struct application_manager_config* new_config,
         msg.msg_type = CHANGE_APPLICATION_CONFIG_REQUEST;
         msg.data.change_config.application_config = new_config;
         msg.data.change_config.hw_configs = hw_configs;
-
+        msg.data.change_config.callback = coordinator_callback;
         return external_management_request(manager.management_pair[THREAD_EXT], &msg, sizeof(msg));
 }
 

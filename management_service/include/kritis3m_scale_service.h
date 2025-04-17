@@ -1,7 +1,7 @@
 #ifndef KRITIS3M_SCALE_SERVICE_H
 #define KRITIS3M_SCALE_SERVICE_H
 
-#include "control_plane_conn.h"
+#include "configuration_manager.h"
 #include "ipc.h"
 #include "kritis3m_configuration.h"
 
@@ -45,6 +45,6 @@ enum MSG_RESPONSE_CODE dataplane_cert_get_req(void);
 typedef ManagementReturncode config_status_cb(int32_t);
 
 enum MSG_RESPONSE_CODE dataplane_config_apply_req(void);
-enum MSG_RESPONSE_CODE dataplane_config_apply_send_status(struct policy_status_t* status);
+enum MSG_RESPONSE_CODE dataplane_config_apply_send_status(struct coordinator_status* status);
 
 #endif // KRITIS3M_SCALE_SERVICE_H

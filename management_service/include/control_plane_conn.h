@@ -2,8 +2,8 @@
 #define CONTROL_PLANE_CONN_H
 
 #include "asl.h"
+#include "configuration_manager.h"
 #include "ipc.h"
-#include "kritis3m_configuration.h"
 #include <stdbool.h>
 
 // service functions init, start, stop, cleanup
@@ -83,19 +83,13 @@ enum module
         SCALE_SERVICE,
         UPDATE_COORDINATOR,
 };
-struct policy_status_t
-{
-        int32_t module;
-        int32_t state;
-        char* msg;
-};
 
 /**
  * Send a policy status to the control plane
  * @param status The policy status to send
  * @return Returns a MSG_RESPONSE_CODE indicating the result
  */
-enum MSG_RESPONSE_CODE send_policy_status(struct policy_status_t* status);
+enum MSG_RESPONSE_CODE send_policy_status(struct coordinator_status* status);
 
 enum MSG_RESPONSE_CODE enable_sync(bool value);
 

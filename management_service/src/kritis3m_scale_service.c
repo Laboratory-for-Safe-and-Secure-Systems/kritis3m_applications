@@ -122,7 +122,7 @@ int fetch_controlplane_certificate(void* context, char** buffer, size_t* buffer_
 int fetch_dataplane_config(void* context, char** buffer, size_t* buffer_size);
 int validate_dataplane_config(void* context, char* config, size_t size);
 int validate_dataplane_certificate(void* context, char* config, size_t size);
-
+void handle_notify_dataplane_cert(void* pki_client_config, enum TRANSACTION_STATE state);
 void handle_notify_controlplane_cert(void* pki_client_config, enum TRANSACTION_STATE state);
 int validate_controlplane_certificate(void* context, char* config, size_t size);
 
@@ -160,6 +160,7 @@ void set_kritis3m_serivce_defaults(struct kritis3m_service* svc)
 int start_kritis3m_service(char* config_file, int log_level)
 {
         // initializations
+        static int max_retries = 3;
         int ret = 0;
 
         /** -------------- set log level ----------------------------- */
@@ -199,54 +200,55 @@ int start_kritis3m_service(char* config_file, int log_level)
 
         uint8_t* cert_buffer;
         size_t cert_buf_size;
-        // start example transaction to get new control plane certificate
-        // get_blocking_cert(&config, CERT_TYPE_CONTROLPLANE, true, (char**) &cert_buffer, &cert_buf_size);
-        // write_file("/tmp/controlplane_cert.pem", cert_buffer, cert_buf_size, false);
+        bool restart_requested = false;
+        if (sys_config->controlplane_cert_active == ACTIVE_NONE)
+        {
+                struct config_transaction* transaction = malloc(sizeof(struct config_transaction));
+                memset(transaction, 0, sizeof(struct config_transaction));
 
-        // if (sys_config->controlplane_cert_active == ACTIVE_ONE)
-        // {
-        //         LOG_INFO("control plane is not bootsrapped yet, we request new certificates");
-        //         // ret = cert_request(&config, CERT_TYPE_CONTROLPLANE, true,
-        //         // controlplane_set_certificate); if (ret < 0)
-        //         // {
-        //         //         LOG_ERROR("Failed to bootstrap control plane during initialization, "
-        //         //                   "shutting down!");
-        //         //         goto error_occured;
-        //         // }
+                ret = init_config_transaction(transaction,
+                                              CONFIG_CONTROLPLANE,
+                                              &svc.pki_clinet_config,
+                                              fetch_controlplane_certificate,
+                                              validate_controlplane_certificate,
+                                              NULL);
+                ret = start_config_transaction(transaction);
+                // await transaction to finish
+                pthread_join(transaction->worker_thread, NULL);
+                restart_requested = true;
+        }
 
-        //         ret = get_blocking_cert(&config,
-        //                                 CERT_TYPE_CONTROLPLANE,
-        //                                 true,
-        //                                 (char**) &cert_buffer,
-        //                                 &cert_buf_size);
-        //         write_file("/tmp/controlplane_cert.pem", cert_buffer, cert_buf_size, false);
-        //         free(cert_buffer);
-        // }
+        if (sys_config->dataplane_cert_active == ACTIVE_NONE)
+        {
+                struct config_transaction* transaction = malloc(sizeof(struct config_transaction));
+                memset(transaction, 0, sizeof(struct config_transaction));
 
-        // if (sys_config->dataplane_cert_active == ACTIVE_ONE)
-        // {
-        //         LOG_INFO("dataplane is not bootsrapped yet, we request new certificates");
-        //         // ret = cert_request(&config, CERT_TYPE_DATAPLANE, true,
-        //         // dataplane_set_certificate); if (ret < 0)
-        //         // {
-        //         //         LOG_ERROR("Failed to bootstrap dataplane during initialization, "
-        //         //                   "shutting down!");
-        //         //         goto error_occured;
-        //         // }
-
-        //         ret = get_blocking_cert(&config,
-        //                                 CERT_TYPE_DATAPLANE,
-        //                                 true,
-        //                                 (char**) &cert_buffer,
-        //                                 &cert_buf_size);
-        //         write_file("/tmp/dataplane_cert.pem", cert_buffer, cert_buf_size, false);
-        //         free(cert_buffer);
-        // }
+                ret = init_config_transaction(transaction,
+                                              CONFIG_DATAPLANE,
+                                              &svc.pki_clinet_config,
+                                              fetch_dataplane_certificate,
+                                              validate_dataplane_certificate,
+                                              NULL);
+                ret = start_config_transaction(transaction);
+                // await transaction to finish
+                pthread_join(transaction->worker_thread, NULL);
+                restart_requested = true;
+        }
+        if (restart_requested && max_retries > 0)
+        {
+                max_retries--;
+                cleanup_configuration_manager();
+                cleanup_kritis3m_service();
+                start_kritis3m_service(config_file, log_level);
+                return 0;
+        }
+        else if (restart_requested && max_retries == 0)
+        {
+                LOG_ERROR("Failed to restart kritis3m_service after 3 retries");
+                return -1;
+        }
 
         start_control_plane_conn(&conn_config);
-
-        // 6. prepare hardware
-        svc.initialized = true;
 
         // 7. start management application
         ret = pthread_create(&svc.mainthread, &svc.thread_attr, kritis3m_service_main_thread, &svc);
@@ -259,7 +261,6 @@ int start_kritis3m_service(char* config_file, int log_level)
         return 0;
 error_occured:
         LOG_INFO("exit kritis3m_service");
-        stop_application_manager();
         cleanup_kritis3m_service();
         return ret;
 }
@@ -268,6 +269,7 @@ void* kritis3m_service_main_thread(void* arg)
 {
         start_application_manager();
 
+        svc.initialized = true;
         enum appl_state
         {
                 APPLICATION_MANAGER_OFF,
@@ -511,7 +513,7 @@ ManagementReturncode handle_svc_message(int socket, service_message* msg, int cf
                                                       &svc.pki_clinet_config,
                                                       fetch_dataplane_certificate,
                                                       validate_dataplane_certificate,
-                                                      NULL);
+                                                      handle_notify_dataplane_cert);
                         ret = start_config_transaction(transaction);
                         if (ret < 0)
                         {
@@ -556,6 +558,7 @@ ManagementReturncode handle_svc_message(int socket, service_message* msg, int cf
                                                       CONFIG_APPLICATION,
                                                       &coordinator,
                                                       fetch_dataplane_config,
+                                                      // in this case, the testcase tests in production mode
                                                       validate_dataplane_config,
                                                       NULL);
                         ret = start_config_transaction(transaction);
@@ -595,7 +598,7 @@ void cleanup_kritis3m_service()
         cleanup_hello_timer(&svc);
 }
 
-enum MSG_RESPONSE_CODE dataplane_config_apply_send_status(struct policy_status_t* status)
+enum MSG_RESPONSE_CODE dataplane_config_apply_send_status(struct coordinator_status* status)
 
 {
         if (!coordinator.initialized || coordinator.management_socket[THREAD_EXT] < 0)
@@ -604,13 +607,13 @@ enum MSG_RESPONSE_CODE dataplane_config_apply_send_status(struct policy_status_t
                 return MSG_ERROR;
         }
         LOG_INFO("sending status to coordinator from module: %d", status->module);
-        struct policy_status_t msg = {0};
+        struct coordinator_status msg = {0};
         msg.module = status->module;
         msg.msg = status->msg;
         msg.state = status->state;
         return external_management_request(coordinator.management_socket[THREAD_EXT],
                                            &msg,
-                                           sizeof(struct policy_status_t));
+                                           sizeof(struct coordinator_status));
 }
 
 enum MSG_RESPONSE_CODE ctrlplane_cert_get_req()
@@ -776,6 +779,36 @@ void handle_notify_controlplane_cert(void* pki_client_config, enum TRANSACTION_S
         }
 }
 
+void handle_notify_dataplane_cert(void* pki_client_config, enum TRANSACTION_STATE state)
+{
+        LOG_INFO("Control plane certificate transaction state: %d", state);
+
+        switch (state)
+        {
+        case TRANSACTION_IDLE:
+                LOG_INFO("Control plane certificate transaction in IDLE state");
+                break;
+        case TRANSACTION_PENDING:
+                LOG_INFO("Control plane certificate transaction in PENDING state");
+                break;
+        case TRANSACTION_VALIDATING:
+                LOG_INFO("Control plane certificate transaction in VALIDATING state");
+                break;
+        case TRANSACTION_COMMITTED:
+                {
+                        // get hwconfigs and appl config
+                        struct hardware_configs hw_configs = {0};
+                        struct application_manager_config app_config = {0};
+                        get_active_hardware_config(&app_config, &hw_configs);
+                        change_application_config(&app_config, &hw_configs, NULL);
+                }
+                break;
+        case TRANSACTION_FAILED:
+                LOG_ERROR("Control plane certificate transaction FAILED");
+                break;
+        }
+}
+
 /**
  * @brief this function is rather hacky, since parsing and storing the config is done in the
  * coordinator, but the transaction mechanism should be kept. addionally, the config is not fetched
@@ -829,7 +862,7 @@ cleanup:
  * @param msg The policy status message to send
  * @return MSG_RESPONSE_CODE indicating success or failure
  */
-static enum MSG_RESPONSE_CODE send_policy_status_message(struct policy_status_t* msg)
+static enum MSG_RESPONSE_CODE send_policy_status_message(struct coordinator_status* msg)
 {
         if (!msg)
         {
@@ -846,7 +879,7 @@ static enum MSG_RESPONSE_CODE send_policy_status_message(struct policy_status_t*
  * @return 0 on success, -1 on failure
  */
 static int handle_policy_status_update(struct dataplane_update_coordinator* update,
-                                       struct policy_status_t* msg)
+                                       struct coordinator_status* msg)
 {
         if (!update || !msg)
         {
@@ -875,11 +908,13 @@ static int handle_policy_status_update(struct dataplane_update_coordinator* upda
 
         case UPDATE_APPLYREQUEST:
                 LOG_INFO("Coordinator: State UPDATE_APPLYREQUEST");
-                if (change_application_config(&update->app_config, &update->hw_configs) < 0)
+                if (change_application_config(&update->app_config,
+                                              &update->hw_configs,
+                                              send_policy_status_message) < 0)
                 {
-                        struct policy_status_t error_msg = {.module = UPDATE_COORDINATOR,
-                                                            .state = UPDATE_ERROR,
-                                                            .msg = "Internal error"};
+                        struct coordinator_status error_msg = {.module = UPDATE_COORDINATOR,
+                                                               .state = UPDATE_ERROR,
+                                                               .msg = "Internal error"};
                         send_policy_status_message(&error_msg);
                         return -1;
                 }
@@ -935,9 +970,9 @@ int validate_dataplane_config(void* context, char* config, size_t size)
         // set 20 seconds timeout if not set
         update->timeout_s = (update->timeout_s < 0) ? update->timeout_s : 20;
 
-        struct policy_status_t policy_msg = {.module = UPDATE_COORDINATOR,
-                                             .state = update->state,
-                                             .msg = NULL};
+        struct coordinator_status policy_msg = {.module = UPDATE_COORDINATOR,
+                                                .state = update->state,
+                                                .msg = NULL};
 
         // Enable sync and send initial status
         if ((ret = enable_sync(true)) < 0)
@@ -996,10 +1031,10 @@ int validate_dataplane_config(void* context, char* config, size_t size)
 
                 if (update_pollfd.revents & POLLIN)
                 {
-                        struct policy_status_t msg = {0};
+                        struct coordinator_status msg = {0};
                         if (sockpair_read(update->management_socket[THREAD_INT],
                                           &msg,
-                                          sizeof(struct policy_status_t)) < 0)
+                                          sizeof(struct coordinator_status)) < 0)
                         {
                                 LOG_ERROR("Failed to read message: %d", errno);
                                 goto cleanup;

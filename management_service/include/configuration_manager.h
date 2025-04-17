@@ -23,6 +23,13 @@ enum PROXY_TYPE
         PROXY_TLS_TLS = 3,
 };
 
+struct coordinator_status
+{
+        int32_t module;
+        int32_t state;
+        char* msg;
+};
+
 struct sysconfig
 {
         // controlplane
@@ -96,6 +103,8 @@ int get_active_hardware_config(struct application_manager_config* app_config,
 int dataplane_set_certificate(char* buffer, size_t size);
 int controlplane_set_certificate(char* buffer, size_t size);
 int application_store_inactive(char* buffer, size_t size);
+
+int reload_controlplane_endpoint();
 
 int store_controlplane_certificate(char* buffer, size_t size);
 int store_dataplane_certificate(char* buffer, size_t size);

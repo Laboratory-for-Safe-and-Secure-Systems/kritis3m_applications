@@ -15,7 +15,6 @@
 #include "kritis3m_scale_service.h"
 #include "logging.h"
 #include "networking.h"
-#include "poll_set.h"
 
 LOG_MODULE_CREATE("CONTROL_PLANE_CONN");
 
@@ -86,7 +85,7 @@ static int subscribe_to_topics(struct control_plane_conn_t* conn);
 static int handle_management_message(struct control_plane_conn_t* conn);
 static int handle_hello_request(struct control_plane_conn_t* conn, bool value);
 static int handle_log_request(struct control_plane_conn_t* conn, const char* message);
-static int handle_policy_status(struct control_plane_conn_t* conn, struct policy_status_t* status);
+static int handle_policy_status(struct control_plane_conn_t* conn, struct coordinator_status* status);
 static int publish_message(struct control_plane_conn_t* conn,
                            const char* topic_format,
                            const void* payload,
@@ -121,7 +120,7 @@ struct control_plane_conn_message
                 } hello;
                 struct
                 {
-                        struct policy_status_t status;
+                        struct coordinator_status status;
                 } policy;
                 bool enable_sync;
         } data;
@@ -250,7 +249,7 @@ int msgarrvd(void* context, char* topicName, int topicLen, MQTTAsync_message* me
                 }
                 enum apply_states status_value = status->valueint;
                 LOG_DEBUG("Received policy status: %d", status_value);
-                struct policy_status_t policy_msg = {0};
+                struct coordinator_status policy_msg = {0};
                 policy_msg.module = CONTROL_PLANE_CONNECTION;
                 policy_msg.state = status_value;
                 policy_msg.msg = "Policy status received";
@@ -747,7 +746,7 @@ static int handle_log_request(struct control_plane_conn_t* conn, const char* mes
         return publish_message(conn, conn->topic_log, message, strlen(message), QOS, 0);
 }
 
-static int handle_policy_status(struct control_plane_conn_t* conn, struct policy_status_t* status)
+static int handle_policy_status(struct control_plane_conn_t* conn, struct coordinator_status* status)
 {
         char* module_name = NULL;
         if (!status || !conn)
@@ -832,7 +831,7 @@ enum MSG_RESPONSE_CODE send_log_message(const char* message)
         return external_management_request(conn.socket_pair[THREAD_EXT], &msg, sizeof(msg));
 }
 
-enum MSG_RESPONSE_CODE send_policy_status(struct policy_status_t* status)
+enum MSG_RESPONSE_CODE send_policy_status(struct coordinator_status* status)
 {
 
         if (!control_plane_running())

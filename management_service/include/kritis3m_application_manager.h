@@ -1,7 +1,7 @@
 #ifndef KRITIS3M_APPLICATION_MANAGER_H
 #define KRITIS3M_APPLICATION_MANAGER_H
 #include "configuration_manager.h"
-#include "kritis3m_configuration.h"
+#include "kritis3m_scale_service.h"
 
 /**
  * @brief Set up the application manager.
@@ -61,7 +61,8 @@ bool confirm_client(int application_id, struct sockaddr* connecting_client);
  * @return int Returns 0 on success, or an error code on failure.
  */
 int change_application_config(struct application_manager_config* new_config,
-                              struct hardware_configs* hw_config);
+                              struct hardware_configs* hw_config,
+                              int (*coordinator_callback)(struct coordinator_status*));
 
 /**
  * @brief Starts an application with the provided configuration.

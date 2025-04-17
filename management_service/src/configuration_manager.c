@@ -1,4 +1,5 @@
 #include "configuration_manager.h"
+#include "asl.h"
 #include "configuration_parser.h"
 #include "file_io.h"
 #include "logging.h"
@@ -12,19 +13,18 @@
 LOG_MODULE_CREATE(configuration_manager);
 
 #define SYS_CONFIG_PATH_FORMAT "%s/sys_config.json"
-#define CONTROLPLANE_KEY_PATH_FORMAT "%s/cert/controlplane_key.pem"
-#define CONTROLPLANE_ROOT_CERT_FORMAT "%s/cert/controlplane_root_cert.pem"
+#define CONTROLPLANE_KEY_PATH_FORMAT "%s/cert/key.pem"
+#define CONTROLPLANE_ROOT_CERT_FORMAT "%s/cert/root.pem"
 #define CONTROLPLANE_1_CHAIN_PATH_FORMAT "%s/cert/1/controlplane_chain.pem"
 #define CONTROLPLANE_2_CHAIN_PATH_FORMAT "%s/cert/2/controlplane_chain.pem"
 
+// root and key is the same, which is ok, since both ca root and dataplane have the same root
 #define DATAPLANE_KEY_PATH_FORMAT CONTROLPLANE_KEY_PATH_FORMAT   //"%s/cert/dataplane_key.pem"
 #define DATAPLANE_ROOT_CERT_FORMAT CONTROLPLANE_ROOT_CERT_FORMAT //"%s/cert/dataplane_root_cert.pem"
+#define DATAPLANE_1_CHAIN_PATH_FORMAT "%s/cert/1/dataplane_chain.pem"
+#define DATAPLANE_2_CHAIN_PATH_FORMAT "%s/cert/2/dataplane_chain.pem"
 
-// for testing purposes
-#define DATAPLANE_1_CHAIN_PATH_FORMAT                                                              \
-        CONTROLPLANE_1_CHAIN_PATH_FORMAT //"%s/cert/1/dataplane_chain.pem"
-#define DATAPLANE_2_CHAIN_PATH_FORMAT                                                              \
-        CONTROLPLANE_2_CHAIN_PATH_FORMAT //"%s/cert/2/dataplane_chain.pem"
+#define BOOTSTRAP_CHAIN_PATH_FORMAT "%s/cert/bootstrap_chain.pem"
 
 #define APPLICATION_1_PATH_FORMAT "%s/application/1/application.json"
 #define APPLICATION_2_PATH_FORMAT "%s/application/2/application.json"
@@ -66,6 +66,8 @@ struct configuration_manager
 
         char* dataplane_1_chain_path;
         char* dataplane_2_chain_path;
+
+        char* bootstrap_chain_path;
 
         // application
         char* application_1_path;
@@ -187,8 +189,58 @@ int get_application_inactive(struct application_manager_config* config,
         free(buffer);
         return 0;
 }
+int reload_controlplane_endpoint()
+{
+        if (!configuration_manager.initialized)
+        {
+                LOG_ERROR("Configuration manager not initialized");
+                return -1;
+        }
+        if (configuration_manager.sys_config.endpoint_config->private_key.buffer)
+        {
+                free((void*) configuration_manager.sys_config.endpoint_config->private_key.buffer);
+                configuration_manager.sys_config.endpoint_config->private_key.buffer = NULL;
+                configuration_manager.sys_config.endpoint_config->private_key.size = 0;
+        }
+        if (configuration_manager.sys_config.endpoint_config->root_certificate.buffer)
+        {
+                free((void*) configuration_manager.sys_config.endpoint_config->root_certificate.buffer);
+                configuration_manager.sys_config.endpoint_config->root_certificate.buffer = NULL;
+                configuration_manager.sys_config.endpoint_config->root_certificate.size = 0;
+        }
+        if (configuration_manager.sys_config.endpoint_config->device_certificate_chain.buffer)
+        {
+                free((void*) configuration_manager.sys_config.endpoint_config
+                             ->device_certificate_chain.buffer);
+                configuration_manager.sys_config.endpoint_config->device_certificate_chain.buffer = NULL;
+        }
 
-// store config
+        char* chain_path = NULL;
+
+        // Select certificate chain based on active configuration
+        switch (configuration_manager.sys_config.controlplane_cert_active)
+        {
+        case ACTIVE_ONE:
+                chain_path = configuration_manager.controlplane_1_chain_path;
+                break;
+        case ACTIVE_TWO:
+                chain_path = configuration_manager.controlplane_2_chain_path;
+                break;
+        case ACTIVE_NONE:
+                LOG_INFO("No active controlplane certs. Load bootstrap certs");
+                return 0; // Early return as we don't load certs in this case
+        default:
+                LOG_ERROR("Invalid controlplane active configuration");
+                return -1;
+        }
+
+        // Load certificates using the selected chain path
+        return load_endpoint_certificates(configuration_manager.sys_config.endpoint_config,
+                                          chain_path,
+                                          configuration_manager.controlplane_key_path,
+                                          configuration_manager.controlplane_root_cert);
+}
+
 int application_store_inactive(char* buffer, size_t size)
 {
         if (!buffer || size == 0 || !configuration_manager.initialized)
@@ -286,6 +338,9 @@ int init_configuration_manager(char* base_path)
         len = snprintf(helper_string, 300, APPLICATION_2_PATH_FORMAT, base_path);
         configuration_manager.application_2_path = duplicate_string(helper_string);
 
+        len = snprintf(helper_string, 300, BOOTSTRAP_CHAIN_PATH_FORMAT, base_path);
+        configuration_manager.bootstrap_chain_path = duplicate_string(helper_string);
+
         size_t buffer_size = 0;
         ret = read_file(configuration_manager.sys_config_path, (uint8_t**) &buffer, &buffer_size);
         if (ret < 0)
@@ -315,7 +370,10 @@ int init_configuration_manager(char* base_path)
                                                  configuration_manager.controlplane_root_cert);
                 break;
         case ACTIVE_NONE:
-                LOG_INFO("No active controlplane certs");
+                ret = load_endpoint_certificates(configuration_manager.sys_config.endpoint_config,
+                                                 configuration_manager.bootstrap_chain_path,
+                                                 configuration_manager.controlplane_key_path,
+                                                 configuration_manager.controlplane_root_cert);
                 break;
         default:
                 LOG_ERROR("Invalid controlplane active configuration");
@@ -337,7 +395,7 @@ error:
 
 int init_config_update(struct config_update* update, enum CONFIG_TYPE type, char* config, size_t size)
 {
-        if (!update || !config || size == 0)
+        if (!update || (type != CONFIG_APPLICATION && (!config || size < 150)))
         {
                 LOG_ERROR("Invalid update parameters");
                 return -1;
@@ -396,6 +454,7 @@ int prepare_config_update(struct config_update* update)
                         target_path = update->path_2;
                         break;
                 case ACTIVE_NONE:
+                        target_path = update->path_1;
                         break;
                 default:
                         target_path = NULL;
@@ -542,13 +601,6 @@ int load_endpoint_certificates(asl_endpoint_configuration* endpoint_config,
         {
                 return -1;
         }
-
-        // Check if controlplane is active
-        if (configuration_manager.sys_config.controlplane_cert_active == ACTIVE_NONE)
-        {
-                LOG_ERROR("No active controlplane configuration");
-                return -1;
-        }
         if (read_file(chain_path,
                       (uint8_t**) &endpoint_config->device_certificate_chain.buffer,
                       &endpoint_config->device_certificate_chain.size) < 0)
@@ -601,7 +653,6 @@ void cleanup_endpoint_config(asl_endpoint_configuration* endpoint_config)
                 free((void*) endpoint_config->private_key.buffer);
         if (endpoint_config->private_key.additional_key_buffer)
                 free((void*) endpoint_config->private_key.additional_key_buffer);
-        free(endpoint_config);
 }
 
 void cleanup_sysconfig()
@@ -611,7 +662,11 @@ void cleanup_sysconfig()
         if (configuration_manager.sys_config.est_host)
                 free(configuration_manager.sys_config.est_host);
         if (configuration_manager.sys_config.endpoint_config)
+        {
+
                 cleanup_endpoint_config(configuration_manager.sys_config.endpoint_config);
+                free(configuration_manager.sys_config.endpoint_config);
+        }
         memset(&configuration_manager.sys_config, 0, sizeof(struct sysconfig));
 }
 
@@ -1139,4 +1194,8 @@ void cleanup_config_transaction(struct config_transaction* transaction)
 
         pthread_mutex_destroy(&transaction->mutex);
         pthread_cond_destroy(&transaction->cond);
+        if (transaction)
+        {
+                free(transaction);
+        }
 }
