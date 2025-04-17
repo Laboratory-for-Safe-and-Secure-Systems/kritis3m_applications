@@ -1,5 +1,6 @@
 #include "pki_client.h"
 #include "asl.h"
+#include "asl_helper.h"
 #include "http_client.h"
 #include "http_method.h"
 #include "kritis3m_pki_client.h"
@@ -35,86 +36,18 @@ static void http_ca_chain_callback(struct http_response* rsp,
 static pki_request_context_t* active_threads[MAX_ACTIVE_THREADS] = {NULL};
 static pthread_mutex_t active_threads_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-// Helper function to establish connection
-static int pki_establish_connection(pki_request_context_t* ctx,
-                                    asl_endpoint** endpoint,
-                                    asl_session** session,
-                                    int* sock_fd)
-{
-        int ret = 0;
-        struct addrinfo* addr_info = NULL;
-        const char* hostname = ctx->config->host;
-        uint16_t port = ctx->config->port;
-
-        // Resolve the hostname
-        if (address_lookup_client(hostname, port, &addr_info, AF_UNSPEC) < 0)
-        {
-                LOG_ERROR("Failed to resolve server hostname: %s", hostname);
-                return ASL_ARGUMENT_ERROR;
-        }
-
-        // Create client socket
-        *sock_fd = create_client_socket(addr_info->ai_family == AF_INET6 ? AF_INET6 : AF_INET);
-        if (*sock_fd < 0)
-        {
-                LOG_ERROR("Failed to create client socket");
-                freeaddrinfo(addr_info);
-                return ASL_INTERNAL_ERROR;
-        }
-
-        // Connect to the server
-        if (ret = connect(*sock_fd, addr_info->ai_addr, addr_info->ai_addrlen), ret < 0)
-        {
-                LOG_ERROR("Failed to connect to server %d, with errno %d", ret, errno);
-                closesocket(*sock_fd);
-                freeaddrinfo(addr_info);
-                return ASL_INTERNAL_ERROR;
-        }
-
-        // Setup TLS session
-        *endpoint = asl_setup_client_endpoint(ctx->config->endpoint_config);
-        if (*endpoint == NULL)
-        {
-                LOG_ERROR("Failed to setup ASL client endpoint");
-                closesocket(*sock_fd);
-                freeaddrinfo(addr_info);
-                return ASL_INTERNAL_ERROR;
-        }
-
-        // Create ASL session
-        *session = asl_create_session(*endpoint, *sock_fd);
-        if (*session == NULL)
-        {
-                LOG_ERROR("Failed to create ASL session");
-                asl_free_endpoint(*endpoint);
-                closesocket(*sock_fd);
-                freeaddrinfo(addr_info);
-                return ASL_INTERNAL_ERROR;
-        }
-
-        // Perform TLS handshake
-        ret = asl_handshake(*session);
-        if (ret != ASL_SUCCESS)
-        {
-                LOG_ERROR("TLS handshake failed: %s", asl_error_message(ret));
-                asl_close_session(*session);
-                asl_free_session(*session);
-                asl_free_endpoint(*endpoint);
-                closesocket(*sock_fd);
-                freeaddrinfo(addr_info);
-                return ret;
-        }
-
-        freeaddrinfo(addr_info);
-        return ASL_SUCCESS;
-}
-
 // Helper function to cleanup connection resources
 static void pki_cleanup_connection(asl_endpoint* endpoint,
                                    asl_session* session,
                                    int sock_fd,
                                    struct addrinfo* addr_info)
 {
+
+        if (session != NULL)
+        {
+                asl_close_session(session);
+                asl_free_session(session);
+        }
         if (sock_fd >= 0)
         {
                 closesocket(sock_fd);
@@ -123,12 +56,6 @@ static void pki_cleanup_connection(asl_endpoint* endpoint,
         if (addr_info != NULL)
         {
                 freeaddrinfo(addr_info);
-        }
-
-        if (session != NULL)
-        {
-                asl_close_session(session);
-                asl_free_session(session);
         }
 
         if (endpoint != NULL)
@@ -155,9 +82,13 @@ static int pki_send_http_request(pki_request_context_t* ctx,
         char port_str[16];
         uint8_t rsp_buffer[HTTP_BUFFER_SIZE];
         memset(rsp_buffer, 0, sizeof(rsp_buffer));
-
         // Establish connection
-        ret = pki_establish_connection(ctx, &endpoint, &session, &sock_fd);
+        ret = establish_connection(ctx->config->host,
+                                   ctx->config->port,
+                                   ctx->config->endpoint_config,
+                                   &endpoint,
+                                   &session,
+                                   &sock_fd);
         if (ret != ASL_SUCCESS)
         {
                 return ret;

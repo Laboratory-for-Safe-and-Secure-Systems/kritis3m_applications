@@ -10,6 +10,7 @@
 #include <unistd.h>
 
 #include "asl.h"
+#include "asl_helper.h"
 #include "configuration_manager.h"
 #include "control_plane_conn.h"
 #include "logging.h"
@@ -121,6 +122,8 @@ int fetch_controlplane_certificate(void* context, char** buffer, size_t* buffer_
 int fetch_dataplane_config(void* context, char** buffer, size_t* buffer_size);
 int validate_dataplane_config(void* context, char* config, size_t size);
 int validate_dataplane_certificate(void* context, char* config, size_t size);
+
+void handle_notify_controlplane_cert(void* pki_client_config, enum TRANSACTION_STATE state);
 int validate_controlplane_certificate(void* context, char* config, size_t size);
 
 /* ----------------------- MAIN kritis3m_service module -------------------------*/
@@ -386,10 +389,8 @@ terminate:
         return NULL;
 }
 
-enum MSG_RESPONSE_CODE stop_kritis3m_service()
+enum MSG_RESPONSE_CODE stop_kritis3m_service(void)
 {
-
-        int socket = -1;
         int ret = 0;
         service_message request = {0};
 
@@ -401,7 +402,9 @@ enum MSG_RESPONSE_CODE stop_kritis3m_service()
         }
 
         request.msg_type = SVC_MSG_KRITIS3M_SERVICE_STOP;
-        enum MSG_RESPONSE_CODE retval = external_management_request(socket, &request, sizeof(request));
+        enum MSG_RESPONSE_CODE retval = external_management_request(svc.management_socket[THREAD_EXT],
+                                                                    &request,
+                                                                    sizeof(request));
 
         if (svc.mainthread)
         {
@@ -409,9 +412,45 @@ enum MSG_RESPONSE_CODE stop_kritis3m_service()
                 svc.mainthread = 0;
         }
 
-        // ggf. cleanup
-
         return retval;
+}
+
+/**
+ * @brief Restarts the kritis3m service.
+ *
+ * This function gets the base path from the configuration manager,
+ * stops the current service, and then starts it again with the same configuration.
+ *
+ * @return Returns MSG_OK if the service is successfully restarted, otherwise returns an error code.
+ */
+enum MSG_RESPONSE_CODE restart_kritis3m_service(void)
+{
+        char* base_path = get_base_path();
+        if (!base_path)
+        {
+                LOG_ERROR("Failed to get base path");
+                return MSG_ERROR;
+        }
+        char* base_path_copy = duplicate_string(base_path);
+        LOG_INFO("Restarting kritis3m service with base path: %s", base_path_copy);
+
+        // Stop the kritis3m service
+        enum MSG_RESPONSE_CODE stop_result = stop_kritis3m_service();
+        if (stop_result != MSG_OK)
+        {
+                LOG_ERROR("Failed to stop kritis3m service");
+                return MSG_ERROR;
+        }
+
+        // Start the service with the stored config file and log level 4
+        int start_result = start_kritis3m_service(base_path_copy, 4);
+        if (start_result < 0)
+        {
+                LOG_ERROR("Failed to restart kritis3m service");
+                return MSG_ERROR;
+        }
+
+        return MSG_OK;
 }
 
 int svc_respond_with(int socket, enum MSG_RESPONSE_CODE response_code)
@@ -445,10 +484,12 @@ ManagementReturncode handle_svc_message(int socket, service_message* msg, int cf
                 }
         case SVC_MSG_KRITIS3M_SERVICE_STOP:
                 {
-                        LOG_INFO("SVC STOP: ");
-                        LOG_INFO("Kritis3m service: Received Stop Request");
+
+                        stop_application_manager();
+                        stop_control_plane_conn();
                         response_code = MSG_OK;
                         return_code = MGMT_THREAD_STOP;
+                        svc_respond_with(socket, response_code);
                         break;
                 }
         case SVC_MSG_DATAPLANE_CERT_GET_REQ:
@@ -467,7 +508,7 @@ ManagementReturncode handle_svc_message(int socket, service_message* msg, int cf
                         memset(transaction, 0, sizeof(struct config_transaction));
                         ret = init_config_transaction(transaction,
                                                       CONFIG_DATAPLANE,
-                                                      &coordinator,
+                                                      &svc.pki_clinet_config,
                                                       fetch_dataplane_certificate,
                                                       validate_dataplane_certificate,
                                                       NULL);
@@ -495,7 +536,7 @@ ManagementReturncode handle_svc_message(int socket, service_message* msg, int cf
                                                       &svc.pki_clinet_config,
                                                       fetch_controlplane_certificate,
                                                       validate_controlplane_certificate,
-                                                      NULL);
+                                                      handle_notify_controlplane_cert);
                         ret = start_config_transaction(transaction);
                         if (ret < 0)
                         {
@@ -513,7 +554,7 @@ ManagementReturncode handle_svc_message(int socket, service_message* msg, int cf
                         memset(transaction, 0, sizeof(struct config_transaction));
                         ret = init_config_transaction(transaction,
                                                       CONFIG_APPLICATION,
-                                                      &svc.pki_clinet_config,
+                                                      &coordinator,
                                                       fetch_dataplane_config,
                                                       validate_dataplane_config,
                                                       NULL);
@@ -671,7 +712,6 @@ int fetch_dataplane_certificate(void* context, char** buffer, size_t* buffer_siz
         return ret;
 
 cleanup:
-        ret = -1;
         LOG_ERROR("error occured in fetch dataplane certificate");
         if (buffer && !(*buffer))
         {
@@ -683,12 +723,12 @@ cleanup:
         return ret;
 }
 
-int fetch_controlplane_certificate(void* context, char** buffer, size_t* buffer_size)
+int fetch_controlplane_certificate(void* pki_client_config, char** buffer, size_t* buffer_size)
 {
         int ret = 0;
-        if (!context || !buffer || !buffer_size)
+        if (!pki_client_config || !buffer || !buffer_size)
                 goto cleanup;
-        struct pki_client_config_t* pki_clinet_config = (struct pki_client_config_t*) context;
+        struct pki_client_config_t* pki_clinet_config = (struct pki_client_config_t*) pki_client_config;
         if ((ret = get_blocking_cert(pki_clinet_config, CERT_TYPE_CONTROLPLANE, true, buffer, buffer_size)) <
             0)
         {
@@ -709,15 +749,32 @@ cleanup:
                 *buffer_size = 0;
         return ret;
 }
-struct dataplane_update_t
+
+void handle_notify_controlplane_cert(void* pki_client_config, enum TRANSACTION_STATE state)
 {
-        struct application_manager_config app_config;
-        struct hardware_configs hw_configs;
-        enum apply_states state;
-        int management_socket[2];
-        int timeout_s;
-        bool initialized;
-};
+        LOG_INFO("Control plane certificate transaction state: %d", state);
+
+        switch (state)
+        {
+        case TRANSACTION_IDLE:
+                LOG_INFO("Control plane certificate transaction in IDLE state");
+                break;
+        case TRANSACTION_PENDING:
+                LOG_INFO("Control plane certificate transaction in PENDING state");
+                break;
+        case TRANSACTION_VALIDATING:
+                LOG_INFO("Control plane certificate transaction in VALIDATING state");
+                break;
+        case TRANSACTION_COMMITTED:
+                {
+                        restart_kritis3m_service();
+                }
+                break;
+        case TRANSACTION_FAILED:
+                LOG_ERROR("Control plane certificate transaction FAILED");
+                break;
+        }
+}
 
 /**
  * @brief this function is rather hacky, since parsing and storing the config is done in the
@@ -995,6 +1052,7 @@ int validate_controlplane_certificate(void* context, char* config, size_t size)
         asl_endpoint* endpoint = NULL;
         asl_session* session = NULL;
         int old_chain_buffer_size = 0;
+        int sock_fd = -1;
         if (!context || !config || size <= 0)
                 goto cleanup;
 
@@ -1014,24 +1072,12 @@ int validate_controlplane_certificate(void* context, char* config, size_t size)
                  .pkcs11 = pki_clinet_config->endpoint_config->pkcs11,
                  .psk = pki_clinet_config->endpoint_config->psk};
         // create endpoint
-        endpoint = asl_setup_client_endpoint(&ep_cfg);
-        if (!endpoint)
+
+        if ((ret = test_endpoint(pki_clinet_config->host, pki_clinet_config->port, &ep_cfg)) < 0)
         {
-                LOG_ERROR("failed to create asl endpoint");
+                LOG_ERROR("failed to establish connection");
                 goto cleanup;
         }
-        // session = asl_create_session(endpoint, svc->management_socket[THREAD_INT]);
-        // if (!session)
-        // {
-        //         LOG_ERROR("failed to create asl session");
-        //         goto cleanup;
-        // }
-        // ret = asl_handshake(session);
-        // if (ret != ASL_SUCCESS)
-        // {
-        //         LOG_ERROR("failed to handshake with asl session");
-        //         goto cleanup;
-        // }
 
         return ret;
 cleanup:
@@ -1050,63 +1096,12 @@ cleanup:
         return ret;
 }
 
+// better validation will be done in the future
 int validate_dataplane_certificate(void* context, char* config, size_t size)
 {
-        int ret = 0;
-        asl_endpoint* endpoint = NULL;
-        asl_session* session = NULL;
-        int old_chain_buffer_size = 0;
-        if (!context || !config || size <= 0)
-                goto cleanup;
-        return 0;
-        struct pki_client_config_t* pki_clinet_config = (struct pki_client_config_t*) context;
-
-        asl_endpoint_configuration ep_cfg =
-                {.device_certificate_chain =
-                         {
-                                 .buffer = (uint8_t* const) config,
-                                 .size = size,
-                         },
-                 .private_key = pki_clinet_config->endpoint_config->private_key,
-                 .root_certificate = pki_clinet_config->endpoint_config->root_certificate,
-                 .key_exchange_method = pki_clinet_config->endpoint_config->key_exchange_method,
-                 .ciphersuites = pki_clinet_config->endpoint_config->ciphersuites,
-                 .mutual_authentication = true,
-                 .pkcs11 = pki_clinet_config->endpoint_config->pkcs11,
-                 .psk = pki_clinet_config->endpoint_config->psk};
-        // create endpoint
-        endpoint = asl_setup_client_endpoint(&ep_cfg);
-        if (!endpoint)
+        if (config && size > 500)
         {
-                LOG_ERROR("failed to create asl endpoint");
-                goto cleanup;
+                return 0;
         }
-        // session = asl_create_session(endpoint, svc->management_socket[THREAD_INT]);
-        // if (!session)
-        // {
-        //         LOG_ERROR("failed to create asl session");
-        //         goto cleanup;
-        // }
-        // ret = asl_handshake(session);
-        // if (ret != ASL_SUCCESS)
-        // {
-        //         LOG_ERROR("failed to handshake with asl session");
-        //         goto cleanup;
-        // }
-
-        return ret;
-cleanup:
-        ret = -1;
-        if (endpoint)
-        {
-                asl_free_endpoint(endpoint);
-                endpoint = NULL;
-        }
-        if (session)
-        {
-                asl_close_session(session);
-                session = NULL;
-        }
-        LOG_ERROR("error occured in validate controlplane certificate");
-        return ret;
+        return -1;
 }

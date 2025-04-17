@@ -24,21 +24,27 @@ int start_kritis3m_service(char* config_file, int log_level);
 enum MSG_RESPONSE_CODE req_send_status_report(ApplicationManagerStatus manager_status);
 
 // stops kritis3m_scale service
-enum MSG_RESPONSE_CODE stop_kritis3m_service();
+enum MSG_RESPONSE_CODE stop_kritis3m_service(void);
 
-enum MSG_RESPONSE_CODE ctrlplane_cert_get_req();
-enum MSG_RESPONSE_CODE dataplane_cert_get_req();
+/**
+ * @brief Restarts the kritis3m service.
+ *
+ * This function gets the base path from the configuration manager,
+ * stops the current service, and then starts it again with the same configuration.
+ *
+ * @return Returns MSG_OK if the service is successfully restarted, otherwise returns an error code.
+ */
+enum MSG_RESPONSE_CODE restart_kritis3m_service(void);
 
-enum MSG_RESPONSE_CODE dataplane_cert_apply_req(char* buffer, int buffer_len);
-
-enum MSG_RESPONSE_CODE ctrlplane_cert_apply_req(char* buffer, int buffer_len);
+enum MSG_RESPONSE_CODE ctrlplane_cert_get_req(void);
+enum MSG_RESPONSE_CODE dataplane_cert_get_req(void);
 
 // returns callback which is used by control plane conn to await signal for synchronous update
 // cb: callback function
 // arg: argument to pass to the callback
 typedef ManagementReturncode config_status_cb(int32_t);
 
-enum MSG_RESPONSE_CODE dataplane_config_apply_req();
+enum MSG_RESPONSE_CODE dataplane_config_apply_req(void);
 enum MSG_RESPONSE_CODE dataplane_config_apply_send_status(struct policy_status_t* status);
 
 #endif // KRITIS3M_SCALE_SERVICE_H

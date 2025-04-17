@@ -47,6 +47,8 @@ int load_endpoint_certificates(asl_endpoint_configuration* endpoint_config,
 
 struct configuration_manager
 {
+        char* base_path;
+
         bool initialized;
         char* sys_config_path;
 
@@ -77,30 +79,6 @@ const struct sysconfig* get_sysconfig()
         return (const struct sysconfig*) &configuration_manager.sys_config;
 }
 
-int ack_dataplane_update()
-{
-        if (!configuration_manager.initialized)
-        {
-                LOG_ERROR("Configuration manager not initialized");
-                return -1;
-        }
-        switch (configuration_manager.sys_config.application_active)
-        {
-        case ACTIVE_ONE:
-                configuration_manager.sys_config.application_active = ACTIVE_TWO;
-                break;
-        case ACTIVE_TWO:
-                configuration_manager.sys_config.application_active = ACTIVE_ONE;
-                break;
-        case ACTIVE_NONE:
-                LOG_ERROR("No active application configuration");
-                return -1;
-        }
-
-        write_sysconfig();
-
-        return 0;
-}
 int get_application_inactive(struct application_manager_config* config,
                              struct hardware_configs* hw_config)
 {
@@ -257,8 +235,16 @@ int application_store_inactive(char* buffer, size_t size)
 
 int init_configuration_manager(char* base_path)
 {
+        if (!base_path)
+        {
+                LOG_ERROR("Invalid base path");
+                return -1;
+        }
+
         char* buffer = NULL;
         memset(&configuration_manager, 0, sizeof(struct configuration_manager));
+
+        configuration_manager.base_path = duplicate_string(base_path);
 
         char helper_string[300];
         int ret = 0;
@@ -307,7 +293,6 @@ int init_configuration_manager(char* base_path)
                 LOG_ERROR("Failed to read sys_config");
                 goto error;
         }
-        // parse
         ret = parse_buffer_to_sysconfig(buffer, buffer_size, &configuration_manager.sys_config);
         if (ret != 0)
         {
@@ -548,169 +533,6 @@ error:
         return ret;
 }
 
-int dataplane_set_certificate(char* buffer, size_t size)
-{
-        if (!buffer || size == 0 || !configuration_manager.initialized)
-        {
-                LOG_ERROR("Invalid buffer or size");
-                return -1;
-        }
-        char* destination = NULL;
-        asl_endpoint_configuration* endpoint_config = malloc(sizeof(asl_endpoint_configuration));
-        if (!endpoint_config)
-        {
-                LOG_ERROR("Failed to allocate memory for endpoint configuration");
-                goto error;
-        }
-        int ret = 0;
-
-        switch (configuration_manager.sys_config.dataplane_cert_active)
-        {
-        case ACTIVE_ONE:
-                destination = configuration_manager.application_2_path;
-                break;
-        case ACTIVE_TWO:
-                destination = configuration_manager.application_1_path;
-                break;
-        case ACTIVE_NONE:
-                LOG_INFO("No active dataplane configuration is set, using 1 as default");
-                destination = configuration_manager.application_1_path;
-                break;
-        default:
-                LOG_ERROR("Invalid dataplane active configuration");
-                goto error;
-        }
-        if (!destination)
-        {
-                goto error;
-        }
-
-        // store certificates in file
-        ret = write_file(destination, (const uint8_t*) buffer, size, false);
-        if (ret != 0)
-        {
-                LOG_ERROR("Failed to write controlplane certificate");
-                goto error;
-        }
-
-        return 0;
-error:
-        return -1;
-}
-
-int controlplane_set_certificate(char* buffer, size_t size)
-{
-        if (!buffer || size == 0 || !configuration_manager.initialized)
-        {
-                LOG_ERROR("Invalid buffer or size");
-                return -1;
-        }
-        char* destination = NULL;
-        asl_endpoint_configuration* endpoint_config = malloc(sizeof(asl_endpoint_configuration));
-        if (!endpoint_config)
-        {
-                LOG_ERROR("Failed to allocate memory for endpoint configuration");
-                goto error;
-        }
-        int ret = 0;
-
-        switch (configuration_manager.sys_config.controlplane_cert_active)
-        {
-        case ACTIVE_ONE:
-                destination = configuration_manager.controlplane_2_chain_path;
-                break;
-        case ACTIVE_TWO:
-                destination = configuration_manager.controlplane_1_chain_path;
-                break;
-        case ACTIVE_NONE:
-                LOG_INFO("No active controlplane configuration is set, using 1 as default");
-                destination = configuration_manager.controlplane_1_chain_path;
-                break;
-        default:
-                LOG_ERROR("Invalid controlplane active configuration");
-                goto error;
-        }
-        if (!destination)
-        {
-                goto error;
-        }
-
-        // store certificates in file
-        ret = write_file(destination, (const uint8_t*) buffer, size, false);
-        if (ret != 0)
-        {
-                LOG_ERROR("Failed to write controlplane certificate");
-                goto error;
-        }
-
-        memcpy(endpoint_config,
-               configuration_manager.sys_config.endpoint_config,
-               sizeof(asl_endpoint_configuration));
-
-        ret = load_endpoint_certificates(endpoint_config,
-                                         destination,
-                                         configuration_manager.controlplane_key_path,
-                                         configuration_manager.controlplane_root_cert);
-        if (ret != 0)
-        {
-                LOG_ERROR("Failed to load controlplane certificate");
-                goto error;
-        }
-
-        ret = test_server_conn(configuration_manager.sys_config.broker_host, endpoint_config);
-        if (ret != 0)
-        {
-                LOG_ERROR("Failed to test controlplane certificate");
-                goto error;
-        }
-
-        // we switchout endpointconfig, to make sure that the buffers are freed later
-        asl_endpoint_configuration* old_endpoint_config = configuration_manager.sys_config.endpoint_config;
-        configuration_manager.sys_config.endpoint_config = endpoint_config;
-        endpoint_config = old_endpoint_config;
-
-        LOG_INFO("Controlplane certificate test successful");
-        // switching to new certificate
-        switch (configuration_manager.sys_config.controlplane_cert_active)
-        {
-        case ACTIVE_ONE:
-                configuration_manager.sys_config.controlplane_cert_active = ACTIVE_TWO;
-                break;
-        case ACTIVE_TWO:
-                configuration_manager.sys_config.controlplane_cert_active = ACTIVE_ONE;
-                break;
-        case ACTIVE_NONE:
-                configuration_manager.sys_config.controlplane_cert_active = ACTIVE_ONE;
-        default:
-                LOG_ERROR("Invalid controlplane active configuration");
-                goto error;
-        }
-        ret = write_sysconfig();
-        if (ret != 0)
-        {
-                LOG_ERROR("Failed to write sysconfig");
-                goto error;
-        }
-        // notify kritis3m_scale service restart
-
-        if (endpoint_config->root_certificate.buffer)
-                free((void*) endpoint_config->root_certificate.buffer);
-        if (endpoint_config->private_key.buffer)
-                free((void*) endpoint_config->private_key.buffer);
-        if (endpoint_config->device_certificate_chain.buffer)
-                free((void*) endpoint_config->device_certificate_chain.buffer);
-        free(endpoint_config);
-        return 0;
-error:
-        if (endpoint_config->root_certificate.buffer)
-                free((void*) endpoint_config->root_certificate.buffer);
-        if (endpoint_config->private_key.buffer)
-                free((void*) endpoint_config->private_key.buffer);
-        if (endpoint_config->device_certificate_chain.buffer)
-                free((void*) endpoint_config->device_certificate_chain.buffer);
-        free(endpoint_config);
-        return -1;
-}
 int load_endpoint_certificates(asl_endpoint_configuration* endpoint_config,
                                char* chain_path,
                                char* key_path,
@@ -727,8 +549,6 @@ int load_endpoint_certificates(asl_endpoint_configuration* endpoint_config,
                 LOG_ERROR("No active controlplane configuration");
                 return -1;
         }
-
-        // Load the certificate chain
         if (read_file(chain_path,
                       (uint8_t**) &endpoint_config->device_certificate_chain.buffer,
                       &endpoint_config->device_certificate_chain.size) < 0)
@@ -736,8 +556,6 @@ int load_endpoint_certificates(asl_endpoint_configuration* endpoint_config,
                 LOG_ERROR("Failed to load controlplane certificate chain");
                 return -1;
         }
-
-        // Load the private key
         if (read_file(key_path,
                       (uint8_t**) &endpoint_config->private_key.buffer,
                       &endpoint_config->private_key.size) < 0)
@@ -746,7 +564,6 @@ int load_endpoint_certificates(asl_endpoint_configuration* endpoint_config,
                 return -1;
         }
 
-        // Load the root certificate
         if (read_file(root_path,
                       (uint8_t**) &endpoint_config->root_certificate.buffer,
                       &endpoint_config->root_certificate.size) < 0)
@@ -784,7 +601,6 @@ void cleanup_endpoint_config(asl_endpoint_configuration* endpoint_config)
                 free((void*) endpoint_config->private_key.buffer);
         if (endpoint_config->private_key.additional_key_buffer)
                 free((void*) endpoint_config->private_key.additional_key_buffer);
-
         free(endpoint_config);
 }
 
@@ -792,11 +608,16 @@ void cleanup_sysconfig()
 {
         if (configuration_manager.sys_config.broker_host)
                 free(configuration_manager.sys_config.broker_host);
-
         if (configuration_manager.sys_config.est_host)
                 free(configuration_manager.sys_config.est_host);
+        if (configuration_manager.sys_config.endpoint_config)
+                cleanup_endpoint_config(configuration_manager.sys_config.endpoint_config);
+        memset(&configuration_manager.sys_config, 0, sizeof(struct sysconfig));
+}
 
-        cleanup_endpoint_config(configuration_manager.sys_config.endpoint_config);
+char* get_base_path(void)
+{
+        return configuration_manager.base_path;
 }
 
 void cleanup_configuration_manager(void)
@@ -805,6 +626,9 @@ void cleanup_configuration_manager(void)
         // sysconfig
         if (configuration_manager.sys_config_path)
                 free(configuration_manager.sys_config_path);
+
+        if (configuration_manager.base_path)
+                free(configuration_manager.base_path);
 
         // controlplane
         if (configuration_manager.controlplane_key_path)

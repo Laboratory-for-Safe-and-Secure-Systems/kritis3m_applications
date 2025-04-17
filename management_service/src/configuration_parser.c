@@ -279,6 +279,7 @@ int parse_buffer_to_sysconfig(char* json_buffer, int json_buffer_size, struct sy
                 LOG_ERROR("Failed to allocate memory for endpoint configuration");
                 goto error;
         }
+        memset(config->endpoint_config, 0, sizeof(asl_endpoint_configuration));
 
         // Parse endpoint configuration
         cJSON* endpoint_config = cJSON_GetObjectItem(root, "endpoint_config");

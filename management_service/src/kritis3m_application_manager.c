@@ -513,6 +513,7 @@ int handle_management_message(struct application_manager* manager)
                 }
         case STOP_APPLICATION_MANAGER_REQUEST:
                 {
+                        respond_with(manager->management_pair[THREAD_INT], MSG_OK);
                         LOG_INFO("Received stop application manager request");
                         ret = tls_proxy_backend_terminate();
                         if (ret < 0)
@@ -522,7 +523,6 @@ int handle_management_message(struct application_manager* manager)
                                 return ret;
                         }
 
-                        respond_with(manager->management_pair[THREAD_INT], MSG_OK);
                         return 1; // Signal to exit main loop
                 }
         case ACKNOWLEDGE_APPLICATION_REQUEST:
@@ -719,6 +719,12 @@ void* application_service_main_thread(void* arg)
                         else if (ret < 0)
                         {
                                 LOG_ERROR("Error handling management message");
+                                break;
+                        }
+                        else if (ret == 1)
+                        {
+                                LOG_INFO("Received signal to exit application manager");
+                                break;
                         }
                 }
         }

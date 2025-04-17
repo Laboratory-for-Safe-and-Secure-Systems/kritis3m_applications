@@ -46,8 +46,7 @@ struct control_plane_conn_t
         char* topic_hello;
         char* topic_policy;
         char* topic_config;
-        char* topic_cert_mgmt;
-        char* topic_cert_prod;
+        char* topic_cert_req;
         char* topic_sync;
         pthread_t conn_thread;
         pthread_attr_t conn_attr;
@@ -63,8 +62,7 @@ static struct control_plane_conn_t conn;
 #define TOPIC_FORMAT_POLICY "%s/control/qos"
 #define TOPIC_FORMAT_SYNC "%s/control/sync"
 #define TOPIC_FORMAT_CONFIG "%s/config"
-#define TOPIC_FORMAT_CERT_MGMT "%s/cert/management"
-#define TOPIC_FORMAT_CERT_PROD "%s/cert/production"
+#define TOPIC_FORMAT_CERT_REQ "%s/control/cert_req"
 
 int disc_finished = 0;
 int subscribed = 0;
@@ -174,7 +172,7 @@ int msgarrvd(void* context, char* topicName, int topicLen, MQTTAsync_message* me
 
         // Create comparison topics
 
-        if (conn->topic_config == NULL || conn->topic_cert_mgmt == NULL || conn->topic_cert_prod == NULL)
+        if (conn->topic_config == NULL || conn->topic_cert_req == NULL)
         {
                 LOG_ERROR("Failed to create comparison topics");
                 goto cleanup;
@@ -191,15 +189,49 @@ int msgarrvd(void* context, char* topicName, int topicLen, MQTTAsync_message* me
                 }
                 dataplane_config_apply_req();
         }
-        else if (strcmp(topicName, conn->topic_cert_mgmt) == 0)
+
+        else if (strcmp(topicName, conn->topic_cert_req) == 0)
         {
+                int plane_type = -1;
+                int ret = 0;
                 bool value = (strncmp(payload, "true", message->payloadlen) == 0);
-                LOG_INFO("Received cert management status: %s", value ? "true" : "false");
-        }
-        else if (strcmp(topicName, conn->topic_cert_prod) == 0)
-        {
-                bool value = (strncmp(payload, "true", message->payloadlen) == 0);
-                LOG_INFO("Received cert production status: %s", value ? "true" : "false");
+                LOG_INFO("Received cert request status: %s", value ? "true" : "false");
+                cJSON* json = cJSON_ParseWithLength(payload, message->payloadlen);
+                if (json == NULL)
+                {
+                        LOG_ERROR("Failed to parse certificate request");
+                        goto cleanup;
+                }
+                cJSON* json_cert_type = cJSON_GetObjectItem(json, "cert_type");
+                if (json_cert_type == NULL)
+                {
+                        LOG_ERROR("Failed to get cert type from certificate request");
+                        goto cleanup;
+                }
+                plane_type = json_cert_type->valueint;
+
+                LOG_DEBUG("Received cert type for plane: %s",
+                          plane_type == 1 ? "dataplane" : "controlplane");
+                cJSON* json_cert_req = cJSON_GetObjectItem(json, "cert_req");
+                if (plane_type == 1)
+                {
+
+                        if ((ret = dataplane_cert_get_req()) < 0)
+                        {
+                                LOG_ERROR("Failed to send dataplane cert request");
+                                goto cleanup;
+                        }
+                }
+                else if (plane_type == 2)
+                {
+                        if ((ret = ctrlplane_cert_get_req()) < 0)
+                        {
+                                LOG_ERROR("Failed to send controlplane cert request");
+                                goto cleanup;
+                        }
+                }
+
+                // type
         }
         else if ((strcmp(topicName, conn->topic_sync) == 0))
         {
@@ -309,20 +341,14 @@ static int subscribe_to_topics(struct control_plane_conn_t* conn)
         }
 
         // Subscribe to cert management topic
-        rc = MQTTAsync_subscribe(conn->client, conn->topic_cert_mgmt, QOS, &opts);
+        rc = MQTTAsync_subscribe(conn->client, conn->topic_cert_req, QOS, &opts);
         if (rc != MQTTASYNC_SUCCESS)
         {
-                LOG_ERROR("Failed to subscribe to topic %s, rc=%d", conn->topic_cert_mgmt, rc);
+                LOG_ERROR("Failed to subscribe to topic %s, rc=%d", conn->topic_cert_req, rc);
                 goto cleanup;
         }
 
         // Subscribe to cert production topic
-        rc = MQTTAsync_subscribe(conn->client, conn->topic_cert_prod, QOS, &opts);
-        if (rc != MQTTASYNC_SUCCESS)
-        {
-                LOG_ERROR("Failed to subscribe to topic %s, rc=%d", conn->topic_cert_prod, rc);
-                goto cleanup;
-        }
 
 cleanup:
         return rc;
@@ -417,8 +443,6 @@ void* control_plane_conn_thread(void* arg)
 
 exit:
         LOG_INFO("Exiting control plane connection thread");
-        closesocket(conn.socket_pair[THREAD_INT]);
-        closesocket(conn.socket_pair[THREAD_EXT]);
 
         // Ensure MQTT client is properly closed
         if (conn.client && MQTTAsync_isConnected(conn.client))
@@ -429,6 +453,8 @@ exit:
                 MQTTAsync_disconnect(conn.client, &disc_opts);
         }
 
+        closesocket(conn.socket_pair[THREAD_INT]);
+        closesocket(conn.socket_pair[THREAD_EXT]);
         cleanup_control_plane_conn();
 
         return NULL;
@@ -581,8 +607,7 @@ int start_control_plane_conn(struct control_plane_conn_config_t* conn_config)
         conn.topic_hello = create_topic(TOPIC_FORMAT_HELLO, conn.serialnumber);
         conn.topic_policy = create_topic(TOPIC_FORMAT_POLICY, conn.serialnumber);
         conn.topic_config = create_topic(TOPIC_FORMAT_CONFIG, conn.serialnumber);
-        conn.topic_cert_mgmt = create_topic(TOPIC_FORMAT_CERT_MGMT, conn.serialnumber);
-        conn.topic_cert_prod = create_topic(TOPIC_FORMAT_CERT_PROD, conn.serialnumber);
+        conn.topic_cert_req = create_topic(TOPIC_FORMAT_CERT_REQ, conn.serialnumber);
         conn.topic_sync = create_topic(TOPIC_FORMAT_SYNC, conn.serialnumber);
 
         memcpy(conn.endpoint_config, conn_config->endpoint_config, sizeof(asl_endpoint_configuration));
@@ -816,7 +841,6 @@ enum MSG_RESPONSE_CODE send_policy_status(struct policy_status_t* status)
         struct control_plane_conn_message msg;
         msg.type = CONTROL_PLANE_SEND_POLICY_STATUS;
         msg.data.policy.status = *status;
-
         return external_management_request(conn.socket_pair[THREAD_EXT], &msg, sizeof(msg));
 }
 

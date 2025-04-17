@@ -76,7 +76,6 @@ const struct sysconfig* get_sysconfig();
 
 int get_application_inactive(struct application_manager_config* config,
                              struct hardware_configs* hw_config);
-int ack_dataplane_update();
 
 /**
  * @brief Reads hardware configuration based on the active dataplane configuration
@@ -103,6 +102,8 @@ int store_dataplane_certificate(char* buffer, size_t size);
 
 void cleanup_application_config(struct application_manager_config* config);
 void cleanup_hardware_configs(struct hardware_configs* hw_configs);
+void cleanup_configuration_manager(void);
+char* get_base_path(void);
 
 enum CONFIG_TYPE
 {
