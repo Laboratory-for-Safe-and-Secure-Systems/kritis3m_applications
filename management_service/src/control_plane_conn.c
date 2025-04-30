@@ -15,6 +15,7 @@
 #include "kritis3m_scale_service.h"
 #include "logging.h"
 #include "networking.h"
+#include "log_buffer.h"
 
 LOG_MODULE_CREATE("CONTROL_PLANE_CONN");
 
@@ -550,6 +551,11 @@ static int handle_management_message(struct control_plane_conn_t* conn)
                                 LOG_ERROR("Failed to send log message: %d", rc);
                                 return_code = MSG_ERROR;
                         }
+                        if (message.data.log.message)
+                        {
+                                free(message.data.log.message);
+                                message.data.log.message = NULL;
+                        }
                 }
                 else
                 {
@@ -595,6 +601,13 @@ int start_control_plane_conn(struct control_plane_conn_config_t* conn_config)
         int ret = 0;
 
         LOG_LVL_SET(LOG_LVL_DEBUG);
+
+        // Initialize log buffer
+        ret = log_buffer_init();
+        if (ret != 0) {
+                LOG_ERROR("Failed to initialize log buffer");
+                goto exit;
+        }
 
         // Validate configuration
         if (conn_config->serialnumber == NULL || conn_config->endpoint_config == NULL ||
@@ -686,6 +699,9 @@ int start_control_plane_conn(struct control_plane_conn_config_t* conn_config)
                 goto exit;
         }
 
+        // Enable remote logging after successful connection
+        log_buffer_set_remote_enabled(true);
+
         LOG_INFO("Control plane connection started successfully");
         return 0;
 
@@ -697,6 +713,10 @@ exit:
 
 void cleanup_control_plane_conn()
 {
+        // Disable remote logging and cleanup log buffer
+        log_buffer_set_remote_enabled(false);
+        log_buffer_cleanup();
+
         if (conn.serialnumber)
         {
                 free(conn.serialnumber);
@@ -861,10 +881,26 @@ enum MSG_RESPONSE_CODE send_log_message(const char* message)
         if (msg.data.log.message == NULL)
         {
                 LOG_ERROR("Failed to allocate memory for log message");
+                if (msg.data.log.message)
+                {
+                        free(msg.data.log.message);
+                        msg.data.log.message = NULL;
+                }
                 return MSG_ERROR;
         }
 
-        return external_management_request(conn.socket_pair[THREAD_EXT], &msg, sizeof(msg));
+        int ret=  external_management_request(conn.socket_pair[THREAD_EXT], &msg, sizeof(msg));
+        if (ret < 0)
+        {
+                LOG_ERROR("Failed to send log message");
+                if (msg.data.log.message)
+                {
+                        free(msg.data.log.message);
+                        msg.data.log.message = NULL;
+                }
+                return MSG_ERROR;
+        }
+        return MSG_OK;
 }
 
 enum MSG_RESPONSE_CODE send_policy_status(struct coordinator_status* status)

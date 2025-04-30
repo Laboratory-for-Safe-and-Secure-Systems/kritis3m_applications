@@ -1,4 +1,5 @@
 #include "logging.h"
+#include "log_buffer.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -38,7 +39,16 @@ void log_message(log_module const* module, int32_t level, char const* fmt, ...)
                 break;
         }
 
+        // Local console logging
         printf("<%s>\t%s: %s\r\n", level_str, module->name, message);
+
+        // Remote logging through the buffer if enabled
+        if (log_buffer_is_remote_enabled()) {
+                //only print message if level is greater than INFO
+                if (level < LOG_LVL_INFO) {
+                        log_buffer_add_message(module->name, level, message);
+                }
+        }
 }
 
 void log_level_set(log_module* module, int32_t level)

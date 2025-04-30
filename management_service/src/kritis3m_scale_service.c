@@ -44,6 +44,7 @@ struct kritis3m_service
         int hello_timer_fd; // File descriptor for the hello timer
         bool timer_initialized;
         struct pki_client_config_t pki_clinet_config;
+        bool proxy_reporting_enabled;  // Flag to control proxy state reporting
 };
 
 struct dataplane_update_coordinator
@@ -1140,4 +1141,47 @@ int validate_dataplane_certificate(void* context, char* config, size_t size)
                 return 0;
         }
         return -1;
+}
+
+void enable_proxy_reporting(void) {
+    svc.proxy_reporting_enabled = true;
+}
+
+enum MSG_RESPONSE_CODE send_hello_message(bool is_timer)
+{
+        if (!svc.proxy_reporting_enabled) {
+            // Send regular hello message without proxy state
+            return MSG_OK;
+        }
+
+        // Get proxy states from all running proxies
+        proxy_status proxy_states[MAX_PROXYS];
+        int num_proxies = 0;
+
+        // Collect proxy states through the application manager
+        for (int i = 1; i <= MAX_PROXYS; i++) {
+            proxy_status status;
+            if (tls_proxy_get_status(i, &status) == 0 && status.is_running) {
+                proxy_states[num_proxies++] = status;
+            }
+        }
+
+        // Create and send hello message with proxy states
+        struct hello_message {
+            bool is_timer;
+            int num_proxies;
+            proxy_status proxy_states[MAX_PROXYS];
+        } msg = {
+            .is_timer = is_timer,
+            .num_proxies = num_proxies
+        };
+        memcpy(msg.proxy_states, proxy_states, sizeof(proxy_status) * num_proxies);
+
+        // Send the message
+        if (write(svc.management_socket[THREAD_EXT], &msg, sizeof(msg)) != sizeof(msg)) {
+            LOG_ERROR("Failed to send hello message with proxy states");
+            return MSG_ERR;
+        }
+
+        return MSG_OK;
 }

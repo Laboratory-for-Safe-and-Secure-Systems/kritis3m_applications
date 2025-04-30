@@ -4,6 +4,8 @@
 #include "configuration_manager.h"
 #include "ipc.h"
 #include "kritis3m_configuration.h"
+#include "tls_proxy.h"
+#include "kritis3m_application_manager.h"
 
 /**
  * @brief Starts the `kritis3m_service` module.
@@ -46,5 +48,8 @@ typedef ManagementReturncode config_status_cb(int32_t);
 
 enum MSG_RESPONSE_CODE dataplane_config_apply_req(void);
 enum MSG_RESPONSE_CODE dataplane_config_apply_send_status(struct coordinator_status* status);
+
+// Enable proxy state reporting in hello messages
+void enable_proxy_reporting(void);
 
 #endif // KRITIS3M_SCALE_SERVICE_H
