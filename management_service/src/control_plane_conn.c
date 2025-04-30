@@ -376,6 +376,38 @@ void close_mqtt_client()
         MQTTAsync_destroy(&conn.client);
 }
 
+// Add this new function before control_plane_conn_thread
+static void cleanup_thread_resources(struct control_plane_conn_t* conn, bool is_error) 
+{
+    // In error case, close both sockets immediately
+    if (is_error) {
+        if (conn->socket_pair[THREAD_INT] != -1) {
+            closesocket(conn->socket_pair[THREAD_INT]);
+            conn->socket_pair[THREAD_INT] = -1;
+        }
+        if (conn->socket_pair[THREAD_EXT] != -1) {
+            closesocket(conn->socket_pair[THREAD_EXT]);
+            conn->socket_pair[THREAD_EXT] = -1;
+        }
+    }
+
+    // Always cleanup MQTT resources
+    if (conn->client && MQTTAsync_isConnected(conn->client)) {
+        LOG_INFO("Disconnecting from MQTT broker");
+        MQTTAsync_disconnectOptions disc_opts = MQTTAsync_disconnectOptions_initializer;
+        disc_opts.timeout = 1000; // 1 second timeout
+        MQTTAsync_disconnect(conn->client, &disc_opts);
+    }
+    MQTTAsync_destroy(&conn->client);
+
+    // For non-error case, only close internal socket
+    // External socket will be closed by the main thread
+    if (!is_error && conn->socket_pair[THREAD_INT] != -1) {
+        closesocket(conn->socket_pair[THREAD_INT]);
+        conn->socket_pair[THREAD_INT] = -1;
+    }
+}
+
 void* control_plane_conn_thread(void* arg)
 {
         int ret = 0;
@@ -394,7 +426,8 @@ void* control_plane_conn_thread(void* arg)
         {
                 LOG_ERROR("Failed to connect to MQTT broker: %d", ret);
                 conn.running = 0;
-                goto exit;
+                cleanup_thread_resources(&conn, true);
+                return NULL;
         }
 
         struct pollfd fds[1];
@@ -414,6 +447,7 @@ void* control_plane_conn_thread(void* arg)
                                 continue;
                         }
                         LOG_ERROR("Failed to poll socket pair: %s", strerror(errno));
+                        cleanup_thread_resources(&conn, true);
                         goto exit;
                 }
 
@@ -425,35 +459,28 @@ void* control_plane_conn_thread(void* arg)
                         if (rc < 0)
                         {
                                 LOG_ERROR("Error handling management message: %d", rc);
+                                cleanup_thread_resources(&conn, true);
+                                goto exit;
                         }
                 }
                 if (fds[THREAD_INT].revents & POLLERR)
                 {
                         LOG_ERROR("Socket pair has error");
+                        cleanup_thread_resources(&conn, true);
                         goto exit;
                 }
                 if (fds[THREAD_INT].revents & POLLHUP)
                 {
-
                         LOG_INFO("Socket pair has hung up");
+                        cleanup_thread_resources(&conn, true);
                         goto exit;
                 }
         }
 
+        // Graceful shutdown - cleanup resources but keep external socket open
+        cleanup_thread_resources(&conn, false);
+
 exit:
-        LOG_INFO("Exiting control plane connection thread");
-
-        // Ensure MQTT client is properly closed
-        if (conn.client && MQTTAsync_isConnected(conn.client))
-        {
-                LOG_INFO("Disconnecting from MQTT broker");
-                MQTTAsync_disconnectOptions disc_opts = MQTTAsync_disconnectOptions_initializer;
-                disc_opts.timeout = 1000; // 1 second timeout
-                MQTTAsync_disconnect(conn.client, &disc_opts);
-        }
-
-        closesocket(conn.socket_pair[THREAD_INT]);
-        closesocket(conn.socket_pair[THREAD_EXT]);
         cleanup_control_plane_conn();
 
         return NULL;
@@ -593,7 +620,7 @@ int start_control_plane_conn(struct control_plane_conn_config_t* conn_config)
                 goto exit;
         }
 
-        // Allocate and copy endpoint configuration
+        // Allocate and copy endpoint configuration, cleanup by mqtt library
         conn.endpoint_config = malloc(sizeof(asl_endpoint_configuration));
         if (conn.endpoint_config == NULL)
         {
@@ -673,38 +700,47 @@ void cleanup_control_plane_conn()
         if (conn.serialnumber)
         {
                 free(conn.serialnumber);
+                conn.serialnumber = NULL;
         }
         if (conn.mqtt_broker_host)
         {
                 free(conn.mqtt_broker_host);
+                conn.mqtt_broker_host = NULL;
         }
         if (conn.endpoint_config)
         {
                 free(conn.endpoint_config);
-        }
-        if (conn.conn_thread)
-        {
-                pthread_join(conn.conn_thread, NULL);
+                conn.endpoint_config = NULL;
         }
         if (conn.client)
         {
                 MQTTAsync_destroy(&conn.client);
+                conn.client = NULL;
         }
         if (conn.topic_log)
         {
                 free(conn.topic_log);
+                conn.topic_log = NULL;
         }
         if (conn.topic_hello)
         {
                 free(conn.topic_hello);
+                conn.topic_hello = NULL;
         }
         if (conn.topic_policy)
         {
                 free(conn.topic_policy);
+                conn.topic_policy = NULL;
         }
         if (conn.topic_config)
         {
                 free(conn.topic_config);
+                conn.topic_config = NULL;
+        }
+        if (conn.topic_cert_req)
+        {
+                free(conn.topic_cert_req);
+                conn.topic_cert_req = NULL;
         }
 
         return;
@@ -855,7 +891,23 @@ enum MSG_RESPONSE_CODE stop_control_plane_conn()
         message.type = CONTROL_PLANE_CONN_STOP;
 
         // Send stop message to thread
-        return external_management_request(conn.socket_pair[THREAD_EXT], &message, sizeof(message));
+        int ret = external_management_request(conn.socket_pair[THREAD_EXT], &message, sizeof(message));
+        if (ret < 0)
+        {
+                LOG_ERROR("Failed to stop control plane connection");
+                return MSG_ERROR;
+        }
+        
+        // Wait for thread to finish
+        pthread_join(conn.conn_thread, NULL);
+        
+        // Now it's safe to close the external socket
+        if (conn.socket_pair[THREAD_EXT] != -1) {
+            closesocket(conn.socket_pair[THREAD_EXT]);
+            conn.socket_pair[THREAD_EXT] = -1;
+        }
+        
+        return MSG_OK;
 }
 
 enum MSG_RESPONSE_CODE enable_sync(bool value)

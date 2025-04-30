@@ -448,10 +448,10 @@ int prepare_config_update(struct config_update* update)
                 switch (*update->active_path)
                 {
                 case ACTIVE_ONE:
-                        target_path = update->path_1;
+                        target_path = update->path_2;
                         break;
                 case ACTIVE_TWO:
-                        target_path = update->path_2;
+                        target_path = update->path_1;
                         break;
                 case ACTIVE_NONE:
                         target_path = update->path_1;

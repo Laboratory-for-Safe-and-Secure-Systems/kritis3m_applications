@@ -387,6 +387,7 @@ terminate:
 
         stop_application_manager();
         cleanup_kritis3m_service();
+        stop_control_plane_conn();
         pthread_detach(pthread_self());
         return NULL;
 }
