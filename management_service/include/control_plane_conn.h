@@ -39,7 +39,7 @@ void cleanup_control_plane_conn();
  * @param value The hello value to send (true/false)
  * @return Returns a ManagementReturncode indicating the result
  */
-enum MSG_RESPONSE_CODE send_hello_message(bool value);
+enum MSG_RESPONSE_CODE send_hello_message(char* msg);
 
 /**
  * Send a log message to the control plane

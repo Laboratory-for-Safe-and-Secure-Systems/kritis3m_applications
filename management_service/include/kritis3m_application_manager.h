@@ -2,6 +2,8 @@
 #define KRITIS3M_APPLICATION_MANAGER_H
 #include "configuration_manager.h"
 #include "kritis3m_scale_service.h"
+#include "tls_proxy.h"
+#include "kritis3m_configuration.h"
 
 /**
  * @brief Set up the application manager.
@@ -80,4 +82,9 @@ int start_application(struct application_manager_config* config, struct hardware
  * This function rolls back the application configuration to the previous one.
  */
 int application_manager_rollback();
+
+uint8_t* get_proxy_status(void);
+
+
+
 #endif // KRITIS3M_APPLICATION_MANAGER_H

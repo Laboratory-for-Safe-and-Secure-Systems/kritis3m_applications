@@ -1,5 +1,3 @@
-#include <errno.h>
-#include <poll.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <string.h>
@@ -113,6 +111,7 @@ static int init_hello_timer(struct kritis3m_service* svc);
 
 // coordinator for dataplane updates
 void* handle_dataplane_apply_req(void* arg);
+enum MSG_RESPONSE_CODE initiate_hello_message(bool is_timer);
 
 static void cleanup_hello_timer(struct kritis3m_service* svc);
 void cleanup_dataplane_update_coordinator(struct dataplane_update_coordinator* update);
@@ -249,7 +248,12 @@ int start_kritis3m_service(char* config_file, int log_level)
                 return -1;
         }
 
-        start_control_plane_conn(&conn_config);
+        ret = start_control_plane_conn(&conn_config);
+        if (ret < 0)
+        {
+                LOG_ERROR("Failed to start control plane connection");
+                goto error_occured;
+        }
 
         // 7. start management application
         ret = pthread_create(&svc.mainthread, &svc.thread_attr, kritis3m_service_main_thread, &svc);
@@ -269,6 +273,7 @@ error_occured:
 void* kritis3m_service_main_thread(void* arg)
 {
         start_application_manager();
+        enable_proxy_reporting();
 
         svc.initialized = true;
         enum appl_state
@@ -366,7 +371,7 @@ void* kritis3m_service_main_thread(void* arg)
                                         ssize_t s = read(svc->hello_timer_fd, &exp, sizeof(uint64_t));
                                         if (s == sizeof(uint64_t))
                                         {
-                                                enum MSG_RESPONSE_CODE ret = send_hello_message(true);
+                                                enum MSG_RESPONSE_CODE ret = initiate_hello_message(true);
                                                 if (ret != MSG_OK)
                                                 {
                                                         LOG_ERROR("Failed to send hello message: "
@@ -1147,41 +1152,18 @@ void enable_proxy_reporting(void) {
     svc.proxy_reporting_enabled = true;
 }
 
-enum MSG_RESPONSE_CODE send_hello_message(bool is_timer)
+enum MSG_RESPONSE_CODE initiate_hello_message(bool is_timer)
 {
         if (!svc.proxy_reporting_enabled) {
-            // Send regular hello message without proxy state
-            return MSG_OK;
+                LOG_WARN("Proxy reporting is disabled");
+                return MSG_OK;
         }
 
-        // Get proxy states from all running proxies
-        proxy_status proxy_states[MAX_PROXYS];
-        int num_proxies = 0;
-
-        // Collect proxy states through the application manager
-        for (int i = 1; i <= MAX_PROXYS; i++) {
-            proxy_status status;
-            if (tls_proxy_get_status(i, &status) == 0 && status.is_running) {
-                proxy_states[num_proxies++] = status;
-            }
+        uint8_t* proxy_status = get_proxy_status();
+        if (!proxy_status) {
+                LOG_ERROR("Failed to get proxy status JSON");
+                return MSG_ERROR;
         }
 
-        // Create and send hello message with proxy states
-        struct hello_message {
-            bool is_timer;
-            int num_proxies;
-            proxy_status proxy_states[MAX_PROXYS];
-        } msg = {
-            .is_timer = is_timer,
-            .num_proxies = num_proxies
-        };
-        memcpy(msg.proxy_states, proxy_states, sizeof(proxy_status) * num_proxies);
-
-        // Send the message
-        if (write(svc.management_socket[THREAD_EXT], &msg, sizeof(msg)) != sizeof(msg)) {
-            LOG_ERROR("Failed to send hello message with proxy states");
-            return MSG_ERR;
-        }
-
-        return MSG_OK;
+        return send_hello_message((char*)proxy_status);
 }

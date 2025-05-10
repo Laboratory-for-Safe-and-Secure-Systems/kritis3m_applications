@@ -84,7 +84,7 @@ void handle_enable_sync(bool value);
 // Forward declarations for the new functions
 static int subscribe_to_topics(struct control_plane_conn_t* conn);
 static int handle_management_message(struct control_plane_conn_t* conn);
-static int handle_hello_request(struct control_plane_conn_t* conn, bool value);
+static int handle_hello_request(struct control_plane_conn_t* conn, char* msg);
 static int handle_log_request(struct control_plane_conn_t* conn, const char* message);
 static int handle_policy_status(struct control_plane_conn_t* conn, struct coordinator_status* status);
 static int publish_message(struct control_plane_conn_t* conn,
@@ -117,7 +117,7 @@ struct control_plane_conn_message
                 } log;
                 struct
                 {
-                        bool value;
+                        char* msg;
                 } hello;
                 struct
                 {
@@ -531,15 +531,19 @@ static int handle_management_message(struct control_plane_conn_t* conn)
                 break;
 
         case CONTROL_PLANE_SEND_HELLO:
-                LOG_DEBUG("Sending hello message, value: %s",
-                          message.data.return_code ? "true" : "false");
-                rc = handle_hello_request(conn, message.data.hello.value);
-                if (rc != MQTTASYNC_SUCCESS)
                 {
-                        LOG_ERROR("Failed to send hello message: %d", rc);
-                        return_code = MSG_ERROR;
+                        rc = handle_hello_request(conn, message.data.hello.msg);
+                        if (rc != MQTTASYNC_SUCCESS) {
+                                LOG_ERROR("Failed to send hello message: %d", rc);
+                                return_code = MSG_ERROR;
+                        }
+                        // Always free the message after handling
+                        if (message.data.hello.msg) {
+                                free(message.data.hello.msg);
+                                message.data.hello.msg = NULL;
+                        }
+                        break;
                 }
-                break;
 
         case CONTROL_PLANE_SEND_LOG:
                 if (message.data.log.message)
@@ -550,11 +554,14 @@ static int handle_management_message(struct control_plane_conn_t* conn)
                         {
                                 LOG_ERROR("Failed to send log message: %d", rc);
                                 return_code = MSG_ERROR;
+                        }else{
+                                return_code = MSG_OK;
                         }
                         if (message.data.log.message)
                         {
                                 free(message.data.log.message);
                                 message.data.log.message = NULL;
+
                         }
                 }
                 else
@@ -775,15 +782,14 @@ static int publish_message(struct control_plane_conn_t* conn,
 {
         int rc = MQTTASYNC_SUCCESS;
         char* topic = create_topic(topic_format, conn->serialnumber);
-        if (topic == NULL)
-        {
+        if (topic == NULL) {
+                LOG_ERROR("Failed to create topic");
                 return -1;
         }
 
         MQTTAsync_responseOptions opts = MQTTAsync_responseOptions_initializer;
         rc = MQTTAsync_send(conn->client, topic, payloadlen, payload, qos, retained, &opts);
-        if (rc != MQTTASYNC_SUCCESS)
-        {
+        if (rc != MQTTASYNC_SUCCESS) {
                 LOG_ERROR("Failed to publish message to topic %s, rc=%d", topic, rc);
         }
 
@@ -791,10 +797,18 @@ static int publish_message(struct control_plane_conn_t* conn,
         return rc;
 }
 
-static int handle_hello_request(struct control_plane_conn_t* conn, bool value)
+static int handle_hello_request(struct control_plane_conn_t* conn, char* msg)
 {
-        const char* payload = value ? "true" : "false";
-        return publish_message(conn, conn->topic_hello, payload, strlen(payload), QOS, 0);
+        if (!msg) {
+                LOG_ERROR("Invalid hello message");
+                return -1;
+        }
+
+        int rc = publish_message(conn, conn->topic_hello, msg, strlen(msg), QOS, 0);
+        if (rc != MQTTASYNC_SUCCESS) {
+                LOG_ERROR("Failed to publish hello message: %d", rc);
+        }
+        return rc;
 }
 
 static int handle_log_request(struct control_plane_conn_t* conn, const char* message)
@@ -854,14 +868,30 @@ static int handle_policy_status(struct control_plane_conn_t* conn, struct coordi
         return publish_message(conn, conn->topic_policy, ret_val, ret, QOS, 0);
 }
 
-enum MSG_RESPONSE_CODE send_hello_message(bool value)
+enum MSG_RESPONSE_CODE send_hello_message(char* msg)
 {
-        if (!control_plane_running())
+        if (!control_plane_running()) {
+                if (msg) {
+                        free(msg);
+                }
                 return MSG_ERROR;
+        }
+
         struct control_plane_conn_message message;
         message.type = CONTROL_PLANE_SEND_HELLO;
-        message.data.hello.value = value;
-        return external_management_request(conn.socket_pair[THREAD_EXT], &message, sizeof(message));
+        message.data.hello.msg = msg;
+        
+        int ret = external_management_request(conn.socket_pair[THREAD_EXT], &message, sizeof(message));
+        if (ret < 0) {
+                // If the request failed, we need to free the message
+                if (message.data.hello.msg) {
+                        free(message.data.hello.msg);
+                        message.data.hello.msg = NULL;
+                }
+                LOG_ERROR("Failed to send hello message");
+                return MSG_ERROR;
+        }
+        return MSG_OK;
 }
 
 // #todo not sure about mem management, dyn or static

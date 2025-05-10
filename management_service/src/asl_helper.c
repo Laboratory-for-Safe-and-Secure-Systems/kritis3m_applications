@@ -42,6 +42,7 @@ int establish_connection(char const* host,
         // Connect to the server
         if (ret = connect(*sock_fd, addr_info->ai_addr, addr_info->ai_addrlen), ret < 0)
         {
+                LOG_ERROR("Failed to connect to server: %s", strerror(errno));
                 goto error_occured;
         }
 

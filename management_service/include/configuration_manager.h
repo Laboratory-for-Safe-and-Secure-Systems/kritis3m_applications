@@ -63,6 +63,7 @@ struct proxy_wrapper
 {
         char* name;
         proxy_config proxy_config;
+        int proxy_id;
         int direction;
 };
 
@@ -100,14 +101,10 @@ int get_application_inactive(struct application_manager_config* config,
 int get_active_hardware_config(struct application_manager_config* app_config,
                                struct hardware_configs* hw_configs);
 
-int dataplane_set_certificate(char* buffer, size_t size);
-int controlplane_set_certificate(char* buffer, size_t size);
 int application_store_inactive(char* buffer, size_t size);
 
 int reload_controlplane_endpoint();
 
-int store_controlplane_certificate(char* buffer, size_t size);
-int store_dataplane_certificate(char* buffer, size_t size);
 
 void cleanup_application_config(struct application_manager_config* config);
 void cleanup_hardware_configs(struct hardware_configs* hw_configs);
