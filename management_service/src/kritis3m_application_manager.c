@@ -491,18 +491,19 @@ static int handle_config_change_request(struct application_manager* manager,
         
         // Step 1: Save current configuration as backup if it exists
         if (manager->app_config != NULL) {
-                backup_config = manager->backup_app_config;
-                
-                // Stop all running proxies
+                backup_config = manager->app_config;
+                manager->app_config = NULL;
                 ret = stop_running_proxies(backup_config);
                 if (ret < 0) {
                         LOG_WARN("Failed to stop some proxies, continuing with configuration change");
                 }
+                tls_proxy_backend_terminate();
         }
         
         // Step 2: Save current hardware configuration as backup if it exists
         if (manager->hw_configs != NULL) {
-                backup_hw_configs = manager->backup_hw_configs;
+                backup_hw_configs = manager->hw_configs;
+                manager->hw_configs = NULL;
                 
                 // Restore previous network configuration
                 ret = restore_network_interfaces(backup_hw_configs);
@@ -551,13 +552,11 @@ static int handle_config_change_request(struct application_manager* manager,
         // Step 8: Clean up old backup configurations and update backups
         if (manager->backup_app_config != NULL) {
                 cleanup_application_config(manager->backup_app_config);
-                free(manager->backup_app_config);
                 manager->backup_app_config = backup_config;
         }
         
         if (manager->backup_hw_configs != NULL) {
                 cleanup_hardware_configs(manager->backup_hw_configs);
-                free(manager->backup_hw_configs);
                 manager->backup_hw_configs = backup_hw_configs;
         }
         
@@ -593,9 +592,11 @@ rollback:
         // Attempt to restore backup configuration
         if (backup_hw_configs != NULL) {
                 prepare_network_interfaces(backup_hw_configs);
+                manager->app_config = backup_config;
         }
         
         if (backup_config != NULL) {
+                manager->app_config = backup_config;
                 // Start the proxy backend again
                 start_proxy_backend();
                 
@@ -714,7 +715,9 @@ static int start_proxies(struct application_manager_config* config)
         int proxy_id = 0;
         
         for (int i = 0; i < config->number_of_groups; i++) {
+                asl_endpoint_configuration* endpoint_config = config->group_config[i].endpoint_config;
                 for (int j = 0; j < config->group_config[i].number_proxies; j++) {
+                        config->group_config[i].proxy_wrapper[j].proxy_config.tls_config = *endpoint_config;
                         if (config->group_config[i].proxy_wrapper[j].direction == PROXY_FORWARD) {
                                 proxy_id = tls_forward_proxy_start(&config->group_config[i].proxy_wrapper[j].proxy_config);
                         } else if (config->group_config[i].proxy_wrapper[j].direction == PROXY_REVERSE) {
