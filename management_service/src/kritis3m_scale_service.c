@@ -110,7 +110,6 @@ void cleanup_kritis3m_service();
 static int init_hello_timer(struct kritis3m_service* svc);
 
 // coordinator for dataplane updates
-void* handle_dataplane_apply_req(void* arg);
 enum MSG_RESPONSE_CODE initiate_hello_message(bool is_timer);
 
 static void cleanup_hello_timer(struct kritis3m_service* svc);

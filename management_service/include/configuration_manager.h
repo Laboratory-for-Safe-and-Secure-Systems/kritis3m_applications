@@ -192,4 +192,20 @@ int start_config_transaction(struct config_transaction* transaction);
 int cancel_config_transaction(struct config_transaction* transaction);
 void cleanup_config_transaction(struct config_transaction* transaction);
 
+/**
+ * @brief Creates a deep copy of hardware_configs structure
+ * 
+ * @param src The source hardware_configs structure to copy
+ * @return struct hardware_configs* A newly allocated deep copy, or NULL on failure
+ */
+struct hardware_configs* deep_copy_hardware_configs(const struct hardware_configs* src);
+
+/**
+ * @brief Creates a deep copy of application_manager_config structure
+ * 
+ * @param src The source application_manager_config structure to copy
+ * @return struct application_manager_config* A newly allocated deep copy, or NULL on failure
+ */
+struct application_manager_config* deep_copy_application_config(const struct application_manager_config* src);
+
 #endif // CONFIGURATION_MANAGER_H

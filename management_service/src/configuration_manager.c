@@ -908,6 +908,7 @@ void cleanup_application_config(struct application_manager_config* config)
                                                              .proxy_wrapper[j]
                                                              .proxy_config.target_ip_address);
                                 }
+                                //deletes the whole array
                                 free(config->group_config[i].proxy_wrapper);
                         }
                 }
@@ -1198,4 +1199,224 @@ void cleanup_config_transaction(struct config_transaction* transaction)
         {
                 free(transaction);
         }
+}
+
+/**
+ * @brief Creates a deep copy of hardware_configs structure
+ * 
+ * @param src The source hardware_configs structure to copy
+ * @return struct hardware_configs* A newly allocated deep copy, or NULL on failure
+ */
+struct hardware_configs* deep_copy_hardware_configs(const struct hardware_configs* src)
+{
+        if (!src) {
+                LOG_ERROR("Invalid source hardware_configs");
+                return NULL;
+        }
+
+        struct hardware_configs* dest = malloc(sizeof(struct hardware_configs));
+        if (!dest) {
+                LOG_ERROR("Failed to allocate memory for hardware_configs");
+                return NULL;
+        }
+        
+        // Initialize with zeros
+        memset(dest, 0, sizeof(struct hardware_configs));
+        
+        // Copy number of configs
+        dest->number_of_hw_configs = src->number_of_hw_configs;
+        
+        if (src->number_of_hw_configs > 0 && src->hw_configs) {
+                // Allocate memory for hw_configs array
+                dest->hw_configs = malloc(src->number_of_hw_configs * sizeof(HardwareConfiguration));
+                if (!dest->hw_configs) {
+                        LOG_ERROR("Failed to allocate memory for hw_configs array");
+                        free(dest);
+                        return NULL;
+                }
+                
+                // Copy each hardware configuration
+                for (int i = 0; i < src->number_of_hw_configs; i++) {
+                        memcpy(&dest->hw_configs[i], &src->hw_configs[i], sizeof(HardwareConfiguration));
+                }
+        }
+        
+        return dest;
+}
+
+/**
+ * @brief Creates a deep copy of application_manager_config structure
+ * 
+ * @param src The source application_manager_config structure to copy
+ * @return struct application_manager_config* A newly allocated deep copy, or NULL on failure
+ */
+struct application_manager_config* deep_copy_application_config(const struct application_manager_config* src)
+{
+        if (!src) {
+                LOG_ERROR("Invalid source application_config");
+                return NULL;
+        }
+
+        struct application_manager_config* dest = malloc(sizeof(struct application_manager_config));
+        if (!dest) {
+                LOG_ERROR("Failed to allocate memory for application_manager_config");
+                return NULL;
+        }
+        
+        // Initialize with zeros
+        memset(dest, 0, sizeof(struct application_manager_config));
+        
+        // Copy number of groups
+        dest->number_of_groups = src->number_of_groups;
+        
+        if (src->number_of_groups > 0 && src->group_config) {
+                // Allocate memory for group_config array
+                dest->group_config = malloc(src->number_of_groups * sizeof(struct group_config));
+                if (!dest->group_config) {
+                        LOG_ERROR("Failed to allocate memory for group_config array");
+                        free(dest);
+                        return NULL;
+                }
+                
+                // Initialize group_config array with zeros
+                memset(dest->group_config, 0, src->number_of_groups * sizeof(struct group_config));
+                
+                // Copy each group configuration
+                for (int i = 0; i < src->number_of_groups; i++) {
+                        // Copy number of proxies
+                        dest->group_config[i].number_proxies = src->group_config[i].number_proxies;
+                        
+                        // Copy endpoint configuration if it exists
+                        if (src->group_config[i].endpoint_config) {
+                                dest->group_config[i].endpoint_config = malloc(sizeof(asl_endpoint_configuration));
+                                if (!dest->group_config[i].endpoint_config) {
+                                        LOG_ERROR("Failed to allocate memory for endpoint_config");
+                                        cleanup_application_config(dest);
+                                        free(dest);
+                                        return NULL;
+                                }
+                                
+                                // Copy the main endpoint structure
+                                memcpy(dest->group_config[i].endpoint_config, 
+                                       src->group_config[i].endpoint_config, 
+                                       sizeof(asl_endpoint_configuration));
+                                
+                                // Now handle the dynamically allocated members of endpoint_config
+                                if (src->group_config[i].endpoint_config->ciphersuites) {
+                                        dest->group_config[i].endpoint_config->ciphersuites = 
+                                                duplicate_string(src->group_config[i].endpoint_config->ciphersuites);
+                                }
+                                
+                                if (src->group_config[i].endpoint_config->keylog_file) {
+                                        dest->group_config[i].endpoint_config->keylog_file = 
+                                                duplicate_string(src->group_config[i].endpoint_config->keylog_file);
+                                }
+                                
+                                // Deep copy device certificate chain buffer
+                                if (src->group_config[i].endpoint_config->device_certificate_chain.buffer && 
+                                    src->group_config[i].endpoint_config->device_certificate_chain.size > 0) {
+                                        uint8_t* new_buffer = malloc(src->group_config[i].endpoint_config->device_certificate_chain.size);
+                                        if (!new_buffer) {
+                                                LOG_ERROR("Failed to allocate memory for device_certificate_chain buffer");
+                                                cleanup_application_config(dest);
+                                                free(dest);
+                                                return NULL;
+                                        }
+                                        
+                                        memcpy(new_buffer, 
+                                               src->group_config[i].endpoint_config->device_certificate_chain.buffer,
+                                               src->group_config[i].endpoint_config->device_certificate_chain.size);
+                                               
+                                        dest->group_config[i].endpoint_config->device_certificate_chain.buffer = new_buffer;
+                                        dest->group_config[i].endpoint_config->device_certificate_chain.size = 
+                                                src->group_config[i].endpoint_config->device_certificate_chain.size;
+                                }
+                                
+                                // Deep copy root certificate buffer
+                                if (src->group_config[i].endpoint_config->root_certificate.buffer && 
+                                    src->group_config[i].endpoint_config->root_certificate.size > 0) {
+                                        uint8_t* new_buffer = malloc(src->group_config[i].endpoint_config->root_certificate.size);
+                                        if (!new_buffer) {
+                                                LOG_ERROR("Failed to allocate memory for root_certificate buffer");
+                                                cleanup_application_config(dest);
+                                                free(dest);
+                                                return NULL;
+                                        }
+                                        
+                                        memcpy(new_buffer, 
+                                               src->group_config[i].endpoint_config->root_certificate.buffer,
+                                               src->group_config[i].endpoint_config->root_certificate.size);
+                                               
+                                        dest->group_config[i].endpoint_config->root_certificate.buffer = new_buffer;
+                                        dest->group_config[i].endpoint_config->root_certificate.size = 
+                                                src->group_config[i].endpoint_config->root_certificate.size;
+                                }
+                                
+                                // Deep copy private key buffer
+                                if (src->group_config[i].endpoint_config->private_key.buffer && 
+                                    src->group_config[i].endpoint_config->private_key.size > 0) {
+                                        uint8_t* new_buffer = malloc(src->group_config[i].endpoint_config->private_key.size);
+                                        if (!new_buffer) {
+                                                LOG_ERROR("Failed to allocate memory for private_key buffer");
+                                                cleanup_application_config(dest);
+                                                free(dest);
+                                                return NULL;
+                                        }
+                                        
+                                        memcpy(new_buffer, 
+                                               src->group_config[i].endpoint_config->private_key.buffer,
+                                               src->group_config[i].endpoint_config->private_key.size);
+                                               
+                                        dest->group_config[i].endpoint_config->private_key.buffer = new_buffer;
+                                        dest->group_config[i].endpoint_config->private_key.size = 
+                                                src->group_config[i].endpoint_config->private_key.size;
+                                }
+                        }
+                        
+                        // Copy proxy_wrapper array if it exists
+                        if (src->group_config[i].number_proxies > 0 && src->group_config[i].proxy_wrapper) {
+                                dest->group_config[i].proxy_wrapper = 
+                                        malloc(src->group_config[i].number_proxies * sizeof(struct proxy_wrapper));
+                                        
+                                if (!dest->group_config[i].proxy_wrapper) {
+                                        LOG_ERROR("Failed to allocate memory for proxy_wrapper array");
+                                        cleanup_application_config(dest);
+                                        free(dest);
+                                        return NULL;
+                                }
+                                
+                                // Copy each proxy wrapper
+                                for (int j = 0; j < src->group_config[i].number_proxies; j++) {
+                                        // Copy basic fields
+                                        dest->group_config[i].proxy_wrapper[j].proxy_id = src->group_config[i].proxy_wrapper[j].proxy_id;
+                                        dest->group_config[i].proxy_wrapper[j].direction = src->group_config[i].proxy_wrapper[j].direction;
+                                        
+                                        // Copy proxy config
+                                        memcpy(&dest->group_config[i].proxy_wrapper[j].proxy_config,
+                                               &src->group_config[i].proxy_wrapper[j].proxy_config,
+                                               sizeof(proxy_config));
+                                               
+                                        // Deep copy own_ip_address
+                                        if (src->group_config[i].proxy_wrapper[j].proxy_config.own_ip_address) {
+                                                dest->group_config[i].proxy_wrapper[j].proxy_config.own_ip_address = 
+                                                        duplicate_string(src->group_config[i].proxy_wrapper[j].proxy_config.own_ip_address);
+                                        }
+                                        
+                                        // Deep copy target_ip_address
+                                        if (src->group_config[i].proxy_wrapper[j].proxy_config.target_ip_address) {
+                                                dest->group_config[i].proxy_wrapper[j].proxy_config.target_ip_address = 
+                                                        duplicate_string(src->group_config[i].proxy_wrapper[j].proxy_config.target_ip_address);
+                                        }
+                                        
+                                        // Deep copy name
+                                        if (src->group_config[i].proxy_wrapper[j].name) {
+                                                dest->group_config[i].proxy_wrapper[j].name = 
+                                                        duplicate_string(src->group_config[i].proxy_wrapper[j].name);
+                                        }
+                                }
+                        }
+                }
+        }
+        
+        return dest;
 }

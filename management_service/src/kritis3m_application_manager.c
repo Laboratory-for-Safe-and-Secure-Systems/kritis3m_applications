@@ -136,7 +136,6 @@ static int stop_running_proxies(struct application_manager_config* config);
 static int restore_network_interfaces(struct hardware_configs* hw_configs);
 static int prepare_network_interfaces(struct hardware_configs* hw_configs);
 static int start_proxies(struct application_manager_config* config);
-static void cleanup_config_resources(struct application_manager_config* config, struct hardware_configs* hw_configs);
 static int start_proxy_backend(void);
 static int handle_config_change_request(struct application_manager* manager, struct application_manager_config* new_config, 
                                       struct hardware_configs* new_hw_configs, 
@@ -338,18 +337,43 @@ int handle_management_message(struct application_manager* manager)
                         break;
                 }
         case APPLICATION_START_REQUEST:
+                {
+                        LOG_DEBUG("Received application start request");
+                        
+                        // The configurations are already deep copies, so we can take ownership directly
+                        struct application_manager_config* new_config = msg.data.start_config.application_config;
+                        struct hardware_configs* new_hw_configs = msg.data.start_config.hw_configs;
+                        
+                        if (!new_config || !new_hw_configs) {
+                                respond_with(manager->management_pair[THREAD_INT], MSG_ERROR);
+                                LOG_ERROR("Invalid configurations received");
+                                return 0;
+                        }
 
+                        // Notify that we successfully received the request
+                        respond_with(manager->management_pair[THREAD_INT], MSG_OK);
+                        
+                        // Use the same handler as for configuration changes, but with NULL callback
+                        ret = handle_config_change_request(manager, new_config, new_hw_configs, NULL);
+                        return ret;
+                }
         case CHANGE_APPLICATION_CONFIG_REQUEST:
                 {
                         LOG_DEBUG("Received change application config request");
 
-                        struct application_manager_config* new_config = msg.data.change_config.application_config;
-                        struct hardware_configs* new_hw_configs = msg.data.change_config.hw_configs;
+                        struct application_manager_config* new_config = deep_copy_application_config(msg.data.change_config.application_config);
+                        struct hardware_configs* new_hw_configs = deep_copy_hardware_configs(msg.data.change_config.hw_configs);
                         int (*callback)(struct coordinator_status*) = msg.data.change_config.callback;
 
                         if (!callback || new_config == NULL) {
                                 respond_with(manager->management_pair[THREAD_INT], MSG_ERROR);
                                 LOG_ERROR("No callback function provided or invalid configuration");
+                                if (new_config != NULL) {
+                                        free(new_config);
+                                }
+                                if (new_hw_configs != NULL) {
+                                        free(new_hw_configs);
+                                }
                                 return 0;
                         } else {
                                 // Only notifies that we successfully received the request
@@ -444,6 +468,7 @@ static int handle_rollback(struct application_manager* manager)
                         LOG_WARN("Failed to restore network interfaces, continuing with configuration change");
                 }
                 cleanup_hardware_configs(manager->hw_configs);
+                free(manager->hw_configs);
                 manager->hw_configs = NULL;
                 
         }
@@ -495,18 +520,22 @@ static int handle_rollback(struct application_manager* manager)
         }
         if (manager->app_config != NULL) {
                 cleanup_application_config(manager->app_config);
+                free(manager->app_config);
                 manager->app_config = NULL;
         }
         if (manager->hw_configs != NULL) {
                 cleanup_hardware_configs(manager->hw_configs);
+                free(manager->hw_configs);
                 manager->hw_configs = NULL;
         }
         if (manager->backup_app_config != NULL) {
                 cleanup_application_config(manager->backup_app_config);
+                free(manager->backup_app_config);
                 manager->backup_app_config = NULL;
         }
         if (manager->backup_hw_configs != NULL) {
                 cleanup_hardware_configs(manager->backup_hw_configs);
+                free(manager->backup_hw_configs);
                 manager->backup_hw_configs = NULL;
         }
         return -1;
@@ -608,6 +637,8 @@ static int handle_config_change_request(struct application_manager* manager,
         // Step 7: Clean up old backup configurations and update backups
         if (manager->backup_app_config != NULL) {
                 cleanup_application_config(manager->backup_app_config);
+                free(manager->backup_app_config);
+                manager->backup_app_config = NULL;
         }
         if (backup_config != NULL) {
                 manager->backup_app_config = backup_config;
@@ -615,6 +646,8 @@ static int handle_config_change_request(struct application_manager* manager,
         
         if (manager->backup_hw_configs != NULL) {
                 cleanup_hardware_configs(manager->backup_hw_configs);
+                free(manager->backup_hw_configs);
+                manager->backup_hw_configs = NULL;
         }
         if (backup_hw_configs != NULL) {
                 manager->backup_hw_configs = backup_hw_configs;
@@ -650,12 +683,14 @@ rollback:
         
         if (new_config_applied) {
                 cleanup_application_config(new_config);
+                free(new_config);
                 new_config = NULL;
         }
         
         if (new_hw_configs_applied) {
                 restore_interfaces(new_hw_configs->hw_configs, new_hw_configs->number_of_hw_configs);
                 cleanup_hardware_configs(new_hw_configs);
+                free(new_hw_configs);
                 new_hw_configs = NULL;
         }
         
@@ -673,8 +708,16 @@ rollback:
                 if (ret < 0) {
                         LOG_ERROR("Failed to start backup proxies, shutting down application manager");
                         tls_proxy_backend_terminate();
-                        cleanup_application_config(backup_config);
-                        cleanup_hardware_configs(backup_hw_configs);
+                        if (backup_config != NULL) {
+                                cleanup_application_config(backup_config);
+                                free(backup_config);
+                                backup_config = NULL;
+                        }
+                        if (backup_hw_configs != NULL) {
+                                cleanup_hardware_configs(backup_hw_configs);
+                                free(backup_hw_configs);
+                                backup_hw_configs = NULL;
+                        }
                         
                         pthread_mutex_lock(&manager->manager_mutex);
                         manager->backup_app_config = NULL;
@@ -809,22 +852,6 @@ static int start_proxies(struct application_manager_config* config)
         return 0;
 }
 
-/**
- * @brief Cleans up resources associated with configuration structures
- * 
- * @param config The application configuration to clean up
- * @param hw_configs The hardware configuration to clean up
- */
-static void cleanup_config_resources(struct application_manager_config* config, struct hardware_configs* hw_configs)
-{
-        if (config) {
-                cleanup_application_config(config);
-        }
-        
-        if (hw_configs) {
-                cleanup_hardware_configs(hw_configs);
-        }
-}
 
 // application manager main thread
 void* application_service_main_thread(void* arg)
@@ -1063,6 +1090,9 @@ void cleanup_application_manager(void)
 /**
  * @brief Changes the current application configuration.
  *
+ * This function sends a request to change the current application configuration
+ * with a new one. The previous configuration will be stored as a backup.
+ *
  * @param new_config Pointer to the new application manager configuration.
  * @return int Returns 0 on success, or an error code on failure.
  */
@@ -1095,6 +1125,8 @@ int change_application_config(struct application_manager_config* new_config,
 /**
  * @brief Starts an application with the provided configuration.
  *
+ * This function sends a request to start an application with the given configuration.
+ *
  * @param config Pointer to the application manager configuration.
  * @return int Returns 0 on success, or an error code on failure.
  */
@@ -1120,10 +1152,21 @@ int start_application(struct application_manager_config* config, struct hardware
                 return -1;
         }
 
+        // Create deep copies of the configurations
+        struct application_manager_config* config_copy = deep_copy_application_config(config);
+        struct hardware_configs* hw_configs_copy = deep_copy_hardware_configs(hw_configs);
+        
+        if (!config_copy || !hw_configs_copy) {
+                LOG_ERROR("Failed to create deep copies of configurations");
+                if (config_copy) free(config_copy);
+                if (hw_configs_copy) free(hw_configs_copy);
+                return -1;
+        }
+
         application_management_message msg = {0};
         msg.msg_type = APPLICATION_START_REQUEST;
-        msg.data.start_config.application_config = config;
-        msg.data.start_config.hw_configs = hw_configs;
+        msg.data.start_config.application_config = config_copy;
+        msg.data.start_config.hw_configs = hw_configs_copy;
 
         enum MSG_RESPONSE_CODE resp = external_management_request(manager.management_pair[THREAD_EXT],
                                                                   &msg,
