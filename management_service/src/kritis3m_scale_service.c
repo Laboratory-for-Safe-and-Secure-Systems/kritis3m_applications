@@ -313,7 +313,7 @@ void* kritis3m_service_main_thread(void* arg)
 
         while (1)
         {
-                ret = poll(svc->pollfd.fds, svc->pollfd.num_fds, -1);
+                ret = poll(svc->pollfd.fds, svc->pollfd.num_fds, 10000);
 
                 if (ret == -1)
                 {
@@ -322,6 +322,23 @@ void* kritis3m_service_main_thread(void* arg)
                 }
                 if (ret == 0)
                 {
+                        LOG_DEBUG("check control plane health");
+                        enum MSG_RESPONSE_CODE ret = initiate_hello_message(true);
+                        if (ret != MSG_OK)
+                        {
+                                LOG_ERROR("Failed to send hello message: "
+                                          "%d",
+                                          ret);
+                                          LOG_WARN("control plane not running, trying to restart");
+                                                const struct sysconfig* sys_config = get_sysconfig();
+                                                struct control_plane_conn_config_t conn_config = {0};
+                                                conn_config.serialnumber = sys_config->serial_number;
+                                                conn_config.endpoint_config = sys_config->endpoint_config;
+                                                conn_config.mqtt_broker_host = sys_config->broker_host;
+                                          stop_control_plane_conn();
+                                          sleep(1);
+                                          start_control_plane_conn(&conn_config);
+                        }
                         continue;
                 }
                 for (int i = 0; i < svc->pollfd.num_fds; i++)
@@ -911,7 +928,8 @@ static int handle_policy_status_update(struct dataplane_update_coordinator* upda
                 {
                         application_manager_rollback();
                 }
-                return 1; // Signal to finish
+                //rollback might be sucessfull, but the transaction responsible for the update process of config.json should fail, to keep the old state
+                return -1; // Signal to finish
 
         case UPDATE_APPLYREQUEST:
                 LOG_INFO("Coordinator: State UPDATE_APPLYREQUEST");
@@ -1012,10 +1030,12 @@ int validate_dataplane_config(void* context, char* config, size_t size)
 
                 if (ret == 0)
                 {
+                        // in case of timeout, we rollback
                         LOG_ERROR("Timeout occurred");
                         policy_msg.state = UPDATE_ERROR;
                         policy_msg.msg = "Timeout occurred";
                         send_policy_status_message(&policy_msg);
+
                         if (update->state == UPDATE_APPLIED)
                         {
                                 application_manager_rollback();
@@ -1025,10 +1045,12 @@ int validate_dataplane_config(void* context, char* config, size_t size)
 
                 if (update_pollfd.revents & POLLERR)
                 {
+
                         LOG_ERROR("Poll error event: %d", errno);
                         policy_msg.state = UPDATE_ERROR;
                         policy_msg.msg = "Internal error";
                         send_policy_status_message(&policy_msg);
+
                         if (update->state == UPDATE_APPLIED)
                         {
                                 application_manager_rollback();

@@ -101,7 +101,7 @@ enum control_plane_conn_message_type
         CONTROL_PLANE_SEND_HELLO,
         CONTROL_PLANE_SEND_POLICY_STATUS,
         CONTROL_PLANE_SEND_LOG,
-        CONTROL_PLANE_ENABLE_SYNC,
+        CONTROL_PLANE_ENABLE_SYNC
 };
 
 struct control_plane_conn_message

@@ -98,6 +98,7 @@ struct application_manager
         int status_timer_fd;  // Timer for status updates
 
         bool timer_initialized;
+        pthread_mutex_t manager_mutex; // Mutex for protecting manager data
 };
 
 // main application manager instance used by the main thread
@@ -124,10 +125,8 @@ int prepare_all_interfaces(HardwareConfiguration hw_config[], int num_configs);
 int restore_interfaces(HardwareConfiguration hw_config[], int num_configs);
 
 void cleanup_application_manager(void);
+static int handle_rollback(struct application_manager* manager);
 int handle_management_message(struct application_manager* manager);
-int start_application_config(struct application_manager* manager,
-                             struct application_manager_config* config,
-                             struct hardware_configs* hw_configs);
 
 static int init_status_timer(struct application_manager* manager);
 static void cleanup_status_timer(struct application_manager* manager);
@@ -157,6 +156,9 @@ void init_application_manager(void)
         pthread_attr_init(&manager.thread_attr);
         pthread_attr_setdetachstate(&manager.thread_attr, PTHREAD_CREATE_JOINABLE);
         sem_init(&manager.thread_setup_sem, 0, 0);
+        
+        // Initialize the mutex
+        pthread_mutex_init(&manager.manager_mutex, NULL);
 }
 
 // start application manager
@@ -359,71 +361,11 @@ int handle_management_message(struct application_manager* manager)
                 }
         case APPLICATION_ROLLBACK_REQUEST:
                 {
-                        LOG_INFO("Received application rollback request");
+                        LOG_DEBUG("Received application rollback request");
                         respond_with(manager->management_pair[THREAD_INT], MSG_OK);
 
-                        // cleanup current config
-                        if (manager->app_config != NULL)
-                        {
-                                tls_proxy_backend_terminate();
-                                cleanup_application_config(manager->app_config);
-                                manager->app_config = NULL;
-                        }
-
-                        if (manager->hw_configs != NULL)
-                        {
-                                ret = restore_interfaces(manager->hw_configs->hw_configs,
-                                                         manager->hw_configs->number_of_hw_configs);
-                                if (ret < 0)
-                                {
-                                        LOG_ERROR("Failed to restore current network "
-                                                  "interfaces during rollback");
-                                }
-                                cleanup_hardware_configs(manager->hw_configs);
-                                manager->hw_configs = NULL;
-                        }
-
-                        // Check if backup configuration exists
-                        if (manager->backup_app_config != NULL && manager->backup_hw_configs != NULL)
-                        {
-
-                                struct proxy_backend_config config = {0};
-                                config.log_level = LOG_LVL_WARN;
-                                ret = tls_proxy_backend_run(&config);
-                                if (ret < 0)
-                                {
-                                        LOG_ERROR("Failed to restart TLS proxy backend during "
-                                                  "rollback");
-                                        respond_with(manager->management_pair[THREAD_INT], MSG_ERROR);
-                                        return ret;
-                                }
-
-                                // Step 5: Apply backup configuration
-                                struct application_manager_config* backup_config = manager->backup_app_config;
-                                struct hardware_configs* backup_hw_configs = manager->backup_hw_configs;
-
-                                // Start application with backup config
-                                ret = start_application_config(manager, backup_config, backup_hw_configs);
-                                if (ret < 0)
-                                {
-                                        LOG_ERROR("Failed to apply backup configuration during "
-                                                  "rollback");
-                                        cleanup_application_config(backup_config);
-                                        cleanup_hardware_configs(backup_hw_configs);
-                                        free(backup_config);
-                                        free(backup_hw_configs);
-                                        backup_config = NULL;
-                                        backup_hw_configs = NULL;
-                                }
-                                else
-                                {
-                                        manager->backup_app_config = NULL;
-                                        manager->backup_hw_configs = NULL;
-                                }
-
-                                LOG_INFO("Successfully rolled back to previous configuration");
-                        }
-                        break;
+                        ret = handle_rollback(manager);
+                        return ret;
                 }
         case STOP_APPLICATION_MANAGER_REQUEST:
                 {
@@ -471,6 +413,114 @@ int handle_management_message(struct application_manager* manager)
  * @param callback Callback function to notify about the result
  * @return int 0 on success, -1 on failure
  */
+static int handle_rollback(struct application_manager* manager)
+{
+        int ret = 0;
+        
+        struct application_manager_config* new_config = manager->backup_app_config;
+        struct hardware_configs* new_hw_configs = manager->backup_hw_configs;
+
+        // Track resource initialization status
+        bool new_hw_configs_applied = false;
+        bool new_config_applied = false;
+        bool proxy_backend_started = false;
+
+        
+        // Step 1: Save current configuration as backup if it exists
+        if (manager->app_config != NULL) {
+                ret = stop_running_proxies(manager->app_config);
+                if (ret < 0) {
+                        LOG_WARN("Failed to stop some proxies, continuing with configuration change");
+                }
+                cleanup_application_config(manager->app_config);
+                manager->app_config = NULL;
+                tls_proxy_backend_terminate();
+        }
+        
+        // Step 2: Save current hardware configuration as backup if it exists
+        if (manager->hw_configs != NULL) {
+                ret = restore_network_interfaces(manager->hw_configs);
+                if (ret < 0) {
+                        LOG_WARN("Failed to restore network interfaces, continuing with configuration change");
+                }
+                cleanup_hardware_configs(manager->hw_configs);
+                manager->hw_configs = NULL;
+                
+        }
+        LOG_DEBUG("Running applications are shut down during rollback");
+        LOG_DEBUG("Starting backup application if available");
+
+        
+        // Step 3: Apply hardware configuration if provided
+        if (new_hw_configs != NULL && new_hw_configs->hw_configs != NULL) {
+                ret = prepare_network_interfaces(new_hw_configs);
+                if (ret < 0) {
+                        LOG_ERROR("Failed to prepare network interfaces");
+                        // Continue anyway, not critical for proxy setup
+                }
+                new_hw_configs_applied = true;
+                manager->hw_configs = new_hw_configs;
+                new_hw_configs = NULL;
+        }
+
+        //if backup config exists, it is applied
+        if (new_config != NULL && new_config->group_config != NULL) {
+                // Step 4: Start TLS proxy backend
+                ret = start_proxy_backend();
+                if (ret < 0) {
+                        LOG_ERROR("Failed to start proxy backend");
+                        goto cleanup;
+                }
+                proxy_backend_started = true;
+        
+                // Step 5: Start proxies from new configuration
+                ret = start_proxies(new_config);
+                if (ret < 0) {
+                        LOG_ERROR("Failed to start proxies");
+                        goto cleanup;
+                }
+                manager->app_config = new_config;
+        }
+
+        manager->backup_app_config = NULL;
+        manager->backup_hw_configs = NULL;
+        
+        
+        
+        return 0;
+        //cleanup is called, if we can't init the backup config,
+        cleanup:
+        if (proxy_backend_started) {
+                tls_proxy_backend_terminate();
+        }
+        if (manager->app_config != NULL) {
+                cleanup_application_config(manager->app_config);
+                manager->app_config = NULL;
+        }
+        if (manager->hw_configs != NULL) {
+                cleanup_hardware_configs(manager->hw_configs);
+                manager->hw_configs = NULL;
+        }
+        if (manager->backup_app_config != NULL) {
+                cleanup_application_config(manager->backup_app_config);
+                manager->backup_app_config = NULL;
+        }
+        if (manager->backup_hw_configs != NULL) {
+                cleanup_hardware_configs(manager->backup_hw_configs);
+                manager->backup_hw_configs = NULL;
+        }
+        return -1;
+}
+
+/**
+ * @brief Handles the configuration change request with proper error handling and rollback
+ * 
+ * @param manager The application manager instance
+ * @param new_config The new application config to apply
+ * @param new_hw_configs The new hardware configs to apply
+ * @param callback Callback function to notify about the result
+ * @return int 0 on success, -1 on failure
+ */
 static int handle_config_change_request(struct application_manager* manager, 
                                       struct application_manager_config* new_config, 
                                       struct hardware_configs* new_hw_configs, 
@@ -489,11 +539,18 @@ static int handle_config_change_request(struct application_manager* manager,
         bool new_config_applied = false;
         bool proxy_backend_started = false;
         
+        // Lock the mutex before modifying manager data
+        pthread_mutex_lock(&manager->manager_mutex);
+        
         // Step 1: Save current configuration as backup if it exists
         if (manager->app_config != NULL) {
                 backup_config = manager->app_config;
                 manager->app_config = NULL;
+                
+                pthread_mutex_unlock(&manager->manager_mutex);  // Unlock during potentially long operation
                 ret = stop_running_proxies(backup_config);
+                pthread_mutex_lock(&manager->manager_mutex);    // Re-lock
+                
                 if (ret < 0) {
                         LOG_WARN("Failed to stop some proxies, continuing with configuration change");
                 }
@@ -506,12 +563,17 @@ static int handle_config_change_request(struct application_manager* manager,
                 manager->hw_configs = NULL;
                 
                 // Restore previous network configuration
+                pthread_mutex_unlock(&manager->manager_mutex);  // Unlock during potentially long operation
                 ret = restore_network_interfaces(backup_hw_configs);
+                pthread_mutex_lock(&manager->manager_mutex);    // Re-lock
+                
                 if (ret < 0) {
                         LOG_WARN("Failed to restore network interfaces, continuing with configuration change");
                 }
         }
         
+        pthread_mutex_unlock(&manager->manager_mutex);  // Unlock for long operations
+
         // Step 3: Apply new hardware configuration if provided
         if (new_hw_configs != NULL && new_hw_configs->hw_configs != NULL) {
                 ret = prepare_network_interfaces(new_hw_configs);
@@ -539,33 +601,41 @@ static int handle_config_change_request(struct application_manager* manager,
         new_config_applied = true;
         
         // Step 6: Update manager with new configurations
+        pthread_mutex_lock(&manager->manager_mutex);
         manager->app_config = new_config;
         manager->hw_configs = new_hw_configs;
         
-        // Step 7: Notify coordinator about successful update
+        // Step 7: Clean up old backup configurations and update backups
+        if (manager->backup_app_config != NULL) {
+                cleanup_application_config(manager->backup_app_config);
+        }
+        if (backup_config != NULL) {
+                manager->backup_app_config = backup_config;
+        }
+        
+        if (manager->backup_hw_configs != NULL) {
+                cleanup_hardware_configs(manager->backup_hw_configs);
+        }
+        if (backup_hw_configs != NULL) {
+                manager->backup_hw_configs = backup_hw_configs;
+        }
+        pthread_mutex_unlock(&manager->manager_mutex);
+        
+        // Notify coordinator about successful update
         policy_msg.state = UPDATE_APPLIED;
         policy_msg.msg = "Successfully applied new configuration";
         if ((ret = callback(&policy_msg)) < 0) {
                 LOG_ERROR("Failed to notify coordinator about new configuration.");
         }
         
-        // Step 8: Clean up old backup configurations and update backups
-        if (manager->backup_app_config != NULL) {
-                cleanup_application_config(manager->backup_app_config);
-                manager->backup_app_config = backup_config;
-        }
-        
-        if (manager->backup_hw_configs != NULL) {
-                cleanup_hardware_configs(manager->backup_hw_configs);
-                manager->backup_hw_configs = backup_hw_configs;
-        }
-        
         return 0;
         
 rollback:
         // Rollback procedure if something went wrong
+        pthread_mutex_lock(&manager->manager_mutex);
         manager->app_config = backup_config; 
         manager->hw_configs = backup_hw_configs;
+        pthread_mutex_unlock(&manager->manager_mutex);
         
         // Notify coordinator about failure
         policy_msg.state = UPDATE_ERROR;
@@ -592,11 +662,9 @@ rollback:
         // Attempt to restore backup configuration
         if (backup_hw_configs != NULL) {
                 prepare_network_interfaces(backup_hw_configs);
-                manager->app_config = backup_config;
-        }
+            }
         
         if (backup_config != NULL) {
-                manager->app_config = backup_config;
                 // Start the proxy backend again
                 start_proxy_backend();
                 
@@ -607,8 +675,12 @@ rollback:
                         tls_proxy_backend_terminate();
                         cleanup_application_config(backup_config);
                         cleanup_hardware_configs(backup_hw_configs);
+                        
+                        pthread_mutex_lock(&manager->manager_mutex);
                         manager->backup_app_config = NULL;
                         manager->backup_hw_configs = NULL;
+                        pthread_mutex_unlock(&manager->manager_mutex);
+                        
                         return -1;
                 }
         }
@@ -759,13 +831,10 @@ void* application_service_main_thread(void* arg)
 {
         int ret = 0;
         struct application_manager* manager = (struct application_manager*) arg;
-        ret = create_socketpair(manager->management_pair);
-        if (ret < 0)
-        {
-                LOG_ERROR("failed to create socketpair");
-                goto cleanup_application_service;
-        }
-
+        
+        // Don't create a new socketpair - it's already created in start_application_manager
+        // and we need to use the same one for communication between threads
+        
         // Initialize the status timer
         ret = init_status_timer(manager);
         if (ret < 0)
@@ -777,26 +846,32 @@ void* application_service_main_thread(void* arg)
         struct pollfd poll_fd[2];
         poll_fd[THREAD_INT].fd = manager->management_pair[THREAD_INT];
         poll_fd[THREAD_INT].events = POLLIN;
+
         poll_fd[1].fd = manager->status_timer_fd;
         poll_fd[1].events = POLLIN;
+        
+        LOG_DEBUG("Poll setup: management fd=%d, timer fd=%d", 
+                 poll_fd[THREAD_INT].fd, poll_fd[1].fd);
 
         manager->initialized = true;
         sem_post(&manager->thread_setup_sem);
 
-        // Initial status update
-        update_proxy_status_json(manager);
-
         while (1)
         {
+                LOG_DEBUG("Waiting for events...");
                 ret = poll(poll_fd, 2, -1);
                 if (ret < 0)
                 {
                         LOG_ERROR("Poll error: %s", strerror(errno));
                         continue;
                 }
+                
+                LOG_DEBUG("Poll returned %d events, revents[0]=%d, revents[1]=%d", 
+                         ret, poll_fd[THREAD_INT].revents, poll_fd[1].revents);
 
                 if (poll_fd[THREAD_INT].revents & POLLIN)
                 {
+                        LOG_DEBUG("Management message received");
                         ret = handle_management_message(manager);
                         if (ret > 0)
                         {
@@ -812,11 +887,17 @@ void* application_service_main_thread(void* arg)
 
                 if (poll_fd[1].revents & POLLIN)
                 {
+                        LOG_DEBUG("Timer event received");
                         uint64_t exp;
                         ssize_t s = read(manager->status_timer_fd, &exp, sizeof(uint64_t));
                         if (s == sizeof(uint64_t))
                         {
+                                LOG_DEBUG("Read %llu timer expirations", (unsigned long long)exp);
                                 update_proxy_status_json(manager);
+                        }
+                        else
+                        {
+                                LOG_ERROR("Failed to read timer: %s", strerror(errno));
                         }
                 }
         }
@@ -930,6 +1011,9 @@ bool confirm_client(int application_id, struct sockaddr* connecting_client)
 void cleanup_application_manager(void)
 {
         int ret = 0;
+        
+        pthread_mutex_lock(&manager.manager_mutex);
+        
         manager.initialized = false;
         manager.management_pair[THREAD_EXT] = -1;
         manager.management_pair[THREAD_INT] = -1;
@@ -968,8 +1052,11 @@ void cleanup_application_manager(void)
                 cJSON_Delete(manager.proxy_status_json);
                 manager.proxy_status_json = NULL;
         }
+        
+        pthread_mutex_unlock(&manager.manager_mutex);
 
         pthread_attr_destroy(&manager.thread_attr);
+        pthread_mutex_destroy(&manager.manager_mutex);
 }
 
 // Application management API implementations
@@ -1079,11 +1166,13 @@ static int init_status_timer(struct application_manager* manager)
                 LOG_ERROR("Failed to create status timer: %s", strerror(errno));
                 return -1;
         }
+        LOG_DEBUG("Created timer fd: %d", manager->status_timer_fd);
 
-        // Set timer interval to 40 seconds as mentioned in the code comment
-        its.it_value.tv_sec = 40;
+        // Set timer interval to 20 seconds
+        memset(&its, 0, sizeof(struct itimerspec));
+        its.it_value.tv_sec = 20;    // First expiration after 20 seconds
         its.it_value.tv_nsec = 0;
-        its.it_interval.tv_sec = 40;
+        its.it_interval.tv_sec = 20; // Repeat every 20 seconds
         its.it_interval.tv_nsec = 0;
 
         // Start timer
@@ -1094,9 +1183,10 @@ static int init_status_timer(struct application_manager* manager)
                 close(manager->status_timer_fd);
                 return -1;
         }
+        LOG_DEBUG("Started timer with 20-second interval");
 
         manager->timer_initialized = true;
-        LOG_INFO("Status timer initialized successfully");
+        LOG_INFO("Status timer initialized successfully with 20-second interval");
         return 0;
 }
 
@@ -1117,6 +1207,9 @@ static void update_proxy_status_json(struct application_manager* manager)
                 return;
         }
 
+        // Lock the mutex before accessing manager data
+        pthread_mutex_lock(&manager->manager_mutex);
+
         // Free existing JSON if it exists
         if (manager->proxy_status_json != NULL) {
                 cJSON_Delete(manager->proxy_status_json);
@@ -1127,6 +1220,7 @@ static void update_proxy_status_json(struct application_manager* manager)
         manager->proxy_status_json = cJSON_CreateObject();
         if (manager->proxy_status_json == NULL) {
                 LOG_ERROR("Failed to create JSON object");
+                pthread_mutex_unlock(&manager->manager_mutex);
                 return;
         }
 
@@ -1134,6 +1228,7 @@ static void update_proxy_status_json(struct application_manager* manager)
         if (!is_running() || manager->app_config == NULL) {
                 cJSON_AddStringToObject(manager->proxy_status_json, "status", "not_running");
                 cJSON_AddStringToObject(manager->proxy_status_json, "message", "Application manager not initialized");
+                pthread_mutex_unlock(&manager->manager_mutex);
                 return;
         }
 
@@ -1146,13 +1241,20 @@ static void update_proxy_status_json(struct application_manager* manager)
                 LOG_ERROR("Failed to create proxy statuses array");
                 cJSON_Delete(manager->proxy_status_json);
                 manager->proxy_status_json = NULL;
+                pthread_mutex_unlock(&manager->manager_mutex);
                 return;
         }
         cJSON_AddItemToObject(manager->proxy_status_json, "proxies", proxy_statuses);
 
+        // Take a local copy of needed information while holding the lock
+        struct application_manager_config* app_config_copy = manager->app_config;
+        
+        // We're done with direct manager access, release the lock
+        pthread_mutex_unlock(&manager->manager_mutex);
+
         // Iterate through all proxy groups
-        for (int i = 0; i < manager->app_config->number_of_groups; i++) {
-                struct group_config* group = &manager->app_config->group_config[i];
+        for (int i = 0; i < app_config_copy->number_of_groups; i++) {
+                struct group_config* group = &app_config_copy->group_config[i];
                 
                 for (int j = 0; j < group->number_proxies; j++) {
                         struct proxy_wrapper* proxy = &group->proxy_wrapper[j];
@@ -1207,68 +1309,4 @@ uint8_t* get_proxy_status(void) {
 
         // Return formatted JSON for running status
         return (uint8_t*)cJSON_PrintUnformatted((const cJSON*)manager.proxy_status_json);
-}
-
-/**
- * @brief Start an application configuration
- *
- * @param manager The application manager
- * @param config The application configuration to start
- * @param hw_configs Hardware configurations to apply
- * @return int 0 on success, -1 on failure
- */
-int start_application_config(struct application_manager* manager,
-                             struct application_manager_config* config,
-                             struct hardware_configs* hw_configs)
-{
-        int ret = 0;
-
-        if (config == NULL || manager == NULL || hw_configs == NULL)
-        {
-                LOG_ERROR("Invalid parameters");
-                return -1;
-        }
-
-        LOG_INFO("Starting application configuration with %d groups", config->number_of_groups);
-
-        // Step 1: Prepare hardware interfaces first
-        LOG_INFO("Preparing network interfaces");
-        if (hw_configs->hw_configs != NULL && hw_configs->number_of_hw_configs > 0)
-        {
-                ret = prepare_network_interfaces(hw_configs);
-                if (ret < 0)
-                {
-                        LOG_WARN("Failed to prepare network interfaces, continuing anyway");
-                }
-                LOG_INFO("Network interfaces prepared");
-        }
-        else
-        {
-                LOG_WARN("No hardware configurations available for network interfaces");
-        }
-        
-        // Step 2: Start the TLS proxy backend if not already running
-        ret = start_proxy_backend();
-        if (ret < 0)
-        {
-                LOG_ERROR("Failed to start TLS proxy backend");
-                return -1;
-        }
-
-        // Step 3: Start proxies
-        ret = start_proxies(config);
-        if (ret < 0)
-        {
-                LOG_ERROR("Failed to start proxies");
-                tls_proxy_backend_terminate();
-                return -1;
-        }
-
-        // Step 4: Set configs as active configs of manager
-        LOG_INFO("Setting new configuration as active");
-        manager->app_config = config;
-        manager->hw_configs = hw_configs;
-
-        LOG_INFO("Application configuration successfully started");
-        return 0;
 }
