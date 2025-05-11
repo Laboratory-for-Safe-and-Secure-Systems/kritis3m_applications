@@ -606,113 +606,133 @@ int parse_config(char* buffer,
 
         // Parse hardware configurations
         cJSON* hw_config_json = cJSON_GetObjectItem(node_update_item, "hardware_config");
-        if (!hw_config_json || !cJSON_IsArray(hw_config_json))
+        if (hw_config_json)
         {
-                LOG_ERROR("Invalid or missing hardware_config array");
-                cJSON_Delete(root);
-                return -1;
-        }
 
-        int hw_count = cJSON_GetArraySize(hw_config_json);
-        hw_configs->number_of_hw_configs = hw_count;
-        hw_configs->hw_configs = malloc(hw_count * sizeof(HardwareConfiguration));
-        if (!hw_configs->hw_configs)
-        {
-                LOG_ERROR("Failed to allocate memory for hardware configs");
-                cJSON_Delete(root);
-                return -1;
-        }
-
-        for (int i = 0; i < hw_count; i++)
-        {
-                cJSON* hw_item = cJSON_GetArrayItem(hw_config_json, i);
-                if (!hw_item || !cJSON_IsObject(hw_item))
+                if (!hw_config_json || !cJSON_IsArray(hw_config_json))
                 {
-                        LOG_ERROR("Invalid hardware config item at index %d", i);
-                        goto error_occured;
-                }
-                int ret = parse_hwconfig(hw_item, &hw_configs->hw_configs[i]);
-                if (ret < 0)
-                {
-                        LOG_ERROR("Failed to parse hardware config item at index %d", i);
-                        goto error_occured;
-                }
-        }
-
-        // Parse group configurations from group_proxy_update array
-        cJSON* groups_json = cJSON_GetObjectItem(node_update_item, "group_proxy_update");
-        if (!groups_json || !cJSON_IsArray(groups_json))
-        {
-                LOG_ERROR("Invalid or missing group_proxy_update array");
-                goto error_occured;
-        }
-
-        int group_count = cJSON_GetArraySize(groups_json);
-        config->number_of_groups = group_count;
-        config->group_config = malloc(group_count * sizeof(struct group_config));
-        if (!config->group_config)
-        {
-                LOG_ERROR("Failed to allocate memory for group configs");
-                goto error_occured;
-        }
-
-        for (int i = 0; i < group_count; i++)
-        {
-                cJSON* group_item = cJSON_GetArrayItem(groups_json, i);
-                if (!group_item || !cJSON_IsObject(group_item))
-                {
-                        LOG_ERROR("Invalid group config item at index %d", i);
-                        goto error_occured;
+                        LOG_ERROR("Invalid or missing hardware_config array");
+                        cJSON_Delete(root);
+                        return -1;
                 }
 
-                // Allocate and initialize endpoint configuration
-                config->group_config[i].endpoint_config = malloc(sizeof(asl_endpoint_configuration));
-                if (!config->group_config[i].endpoint_config)
+                int hw_count = cJSON_GetArraySize(hw_config_json);
+                hw_configs->number_of_hw_configs = hw_count;
+                hw_configs->hw_configs = malloc(hw_count * sizeof(HardwareConfiguration));
+                if (!hw_configs->hw_configs)
                 {
-                        LOG_ERROR("Failed to allocate memory for endpoint configuration");
-                        goto error_occured;
-                }
-                // Initialize with default values
-                *config->group_config[i].endpoint_config = asl_default_endpoint_config();
-
-                // Parse endpoint configuration
-                cJSON* endpoint_json = cJSON_GetObjectItem(group_item, "endpoint_config");
-                if (endpoint_json && cJSON_IsObject(endpoint_json))
-                {
-                        // Parse key exchange method
-                        parse_endpoint_config(config->group_config[i].endpoint_config, endpoint_json);
-                }
-                int group_log_level;
-                // Setup proxy configuration
-                cJSON* json_group_log_level = cJSON_GetObjectItem(group_item, "group_log_level");
-                if (cJSON_IsNumber(json_group_log_level))
-                {
-                        group_log_level = json_group_log_level->valueint;
+                        LOG_ERROR("Failed to allocate memory for hardware configs");
+                        cJSON_Delete(root);
+                        return -1;
                 }
 
-                // Parse proxies array to get number of proxies
-                cJSON* proxies = cJSON_GetObjectItem(group_item, "proxies");
-                if (proxies && cJSON_IsArray(proxies))
+                for (int i = 0; i < hw_count; i++)
                 {
-                        config->group_config[i].number_proxies = cJSON_GetArraySize(proxies);
-                        if (config->group_config[i].number_proxies > 0)
+                        cJSON* hw_item = cJSON_GetArrayItem(hw_config_json, i);
+                        if (!hw_item || !cJSON_IsObject(hw_item))
                         {
-                                config->group_config[i].proxy_wrapper = malloc(
-                                        config->group_config[i].number_proxies *
-                                        sizeof(struct proxy_wrapper));
-                                for (int j = 0; j < config->group_config[i].number_proxies; j++)
+                                LOG_ERROR("Invalid hardware config item at index %d", i);
+                                goto error_occured;
+                        }
+                        int ret = parse_hwconfig(hw_item, &hw_configs->hw_configs[i]);
+                        if (ret < 0)
+                        {
+                                LOG_ERROR("Failed to parse hardware config item at index %d", i);
+                                goto error_occured;
+                        }
+                }
+        }
+        else
+        {
+                LOG_WARN("No hardware configuration found");
+                hw_configs->number_of_hw_configs = 0;
+                hw_configs->hw_configs = NULL;
+        }
+        cJSON* groups_json = cJSON_GetObjectItem(node_update_item, "group_proxy_update");
+        if (groups_json)
+        {
+                if (!groups_json || !cJSON_IsArray(groups_json))
+                {
+                        LOG_ERROR("Invalid or missing group_proxy_update array");
+                        goto error_occured;
+                }
+
+                int group_count = cJSON_GetArraySize(groups_json);
+                config->number_of_groups = group_count;
+                config->group_config = malloc(group_count * sizeof(struct group_config));
+                if (!config->group_config)
+                {
+                        LOG_ERROR("Failed to allocate memory for group configs");
+                        goto error_occured;
+                }
+
+                for (int i = 0; i < group_count; i++)
+                {
+                        cJSON* group_item = cJSON_GetArrayItem(groups_json, i);
+                        if (!group_item || !cJSON_IsObject(group_item))
+                        {
+                                LOG_ERROR("Invalid group config item at index %d", i);
+                                goto error_occured;
+                        }
+
+                        // Allocate and initialize endpoint configuration
+                        config->group_config[i].endpoint_config = malloc(
+                                sizeof(asl_endpoint_configuration));
+                        if (!config->group_config[i].endpoint_config)
+                        {
+                                LOG_ERROR("Failed to allocate memory for endpoint configuration");
+                                goto error_occured;
+                        }
+                        // Initialize with default values
+                        *config->group_config[i].endpoint_config = asl_default_endpoint_config();
+
+                        // Parse endpoint configuration
+                        cJSON* endpoint_json = cJSON_GetObjectItem(group_item, "endpoint_config");
+                        if (endpoint_json && cJSON_IsObject(endpoint_json))
+                        {
+                                // Parse key exchange method
+                                parse_endpoint_config(config->group_config[i].endpoint_config,
+                                                      endpoint_json);
+                        }
+                        int group_log_level;
+                        // Setup proxy configuration
+                        cJSON* json_group_log_level = cJSON_GetObjectItem(group_item,
+                                                                          "group_log_level");
+                        if (cJSON_IsNumber(json_group_log_level))
+                        {
+                                group_log_level = json_group_log_level->valueint;
+                        }
+
+                        // Parse proxies array to get number of proxies
+                        cJSON* proxies = cJSON_GetObjectItem(group_item, "proxies");
+                        if (proxies && cJSON_IsArray(proxies))
+                        {
+                                config->group_config[i].number_proxies = cJSON_GetArraySize(proxies);
+                                if (config->group_config[i].number_proxies > 0)
                                 {
-                                        // call parse_proxy
-                                        cJSON* proxy = cJSON_GetArrayItem(proxies, j);
-                                        if (proxy && cJSON_IsObject(proxy))
+                                        config->group_config[i].proxy_wrapper = malloc(
+                                                config->group_config[i].number_proxies *
+                                                sizeof(struct proxy_wrapper));
+                                        for (int j = 0; j < config->group_config[i].number_proxies; j++)
                                         {
-                                                parse_proxy(proxy,
-                                                            &config->group_config[i].proxy_wrapper[j],
-                                                            group_log_level);
+                                                // call parse_proxy
+                                                cJSON* proxy = cJSON_GetArrayItem(proxies, j);
+                                                if (proxy && cJSON_IsObject(proxy))
+                                                {
+                                                        parse_proxy(proxy,
+                                                                    &config->group_config[i].proxy_wrapper[j],
+                                                                    group_log_level);
+                                                }
                                         }
                                 }
                         }
                 }
+        }
+        else
+        {
+                LOG_WARN("No group configuration found");
+                config->number_of_groups = 0;
+                config->group_config = NULL;
         }
         cJSON_Delete(root);
         return 0;
