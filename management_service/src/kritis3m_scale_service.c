@@ -112,7 +112,8 @@ ManagementReturncode handle_svc_message(int socket,
                                         service_message* msg,
                                         int cfg_id,
                                         int version_number,
-                                        struct est_configuration* est_config);
+                                        struct est_configuration* est_config, 
+                                        struct config_transaction* transaction);
 // init
 void* kritis3m_service_main_thread(void* arg);
 // http
@@ -291,6 +292,7 @@ void* kritis3m_service_main_thread(void* arg)
         start_application_manager();
         enable_proxy_reporting();
         struct est_configuration est_config = {0};
+        struct config_transaction transaction = {0};
 
         svc.initialized = true;
         enum appl_state
@@ -377,7 +379,8 @@ void* kritis3m_service_main_thread(void* arg)
                                                                                  &req,
                                                                                  cfg_id,
                                                                                  version_number,
-                                                                                 &est_config);
+                                                                                 &est_config,
+                                                                                 &transaction);
 
                                         if (return_code == MGMT_THREAD_STOP)
                                         {
@@ -512,7 +515,8 @@ ManagementReturncode handle_svc_message(int socket,
                                         service_message* msg,
                                         int cfg_id,
                                         int version_number,
-                                        struct est_configuration* est_config)
+                                        struct est_configuration* est_config, 
+                                        struct config_transaction* transaction)
 {
         int ret = 0;
         // to internal context
@@ -549,7 +553,9 @@ ManagementReturncode handle_svc_message(int socket,
                         const char* algo = msg->payload.cert_req.algo;
                         const char* alt_algo = msg->payload.cert_req.alt_algo;
                         enum CERT_TYPE cert_type = msg->payload.cert_req.cert_type;
+                        enum CONFIG_TYPE config_type;
                         config_notify_callback notify = NULL;
+                        config_validate_callback validate = NULL;
                         response_code = MSG_OK;
                         if (cert_type != CONFIG_DATAPLANE && cert_type != CONFIG_CONTROLPLANE || est_config == NULL)
                         {
@@ -571,23 +577,29 @@ ManagementReturncode handle_svc_message(int socket,
                         if (cert_type == CONFIG_DATAPLANE)
                         {
                                 notify = handle_notify_dataplane_cert;
+                                config_type = CONFIG_DATAPLANE;
+                                validate = validate_dataplane_certificate;
                         }
                         else if (cert_type == CONFIG_CONTROLPLANE)
                         {
+                                config_type = CONFIG_CONTROLPLANE;
                                 notify = handle_notify_controlplane_cert;
+                                validate = validate_controlplane_certificate;
+                        }else{
+                                LOG_ERROR("Invalid cert type");
+                                break;
                         }
 
-                        struct config_transaction transaction = {0};
 
-                        ret = init_config_transaction(&transaction,
-                                                      cert_type,
+                        ret = init_config_transaction(transaction,
+                                                      config_type,
                                                       &svc.pki_clinet_config,
                                                       est_config,
                                                       fetch_certificate,
-                                                      validate_dataplane_certificate,
+                                                      validate,
                                                       notify);
 
-                        ret = start_config_transaction(&transaction);
+                        ret = start_config_transaction(transaction);
                         if (ret < 0)
                         {
                                 LOG_ERROR("Failed to start dataplane transaction");
@@ -599,9 +611,7 @@ ManagementReturncode handle_svc_message(int socket,
                 {
                         LOG_INFO("Received data plane config apply request");
                         svc_respond_with(socket, MSG_OK);
-                        struct config_transaction transaction = {0};
-
-                        ret = init_config_transaction(&transaction,
+                        ret = init_config_transaction(transaction,
                                                       CONFIG_APPLICATION,
                                                       &coordinator,
                                                       NULL, // to_fetch is 0, transaction mechanism changed to to multple returnvalues in certificate update, which required to_fetch. Cleanup required in the future!
@@ -609,7 +619,7 @@ ManagementReturncode handle_svc_message(int socket,
                                                       // in this case, the testcase tests in production mode
                                                       validate_dataplane_config,
                                                       NULL);
-                        ret = start_config_transaction(&transaction);
+                        ret = start_config_transaction(transaction);
                         if (ret < 0)
                         {
                                 LOG_ERROR("Failed to start dataplane transaction");
@@ -743,16 +753,25 @@ static void cleanup_hello_timer(struct kritis3m_service* svc)
 static int fetch_certificate(void* context, enum CONFIG_TYPE type, void* to_fetch)
 {
         int ret = 0;
+        enum CERT_TYPE cert_type;
         if (!context || !to_fetch)
                 return -1;
 
         if (type == CONFIG_APPLICATION)
         {
                 return -1;
+        }else if (type == CONFIG_DATAPLANE)
+        {
+                cert_type = CERT_TYPE_DATAPLANE;
+        }else if (type == CONFIG_CONTROLPLANE)
+        {
+                cert_type = CERT_TYPE_CONTROLPLANE;
+        }else{
+                return -1;
         }
 
         if ((ret = blocking_est_request((struct pki_client_config_t*) context,
-                                        CERT_TYPE_DATAPLANE,
+                                        cert_type,
                                         true,
                                         (struct est_configuration*) to_fetch)) < 0)
         {

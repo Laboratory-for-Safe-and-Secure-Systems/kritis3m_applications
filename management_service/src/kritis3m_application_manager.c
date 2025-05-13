@@ -365,7 +365,8 @@ int handle_management_message(struct application_manager* manager)
                         struct hardware_configs* new_hw_configs = deep_copy_hardware_configs(msg.data.change_config.hw_configs);
                         int (*callback)(struct coordinator_status*) = msg.data.change_config.callback;
 
-                        if (!callback || new_config == NULL) {
+
+                        if ( new_config == NULL) {
                                 respond_with(manager->management_pair[THREAD_INT], MSG_ERROR);
                                 LOG_ERROR("No callback function provided or invalid configuration");
                                 if (new_config != NULL) {
@@ -378,6 +379,9 @@ int handle_management_message(struct application_manager* manager)
                         } else {
                                 // Only notifies that we successfully received the request
                                 respond_with(manager->management_pair[THREAD_INT], MSG_OK);
+                        }
+                        if (!callback) {
+                                LOG_DEBUG("No callback function provided, notifying coordinator about successful configuration change");
                         }
 
                         ret = handle_config_change_request(manager, new_config, new_hw_configs, callback);
@@ -657,7 +661,7 @@ static int handle_config_change_request(struct application_manager* manager,
         // Notify coordinator about successful update
         policy_msg.state = UPDATE_APPLIED;
         policy_msg.msg = "Successfully applied new configuration";
-        if ((ret = callback(&policy_msg)) < 0) {
+        if (callback && (ret = callback(&policy_msg)) < 0) {
                 LOG_ERROR("Failed to notify coordinator about new configuration.");
         }
         
@@ -674,7 +678,9 @@ rollback:
         policy_msg.state = UPDATE_ERROR;
         policy_msg.msg = "Failed to apply new configuration";
         LOG_WARN("notifying controller about failed configuration change");
+        if (callback) {
         callback(&policy_msg);
+        }
         
         // Clean up resources based on what was initialized
         if (proxy_backend_started) {

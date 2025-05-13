@@ -510,6 +510,13 @@ int load_endpoint_certificates(asl_endpoint_configuration* endpoint_config,
         {
                 LOG_WARN("no additional key buffer. All good");
         }
+        if (endpoint_config->private_key.additional_key_size == 0)
+        {
+                if (endpoint_config->private_key.additional_key_buffer){
+                        free((void*)endpoint_config->private_key.additional_key_buffer);
+                }
+                endpoint_config->private_key.additional_key_buffer = NULL;
+        }
 
         if (read_file(root_path,
                       (uint8_t**) &endpoint_config->root_certificate.buffer,

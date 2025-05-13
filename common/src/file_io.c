@@ -361,7 +361,7 @@ int write_file(const char* file_path, uint8_t const* buffer, size_t buffer_size,
 #ifndef __ZEPHYR__
         FILE* file = NULL;
 
-        if (!file_path || !buffer || (buffer_size == 0))
+        if (!file_path || !buffer )
         {
                 LOG_ERROR("file_path, buffer or buffer_size is 0 or NULL");
                 goto error_occured;

@@ -444,7 +444,6 @@ int blocking_est_request(struct pki_client_config_t* config,
                 // Allocate buffer for response
                 uint8_t cert_rsp_buffer[MAX_KEY_SIZE];
                 memset(cert_rsp_buffer, 0, sizeof(cert_rsp_buffer));
-
                 cert_req.recv_buf = cert_rsp_buffer;
                 cert_req.recv_buf_len = sizeof(cert_rsp_buffer);
 

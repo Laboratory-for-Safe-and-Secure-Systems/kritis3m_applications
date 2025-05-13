@@ -74,6 +74,7 @@ int establish_connection(char const* host,
         return ret;
 
 error_occured:
+        ret = -1;
         freeaddrinfo(addr_info);
         if (!*endpoint)
         {
