@@ -42,7 +42,7 @@ struct kritis3m_service
         int hello_timer_fd; // File descriptor for the hello timer
         bool timer_initialized;
         struct pki_client_config_t pki_clinet_config;
-        bool proxy_reporting_enabled;  // Flag to control proxy state reporting
+        bool proxy_reporting_enabled; // Flag to control proxy state reporting
 };
 
 struct dataplane_update_coordinator
@@ -61,6 +61,11 @@ struct dataplane_update_coordinator
         pthread_attr_t thread_attr;
 };
 
+struct appl_manager{
+        struct application_manager_config appl_manager;
+        struct hardware_configs hw_configs;
+};
+
 // ipc services
 enum service_message_type
 {
@@ -68,8 +73,7 @@ enum service_message_type
         SVC_MSG_KRITIS3M_SERVICE_STOP,
         SVC_MSG_APPLICATION_MANGER_STATUS_REQ,
 
-        SVC_MSG_CTRLPLANE_CERT_GET_REQ, // start controlplane est transaction
-        SVC_MSG_DATAPLANE_CERT_GET_REQ, // start dataplane est transaction
+        SVC_MSG_CERT_GET_REQ, // start dataplane est transaction
 
         SVC_RELOAD_DATAPLANE,    // new dataplane certificates
         SVC_RELOAD_CONTROLPLANE, // new control plane certificate
@@ -96,12 +100,23 @@ typedef struct service_message
                         enum CERT_TYPE cert_type;
                         bool timeout;
                 } cert_apply;
+                struct cert_req
+                {
+                        enum CERT_TYPE cert_type;
+                        const char* algo;
+                        const char* alt_algo;
+
+                } cert_req;
         } payload;
 } service_message;
 
 /*------------------------ FORWARD DECLARATION --------------------------------*/
 int respond_with(int socket, enum MSG_RESPONSE_CODE response_code);
-ManagementReturncode handle_svc_message(int socket, service_message* msg, int cfg_id, int version_number);
+ManagementReturncode handle_svc_message(int socket,
+                                        service_message* msg,
+                                        int cfg_id,
+                                        int version_number,
+                                        struct est_configuration* est_config);
 // init
 void* kritis3m_service_main_thread(void* arg);
 // http
@@ -114,16 +129,14 @@ enum MSG_RESPONSE_CODE initiate_hello_message(bool is_timer);
 
 static void cleanup_hello_timer(struct kritis3m_service* svc);
 void cleanup_dataplane_update_coordinator(struct dataplane_update_coordinator* update);
+int fetch_certificate(void* context, enum CONFIG_TYPE type, void* to_fetch);
 
-// transaction functions:
-int fetch_dataplane_certificate(void* context, char** buffer, size_t* buffer_size);
-int fetch_controlplane_certificate(void* context, char** buffer, size_t* buffer_size);
-int fetch_dataplane_config(void* context, char** buffer, size_t* buffer_size);
 int validate_dataplane_config(void* context, char* config, size_t size);
-int validate_dataplane_certificate(void* context, char* config, size_t size);
-void handle_notify_dataplane_cert(void* pki_client_config, enum TRANSACTION_STATE state);
-void handle_notify_controlplane_cert(void* pki_client_config, enum TRANSACTION_STATE state);
-int validate_controlplane_certificate(void* context, char* config, size_t size);
+void handle_notify_dataplane_cert(enum TRANSACTION_STATE state, void* to_fetch);
+void handle_notify_controlplane_cert(enum TRANSACTION_STATE state, void* to_fetch);
+
+int validate_controlplane_certificate(void* config, enum CONFIG_TYPE type, void* to_fetch);
+int validate_dataplane_certificate(void* config, enum CONFIG_TYPE type, void* to_fetch);
 
 /* ----------------------- MAIN kritis3m_service module -------------------------*/
 static struct kritis3m_service svc = {0};
@@ -160,6 +173,7 @@ int start_kritis3m_service(char* config_file, int log_level)
 {
         // initializations
         static int max_retries = 3;
+        struct est_configuration est_config = {0};
         int ret = 0;
 
         /** -------------- set log level ----------------------------- */
@@ -204,11 +218,14 @@ int start_kritis3m_service(char* config_file, int log_level)
         {
                 struct config_transaction* transaction = malloc(sizeof(struct config_transaction));
                 memset(transaction, 0, sizeof(struct config_transaction));
+                LOG_DEBUG("controlplane: starting with secp384 defaultwise");
+                init_est_configuration(&est_config, "secp384", NULL);
 
                 ret = init_config_transaction(transaction,
                                               CONFIG_CONTROLPLANE,
                                               &svc.pki_clinet_config,
-                                              fetch_controlplane_certificate,
+                                              &est_config,
+                                              fetch_certificate,
                                               validate_controlplane_certificate,
                                               NULL);
                 ret = start_config_transaction(transaction);
@@ -222,10 +239,14 @@ int start_kritis3m_service(char* config_file, int log_level)
                 struct config_transaction* transaction = malloc(sizeof(struct config_transaction));
                 memset(transaction, 0, sizeof(struct config_transaction));
 
+                LOG_DEBUG("dataplane: starting with secp384 defaultwise");
+                init_est_configuration(&est_config, "secp384", NULL);
+
                 ret = init_config_transaction(transaction,
                                               CONFIG_DATAPLANE,
                                               &svc.pki_clinet_config,
-                                              fetch_dataplane_certificate,
+                                              &est_config,
+                                              fetch_certificate,
                                               validate_dataplane_certificate,
                                               NULL);
                 ret = start_config_transaction(transaction);
@@ -273,6 +294,7 @@ void* kritis3m_service_main_thread(void* arg)
 {
         start_application_manager();
         enable_proxy_reporting();
+        struct est_configuration est_config = {0};
 
         svc.initialized = true;
         enum appl_state
@@ -328,15 +350,15 @@ void* kritis3m_service_main_thread(void* arg)
                                 LOG_ERROR("Failed to send hello message: "
                                           "%d",
                                           ret);
-                                          LOG_WARN("control plane not running, trying to restart");
-                                                const struct sysconfig* sys_config = get_sysconfig();
-                                                struct control_plane_conn_config_t conn_config = {0};
-                                                conn_config.serialnumber = sys_config->serial_number;
-                                                conn_config.endpoint_config = sys_config->endpoint_config;
-                                                conn_config.mqtt_broker_host = sys_config->broker_host;
-                                          stop_control_plane_conn();
-                                          sleep(1);
-                                          start_control_plane_conn(&conn_config);
+                                LOG_WARN("control plane not running, trying to restart");
+                                const struct sysconfig* sys_config = get_sysconfig();
+                                struct control_plane_conn_config_t conn_config = {0};
+                                conn_config.serialnumber = sys_config->serial_number;
+                                conn_config.endpoint_config = sys_config->endpoint_config;
+                                conn_config.mqtt_broker_host = sys_config->broker_host;
+                                stop_control_plane_conn();
+                                sleep(1);
+                                start_control_plane_conn(&conn_config);
                         }
                         continue;
                 }
@@ -358,7 +380,8 @@ void* kritis3m_service_main_thread(void* arg)
                                                 return_code = handle_svc_message(svc->management_socket[THREAD_INT],
                                                                                  &req,
                                                                                  cfg_id,
-                                                                                 version_number);
+                                                                                 version_number,
+                                                                                 &est_config);
 
                                         if (return_code == MGMT_THREAD_STOP)
                                         {
@@ -387,7 +410,8 @@ void* kritis3m_service_main_thread(void* arg)
                                         ssize_t s = read(svc->hello_timer_fd, &exp, sizeof(uint64_t));
                                         if (s == sizeof(uint64_t))
                                         {
-                                                enum MSG_RESPONSE_CODE ret = initiate_hello_message(true);
+                                                enum MSG_RESPONSE_CODE ret = initiate_hello_message(
+                                                        true);
                                                 if (ret != MSG_OK)
                                                 {
                                                         LOG_ERROR("Failed to send hello message: "
@@ -488,7 +512,11 @@ int svc_respond_with(int socket, enum MSG_RESPONSE_CODE response_code)
 }
 
 // cfg_id and version number are temporary arguments and will be cleaned up after the testing
-ManagementReturncode handle_svc_message(int socket, service_message* msg, int cfg_id, int version_number)
+ManagementReturncode handle_svc_message(int socket,
+                                        service_message* msg,
+                                        int cfg_id,
+                                        int version_number,
+                                        struct est_configuration* est_config)
 {
         int ret = 0;
         // to internal context
@@ -517,55 +545,59 @@ ManagementReturncode handle_svc_message(int socket, service_message* msg, int cf
                         svc_respond_with(socket, response_code);
                         break;
                 }
-        case SVC_MSG_DATAPLANE_CERT_GET_REQ:
+        case SVC_MSG_CERT_GET_REQ:
+
                 {
                         LOG_INFO("Received data plane certificate get request");
+
+                        const char* algo = msg->payload.cert_req.algo;
+                        const char* alt_algo = msg->payload.cert_req.alt_algo;
+                        enum CERT_TYPE cert_type = msg->payload.cert_req.cert_type;
+                        config_notify_callback notify = NULL;
                         response_code = MSG_OK;
+                        if (cert_type != CONFIG_DATAPLANE && cert_type != CONFIG_CONTROLPLANE || est_config == NULL)
+                        {
+                                svc_respond_with(socket, MSG_ERROR);
+                                return_code = MGMT_ERR;
+                                goto error_occured;
+                        }
+
                         // cert_request(endpoint_config, config, CERT_TYPE_DATAPLANE, callback);
                         svc_respond_with(socket, response_code);
                         if (ret < 0)
                         {
                                 LOG_ERROR("Failed to send dataplane cert get request");
                                 return_code = MGMT_ERR;
+                                goto error_occured;
                         }
+
+                        init_est_configuration(est_config, algo, alt_algo);
+                        if (cert_type == CONFIG_DATAPLANE)
+                        {
+                                notify = handle_notify_dataplane_cert;
+                        }
+                        else if (cert_type == CONFIG_CONTROLPLANE)
+                        {
+                                notify = handle_notify_controlplane_cert;
+                        }
+
                         struct config_transaction* transaction = malloc(
                                 sizeof(struct config_transaction));
+
                         memset(transaction, 0, sizeof(struct config_transaction));
+
                         ret = init_config_transaction(transaction,
-                                                      CONFIG_DATAPLANE,
+                                                      cert_type,
                                                       &svc.pki_clinet_config,
-                                                      fetch_dataplane_certificate,
+                                                      &est_config,
+                                                      fetch_certificate,
                                                       validate_dataplane_certificate,
-                                                      handle_notify_dataplane_cert);
+                                                      notify);
+
                         ret = start_config_transaction(transaction);
                         if (ret < 0)
                         {
                                 LOG_ERROR("Failed to start dataplane transaction");
-                                goto error_occured;
-                        }
-                        break;
-                }
-        case SVC_MSG_CTRLPLANE_CERT_GET_REQ:
-                {
-                        LOG_INFO("Received control plane certificate apply request");
-                        // LOG_INFO("Buffer length: %d", msg->payload.cert_apply.buffer_len);
-                        response_code = MSG_OK;
-                        svc_respond_with(socket, response_code);
-                        // start ctrlplane transaction
-                        struct config_transaction* transaction = malloc(
-                                sizeof(struct config_transaction));
-                        memset(transaction, 0, sizeof(struct config_transaction));
-
-                        ret = init_config_transaction(transaction,
-                                                      CONFIG_CONTROLPLANE,
-                                                      &svc.pki_clinet_config,
-                                                      fetch_controlplane_certificate,
-                                                      validate_controlplane_certificate,
-                                                      handle_notify_controlplane_cert);
-                        ret = start_config_transaction(transaction);
-                        if (ret < 0)
-                        {
-                                LOG_ERROR("Failed to start controlplane transaction");
                                 goto error_occured;
                         }
                         break;
@@ -577,6 +609,7 @@ ManagementReturncode handle_svc_message(int socket, service_message* msg, int cf
                         struct config_transaction* transaction = malloc(
                                 sizeof(struct config_transaction));
                         memset(transaction, 0, sizeof(struct config_transaction));
+
                         ret = init_config_transaction(transaction,
                                                       CONFIG_APPLICATION,
                                                       &coordinator,
@@ -639,7 +672,7 @@ enum MSG_RESPONSE_CODE dataplane_config_apply_send_status(struct coordinator_sta
                                            sizeof(struct coordinator_status));
 }
 
-enum MSG_RESPONSE_CODE ctrlplane_cert_get_req()
+enum MSG_RESPONSE_CODE cert_req(enum CERT_TYPE type, char* algo, char* alt_algo)
 {
         if (!svc.initialized || svc.management_socket[THREAD_EXT] < 0)
         {
@@ -649,6 +682,9 @@ enum MSG_RESPONSE_CODE ctrlplane_cert_get_req()
 
         service_message request = {0};
         request.msg_type = SVC_MSG_CTRLPLANE_CERT_GET_REQ;
+        request.payload.cert_req.algo = algo;
+        request.payload.cert_req.alt_algo = alt_algo;
+
         return external_management_request(svc.management_socket[THREAD_EXT], &request, sizeof(request));
 }
 
@@ -722,61 +758,29 @@ static void cleanup_hello_timer(struct kritis3m_service* svc)
 }
 
 // used by transaction mechanism
-int fetch_dataplane_certificate(void* context, char** buffer, size_t* buffer_size)
+int fetch_certificate(void* context, enum CONFIG_TYPE type, void* to_fetch)
 {
         int ret = 0;
-        if (!context || !buffer || !buffer_size)
-                goto cleanup;
-        struct pki_client_config_t* pki_clinet_config = (struct pki_client_config_t*) context;
+        if (!context || !to_fetch)
+                return -1;
 
-        if ((ret = get_blocking_cert(pki_clinet_config, CERT_TYPE_DATAPLANE, true, buffer, buffer_size)) <
-            0)
+        if (type == CONFIG_APPLICATION)
+        {
+                return -1;
+        }
+
+        if ((ret = blocking_est_request((struct pki_client_config_t*) context,
+                                        CERT_TYPE_DATAPLANE,
+                                        true,
+                                        (struct est_configuration*) to_fetch) < 0))
         {
                 LOG_ERROR("error occured in fetch dataplane certificate, with ret: %d", ret);
-                goto cleanup;
+                return -1;
         }
-        return ret;
-
-cleanup:
-        LOG_ERROR("error occured in fetch dataplane certificate");
-        if (buffer && !(*buffer))
-        {
-                free(*buffer);
-                *buffer = NULL;
-        }
-        if (buffer_size)
-                *buffer_size = 0;
         return ret;
 }
 
-int fetch_controlplane_certificate(void* pki_client_config, char** buffer, size_t* buffer_size)
-{
-        int ret = 0;
-        if (!pki_client_config || !buffer || !buffer_size)
-                goto cleanup;
-        struct pki_client_config_t* pki_clinet_config = (struct pki_client_config_t*) pki_client_config;
-        if ((ret = get_blocking_cert(pki_clinet_config, CERT_TYPE_CONTROLPLANE, true, buffer, buffer_size)) <
-            0)
-        {
-                LOG_ERROR("error occured in fetch controlplane certificate, with ret: %d", ret);
-                goto cleanup;
-        }
-        return ret;
-
-cleanup:
-        ret = -1;
-        LOG_ERROR("error occured in fetch controlplane certificate");
-        if (buffer && !(*buffer))
-        {
-                free(*buffer);
-                *buffer = NULL;
-        }
-        if (buffer_size)
-                *buffer_size = 0;
-        return ret;
-}
-
-void handle_notify_controlplane_cert(void* pki_client_config, enum TRANSACTION_STATE state)
+void handle_notify_controlplane_cert(enum TRANSACTION_STATE state, void* to_fetch)
 {
         LOG_INFO("Control plane certificate transaction state: %d", state);
 
@@ -802,7 +806,7 @@ void handle_notify_controlplane_cert(void* pki_client_config, enum TRANSACTION_S
         }
 }
 
-void handle_notify_dataplane_cert(void* pki_client_config, enum TRANSACTION_STATE state)
+void handle_notify_dataplane_cert(enum TRANSACTION_STATE state, void* to_fetch)
 {
         LOG_INFO("Control plane certificate transaction state: %d", state);
 
@@ -840,7 +844,7 @@ void handle_notify_dataplane_cert(void* pki_client_config, enum TRANSACTION_STAT
  * @param buffer_size: is not used
  * @return: 0 on success, -1 on failure
  */
-int fetch_dataplane_config(void* context, char** buffer, size_t* buffer_size)
+int fetch_dataplane_config(void* context, enum CONFIG_TYPE, void* to_fetch)
 {
         int ret = 0;
         struct dataplane_update_coordinator* update = NULL;
@@ -858,12 +862,6 @@ int fetch_dataplane_config(void* context, char** buffer, size_t* buffer_size)
 cleanup:
         ret = -1;
         LOG_ERROR("error occured in fetch dataplane config");
-        if (buffer && !(*buffer))
-        {
-                free(*buffer);
-                *buffer = NULL;
-        }
-        // free update
         if (update)
         {
                 cleanup_hardware_configs(&update->hw_configs);
@@ -874,9 +872,6 @@ cleanup:
                         closesocket(update->management_socket[THREAD_EXT]);
                 update = NULL;
         }
-
-        if (buffer_size)
-                *buffer_size = 0;
         return ret;
 }
 
@@ -927,7 +922,7 @@ static int handle_policy_status_update(struct dataplane_update_coordinator* upda
                 {
                         application_manager_rollback();
                 }
-                //rollback might be sucessfull, but the transaction responsible for the update process of config.json should fail, to keep the old state
+                // rollback might be sucessfull, but the transaction responsible for the update process of config.json should fail, to keep the old state
                 return -1; // Signal to finish
 
         case UPDATE_APPLYREQUEST:
@@ -1109,25 +1104,33 @@ void cleanup_dataplane_update_coordinator(struct dataplane_update_coordinator* u
         update->timeout_s = -1;
 }
 
-int validate_controlplane_certificate(void* context, char* config, size_t size)
+int validate_controlplane_certificate(void* config, enum CONFIG_TYPE type, void* to_fetch)
 {
         int ret = 0;
         asl_endpoint* endpoint = NULL;
         asl_session* session = NULL;
-        int old_chain_buffer_size = 0;
         int sock_fd = -1;
-        if (!context || !config || size <= 0)
+
+        if (!config || !to_fetch)
                 goto cleanup;
 
-        struct pki_client_config_t* pki_clinet_config = (struct pki_client_config_t*) context;
+        struct est_configuration* est_config = (struct est_configuration*) to_fetch;
+
+        struct pki_client_config_t* pki_clinet_config = (struct pki_client_config_t*) config;
 
         asl_endpoint_configuration ep_cfg =
                 {.device_certificate_chain =
                          {
-                                 .buffer = (uint8_t* const) config,
-                                 .size = size,
+                                 .buffer = (uint8_t* const) est_config->chain,
+                                 .size = est_config->chain_size,
                          },
-                 .private_key = pki_clinet_config->endpoint_config->private_key,
+                 .private_key =
+                         {
+                                 .buffer = est_config->key,
+                                 .size = est_config->key_size,
+                                 .additional_key_buffer = est_config->alt_key,
+                                 .additional_key_size = est_config->alt_key_size,
+                         },
                  .root_certificate = pki_clinet_config->endpoint_config->root_certificate,
                  .key_exchange_method = pki_clinet_config->endpoint_config->key_exchange_method,
                  .ciphersuites = pki_clinet_config->endpoint_config->ciphersuites,
@@ -1160,31 +1163,31 @@ cleanup:
 }
 
 // better validation will be done in the future
-int validate_dataplane_certificate(void* context, char* config, size_t size)
+int validate_dataplane_certificate(void* config, enum CONFIG_TYPE type, void* to_fetch)
 {
-        if (config && size > 500)
-        {
-                return 0;
-        }
-        return -1;
+        LOG_WARN("to be implemented");
+        return 0;
 }
 
-void enable_proxy_reporting(void) {
-    svc.proxy_reporting_enabled = true;
+void enable_proxy_reporting(void)
+{
+        svc.proxy_reporting_enabled = true;
 }
 
 enum MSG_RESPONSE_CODE initiate_hello_message(bool is_timer)
 {
-        if (!svc.proxy_reporting_enabled) {
+        if (!svc.proxy_reporting_enabled)
+        {
                 LOG_WARN("Proxy reporting is disabled");
                 return MSG_OK;
         }
 
         uint8_t* proxy_status = get_proxy_status();
-        if (!proxy_status) {
+        if (!proxy_status)
+        {
                 LOG_ERROR("Failed to get proxy status JSON");
                 return MSG_ERROR;
         }
 
-        return send_hello_message((char*)proxy_status);
+        return send_hello_message((char*) proxy_status);
 }

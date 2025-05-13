@@ -80,6 +80,9 @@ struct application_manager_config
         int number_of_groups;
 };
 
+
+
+
 const struct sysconfig* get_sysconfig();
 
 int get_application_inactive(struct application_manager_config* config,
@@ -103,7 +106,6 @@ int get_active_hardware_config(struct application_manager_config* app_config,
 
 int application_store_inactive(char* buffer, size_t size);
 
-int reload_controlplane_endpoint();
 
 
 void cleanup_application_config(struct application_manager_config* config);
@@ -121,14 +123,15 @@ enum CONFIG_TYPE
 struct config_update
 {
         enum CONFIG_TYPE type;
-        char* new_config;
+
+        void* new_config;
+
         size_t config_size;
         bool (*validation_callback)(void* config);
         void* validation_context;
 
         enum ACTIVE* active_path;
-        char* path_1;
-        char* path_2;
+
         bool is_validating;
         bool validation_success;
 };
@@ -158,17 +161,21 @@ enum TRANSACTION_STATE
 };
 
 // Callback function types
-typedef int (*config_fetch_callback)(void* context, char** config, size_t* size);
-typedef int (*config_validate_callback)(void* context, char* config, size_t size);
-typedef void (*config_notify_callback)(void* context, enum TRANSACTION_STATE state);
+typedef int (*config_fetch_callback)(void* context, enum CONFIG_TYPE type, void* to_fetch);
+typedef int (*config_validate_callback)(void* context, enum CONFIG_TYPE type,void* to_fetch);
+typedef void (*config_notify_callback)();
 
 struct config_transaction
 {
         enum CONFIG_TYPE type;
         void* context;
+
+        void* to_fetch;
+
         config_fetch_callback fetch;
         config_validate_callback validate;
         config_notify_callback notify;
+
         enum TRANSACTION_STATE state;
         pthread_t worker_thread;
         bool thread_running;
@@ -183,10 +190,12 @@ struct config_transaction
 // Transaction management functions
 int init_config_transaction(struct config_transaction* transaction,
                             enum CONFIG_TYPE type,
-                            void* context,
-                            config_fetch_callback fetch,
-                            config_validate_callback validate,
-                            config_notify_callback notify);
+                            void* context, //defines how to reach out to the server
+                            void* to_fetch, //defines the return value
+                            config_fetch_callback fetch, //defines the function to fetch the config
+                            config_validate_callback validate, //defines the function to validate the config
+                            config_notify_callback notify //defines the function to notify the caller of the transaction
+                            ); //defines the function to cleanup the transaction
 
 int start_config_transaction(struct config_transaction* transaction);
 int cancel_config_transaction(struct config_transaction* transaction);

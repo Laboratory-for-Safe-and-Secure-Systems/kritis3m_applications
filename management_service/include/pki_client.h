@@ -1,10 +1,8 @@
-#ifndef PKI_CLIENT_H_
-#define PKI_CLIENT_H_
-
+#ifndef _PKI_CLIENT_H_
+#define _PKI_CLIENT_H_
 #include "asl.h"
 #include <pthread.h>
 
-// Public types and API
 struct pki_client_config_t
 {
         const asl_endpoint_configuration* endpoint_config;
@@ -18,43 +16,34 @@ enum CERT_TYPE
         CERT_TYPE_DATAPLANE,
         CERT_TYPE_CONTROLPLANE,
 };
+#define MAX_KEY_SIZE 32*1024
+#define MAX_CHAIN_SIZE (4*MAX_KEY_SIZE)
 
-typedef int (*pki_callback_t)(char* buffer, size_t size);
 
-// Public API functions
-int cert_request(struct pki_client_config_t* config,
-                 enum CERT_TYPE cert_type,
-                 bool include_ca_certs,
-                 pki_callback_t callback);
 
-int get_blocking_cert(struct pki_client_config_t* config,
+struct est_configuration{
+        const char* algorithm; //if specified, keys are generated
+        const char* alt_algoithm; //if specified, keys are generated
+        
+       char key[MAX_KEY_SIZE];
+       size_t key_buffer_size;
+       size_t key_size;
+
+       char alt_key[MAX_KEY_SIZE];
+       size_t alt_key_buffer_size;
+       size_t alt_key_size;
+
+       char chain[MAX_CHAIN_SIZE]; 
+       size_t chain_buffer_size;
+       size_t chain_size;
+};
+
+void init_est_configuration(struct est_configuration* est_config,const char* algo, const char* alt_algo);
+
+int blocking_est_request(struct pki_client_config_t* config,
                       enum CERT_TYPE cert_type,
                       bool include_ca_certs,
-                      char** response_buffer,
-                      size_t* response_buffer_size);
+                      struct est_configuration* est_config);
 
-// Internal types
-typedef struct
-{
-        struct pki_client_config_t* config;
-        enum CERT_TYPE cert_type;
-        bool include_ca_certs;
-        pki_callback_t callback;
-        bool is_blocking;
-        char** response_buffer;
-        size_t* response_buffer_size;
-        bool completed;
-        bool cleanup_requested;
-        pthread_mutex_t mutex;
-        pthread_t thread_id;
-        uint8_t* cert_buffer;
-        size_t cert_buffer_size;
-        size_t cert_size;
-        bool has_ca_chain;
-        uint8_t* ca_chain_buffer;
-        size_t ca_chain_buffer_size;
-        size_t ca_chain_size;
-        bool message_complete; // Flag to track if HTTP message is complete
-} pki_request_context_t;
 
 #endif /* PKI_CLIENT_H_ */

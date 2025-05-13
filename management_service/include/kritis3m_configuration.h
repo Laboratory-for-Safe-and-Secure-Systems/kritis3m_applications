@@ -51,11 +51,6 @@ enum ApplicationStatus
         APK_OK = 0,
 };
 
-typedef struct
-{
-        enum ApplicationStatus Status;
-        int running_applications;
-} ApplicationManagerStatus;
 
 typedef struct
 {

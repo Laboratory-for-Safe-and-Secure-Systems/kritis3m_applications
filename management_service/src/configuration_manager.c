@@ -13,18 +13,27 @@
 LOG_MODULE_CREATE(configuration_manager);
 
 #define SYS_CONFIG_PATH_FORMAT "%s/sys_config.json"
-#define CONTROLPLANE_KEY_PATH_FORMAT "%s/cert/key.pem"
-#define CONTROLPLANE_ROOT_CERT_FORMAT "%s/cert/root.pem"
-#define CONTROLPLANE_1_CHAIN_PATH_FORMAT "%s/cert/1/controlplane_chain.pem"
-#define CONTROLPLANE_2_CHAIN_PATH_FORMAT "%s/cert/2/controlplane_chain.pem"
 
-// root and key is the same, which is ok, since both ca root and dataplane have the same root
-#define DATAPLANE_KEY_PATH_FORMAT CONTROLPLANE_KEY_PATH_FORMAT   //"%s/cert/dataplane_key.pem"
-#define DATAPLANE_ROOT_CERT_FORMAT CONTROLPLANE_ROOT_CERT_FORMAT //"%s/cert/dataplane_root_cert.pem"
+#define CONTROLPLANE_1_CHAIN_PATH_FORMAT "%s/cert/1/controlplane_chain.pem"
+#define CONTROLPLANE_1_KEY_PATH_FORMAT "%s/cert/1/controlplane_key.pem"
+#define CONTROLPLANE_1_ALTKEY_PATH_FORMAT "%s/cert/1/controlplane_altkey.pem"
+
+#define CONTROLPLANE_2_CHAIN_PATH_FORMAT "%s/cert/2/controlplane_chain.pem"
+#define CONTROLPLANE_2_KEY_PATH_FORMAT "%s/cert/2/controlplane_key.pem"
+#define CONTROLPLANE_2_ALTKEY_PATH_FORMAT "%s/cert/2/controlplane_altkey.pem"
+
 #define DATAPLANE_1_CHAIN_PATH_FORMAT "%s/cert/1/dataplane_chain.pem"
+#define DATAPLANE_1_KEY_PATH_FORMAT "%s/cert/1/dataplane_key.pem"
+#define DATAPLANE_1_ALTKEY_PATH_FORMAT "%s/cert/1/dataplane_altkey.pem"
+
 #define DATAPLANE_2_CHAIN_PATH_FORMAT "%s/cert/2/dataplane_chain.pem"
+#define DATAPLANE_2_KEY_PATH_FORMAT "%s/cert/2/dataplane_key.pem"
+#define DATAPLANE_2_ALTKEY_PATH_FORMAT "%s/cert/2/dataplane_altkey.pem"
 
 #define BOOTSTRAP_CHAIN_PATH_FORMAT "%s/cert/bootstrap_chain.pem"
+#define BOOTSTRAP_KEY_PATH_FORMAT "%s/cert/bootstrap_key.pem"
+#define BOOTSTRAP_ALTKEY_PATH_FORMAT "%s/cert/bootstrap_altkey.pem"
+#define ROOT_PATH_FORMAT "%s/cert/root.pem"
 
 #define APPLICATION_1_PATH_FORMAT "%s/application/1/application.json"
 #define APPLICATION_2_PATH_FORMAT "%s/application/2/application.json"
@@ -43,6 +52,7 @@ void cleanup_endpoint_config(asl_endpoint_configuration* endpoint_config);
 int load_endpoint_certificates(asl_endpoint_configuration* endpoint_config,
                                char* chain_path,
                                char* key_path,
+                               char* optional_key_path,
                                char* root_path);
 
 struct configuration_manager
@@ -54,20 +64,28 @@ struct configuration_manager
 
         struct sysconfig sys_config;
 
-        char* controlplane_key_path;
-        char* controlplane_root_cert;
+
+        char* root_cert;
+
+        char* bootstrap_key_path;
+        char* bootstrap_altkey_path;
+        char* bootstrap_chain_path;
 
         char* controlplane_1_chain_path;
-        char* controlplane_2_chain_path;
+        char* controlplane_1_key_path;
+        char* controlplane_1_altkey_path;
 
-        // dataplane
-        char* dataplane_key_path;
-        char* dataplane_root_cert;
+        char* controlplane_2_chain_path;
+        char* controlplane_2_key_path;
+        char* controlplane_2_altkey_path;
 
         char* dataplane_1_chain_path;
-        char* dataplane_2_chain_path;
+        char* dataplane_1_key_path;
+        char* dataplane_1_altkey_path;
 
-        char* bootstrap_chain_path;
+        char* dataplane_2_chain_path;
+        char* dataplane_2_key_path;
+        char* dataplane_2_altkey_path;
 
         // application
         char* application_1_path;
@@ -138,6 +156,10 @@ int get_application_inactive(struct application_manager_config* config,
                 free(buffer);
                 return -1;
         }
+        if (buffer){
+                free(buffer);
+                buffer = NULL;
+        }
 
         // Now load certificates for each group's endpoint configuration
         for (int i = 0; i < config->number_of_groups; i++)
@@ -153,32 +175,35 @@ int get_application_inactive(struct application_manager_config* config,
                 char* chain_path = NULL;
                 switch (configuration_manager.sys_config.dataplane_cert_active)
                 {
-                case ACTIVE_ONE:
-                        chain_path = configuration_manager.dataplane_1_chain_path;
-                        break;
-                case ACTIVE_TWO:
-                        chain_path = configuration_manager.dataplane_2_chain_path;
-                        break;
+
                 case ACTIVE_NONE:
                         LOG_INFO("No active dataplane configuration is set, using "
                                  "dataplane_1_chain_path as default");
+                case ACTIVE_ONE:
                         chain_path = configuration_manager.dataplane_1_chain_path;
-                        break;
-                default:
-                        LOG_ERROR("Invalid dataplane active configuration");
-                        free(buffer);
-                        return -1;
-                }
 
                 // Load certificates into this endpoint configuration
                 ret = load_endpoint_certificates(config->group_config[i].endpoint_config,
-                                                 chain_path,
-                                                 configuration_manager.dataplane_key_path,
-                                                 configuration_manager.dataplane_root_cert);
+                                                 configuration_manager.dataplane_1_chain_path,
+                                                 configuration_manager.dataplane_1_key_path,
+                                                 configuration_manager.dataplane_1_altkey_path,
+                                                 configuration_manager.root_cert);
+                        break;
+                case ACTIVE_TWO:
+                ret = load_endpoint_certificates(config->group_config[i].endpoint_config,
+                                                 configuration_manager.dataplane_2_chain_path,
+                                                 configuration_manager.dataplane_2_key_path,
+                                                 configuration_manager.dataplane_2_altkey_path,
+                                                 configuration_manager.root_cert);
+                        break;
+                default:
+                        LOG_ERROR("Invalid dataplane active configuration");
+                        return -1;
+                }
+
                 if (ret != 0)
                 {
                         LOG_ERROR("Failed to load certificates for group %d", i);
-                        free(buffer);
                         return -1;
                 }
 
@@ -186,59 +211,7 @@ int get_application_inactive(struct application_manager_config* config,
         }
 
         LOG_INFO("Successfully loaded application configuration from %s", source_path);
-        free(buffer);
         return 0;
-}
-int reload_controlplane_endpoint()
-{
-        if (!configuration_manager.initialized)
-        {
-                LOG_ERROR("Configuration manager not initialized");
-                return -1;
-        }
-        if (configuration_manager.sys_config.endpoint_config->private_key.buffer)
-        {
-                free((void*) configuration_manager.sys_config.endpoint_config->private_key.buffer);
-                configuration_manager.sys_config.endpoint_config->private_key.buffer = NULL;
-                configuration_manager.sys_config.endpoint_config->private_key.size = 0;
-        }
-        if (configuration_manager.sys_config.endpoint_config->root_certificate.buffer)
-        {
-                free((void*) configuration_manager.sys_config.endpoint_config->root_certificate.buffer);
-                configuration_manager.sys_config.endpoint_config->root_certificate.buffer = NULL;
-                configuration_manager.sys_config.endpoint_config->root_certificate.size = 0;
-        }
-        if (configuration_manager.sys_config.endpoint_config->device_certificate_chain.buffer)
-        {
-                free((void*) configuration_manager.sys_config.endpoint_config
-                             ->device_certificate_chain.buffer);
-                configuration_manager.sys_config.endpoint_config->device_certificate_chain.buffer = NULL;
-        }
-
-        char* chain_path = NULL;
-
-        // Select certificate chain based on active configuration
-        switch (configuration_manager.sys_config.controlplane_cert_active)
-        {
-        case ACTIVE_ONE:
-                chain_path = configuration_manager.controlplane_1_chain_path;
-                break;
-        case ACTIVE_TWO:
-                chain_path = configuration_manager.controlplane_2_chain_path;
-                break;
-        case ACTIVE_NONE:
-                LOG_INFO("No active controlplane certs. Load bootstrap certs");
-                return 0; // Early return as we don't load certs in this case
-        default:
-                LOG_ERROR("Invalid controlplane active configuration");
-                return -1;
-        }
-
-        // Load certificates using the selected chain path
-        return load_endpoint_certificates(configuration_manager.sys_config.endpoint_config,
-                                          chain_path,
-                                          configuration_manager.controlplane_key_path,
-                                          configuration_manager.controlplane_root_cert);
 }
 
 int application_store_inactive(char* buffer, size_t size)
@@ -285,6 +258,7 @@ int application_store_inactive(char* buffer, size_t size)
         return 0;
 }
 
+
 int init_configuration_manager(char* base_path)
 {
         if (!base_path)
@@ -306,32 +280,54 @@ int init_configuration_manager(char* base_path)
         configuration_manager.sys_config_path = duplicate_string(helper_string);
 
         // controlplane
-        len = snprintf(helper_string, 300, CONTROLPLANE_KEY_PATH_FORMAT, base_path);
-        configuration_manager.controlplane_key_path = duplicate_string(helper_string);
+        len = snprintf(helper_string, 300, ROOT_PATH_FORMAT, base_path);
+        configuration_manager.root_cert = duplicate_string(helper_string);
 
-        len = snprintf(helper_string, 300, CONTROLPLANE_ROOT_CERT_FORMAT, base_path);
-        configuration_manager.controlplane_root_cert = duplicate_string(helper_string);
+        len = snprintf(helper_string, 300, BOOTSTRAP_KEY_PATH_FORMAT, base_path);
+        configuration_manager.bootstrap_key_path = duplicate_string(helper_string);
+
+        len = snprintf(helper_string, 300, BOOTSTRAP_ALTKEY_PATH_FORMAT, base_path);
+        configuration_manager.bootstrap_altkey_path = duplicate_string(helper_string);
+
+        len = snprintf(helper_string, 300, CONTROLPLANE_1_ALTKEY_PATH_FORMAT, base_path);
+        configuration_manager.controlplane_1_altkey_path = duplicate_string(helper_string);
+
+        len = snprintf(helper_string, 300, CONTROLPLANE_1_KEY_PATH_FORMAT, base_path);
+        configuration_manager.controlplane_1_key_path = duplicate_string(helper_string);
 
         len = snprintf(helper_string, 300, CONTROLPLANE_1_CHAIN_PATH_FORMAT, base_path);
         configuration_manager.controlplane_1_chain_path = duplicate_string(helper_string);
 
+        len = snprintf(helper_string, 300, CONTROLPLANE_1_CHAIN_PATH_FORMAT, base_path);
+        configuration_manager.controlplane_1_chain_path = duplicate_string(helper_string);
+
+        len = snprintf(helper_string, 300, CONTROLPLANE_2_ALTKEY_PATH_FORMAT, base_path);
+        configuration_manager.controlplane_2_altkey_path = duplicate_string(helper_string);
+
+        len = snprintf(helper_string, 300, CONTROLPLANE_2_KEY_PATH_FORMAT, base_path);
+        configuration_manager.controlplane_2_key_path = duplicate_string(helper_string);
+
         len = snprintf(helper_string, 300, CONTROLPLANE_2_CHAIN_PATH_FORMAT, base_path);
         configuration_manager.controlplane_2_chain_path = duplicate_string(helper_string);
 
-        // dataplane
-        len = snprintf(helper_string, 300, DATAPLANE_KEY_PATH_FORMAT, base_path);
-        configuration_manager.dataplane_key_path = duplicate_string(helper_string);
+        len = snprintf(helper_string, 300, DATAPLANE_1_ALTKEY_PATH_FORMAT, base_path);
+        configuration_manager.dataplane_1_altkey_path = duplicate_string(helper_string);
 
-        len = snprintf(helper_string, 300, DATAPLANE_ROOT_CERT_FORMAT, base_path);
-        configuration_manager.dataplane_root_cert = duplicate_string(helper_string);
+        len = snprintf(helper_string, 300, DATAPLANE_1_KEY_PATH_FORMAT, base_path);
+        configuration_manager.dataplane_1_key_path = duplicate_string(helper_string);
 
         len = snprintf(helper_string, 300, DATAPLANE_1_CHAIN_PATH_FORMAT, base_path);
         configuration_manager.dataplane_1_chain_path = duplicate_string(helper_string);
 
-        len = snprintf(helper_string, 300, DATAPLANE_2_CHAIN_PATH_FORMAT, base_path);
+        len = snprintf(helper_string, 300, DATAPLANE_2_ALTKEY_PATH_FORMAT, base_path);
+        configuration_manager.dataplane_2_altkey_path = duplicate_string(helper_string);
+
+        len = snprintf(helper_string, 300, DATAPLANE_2_KEY_PATH_FORMAT, base_path);
+        configuration_manager.dataplane_2_key_path = duplicate_string(helper_string);
+
+        len = snprintf(helper_string, 300, DATAPLANE_1_CHAIN_PATH_FORMAT, base_path);
         configuration_manager.dataplane_2_chain_path = duplicate_string(helper_string);
 
-        // application
         len = snprintf(helper_string, 300, APPLICATION_1_PATH_FORMAT, base_path);
         configuration_manager.application_1_path = duplicate_string(helper_string);
 
@@ -360,20 +356,23 @@ int init_configuration_manager(char* base_path)
         case ACTIVE_ONE:
                 ret = load_endpoint_certificates(configuration_manager.sys_config.endpoint_config,
                                                  configuration_manager.controlplane_1_chain_path,
-                                                 configuration_manager.controlplane_key_path,
-                                                 configuration_manager.controlplane_root_cert);
+                                                 configuration_manager.controlplane_1_key_path,
+                                                 configuration_manager.controlplane_1_altkey_path,
+                                                 configuration_manager.root_cert);
                 break;
         case ACTIVE_TWO:
                 ret = load_endpoint_certificates(configuration_manager.sys_config.endpoint_config,
                                                  configuration_manager.controlplane_2_chain_path,
-                                                 configuration_manager.controlplane_key_path,
-                                                 configuration_manager.controlplane_root_cert);
+                                                 configuration_manager.controlplane_2_key_path,
+                                                 configuration_manager.controlplane_2_altkey_path,
+                                                 configuration_manager.root_cert);
                 break;
         case ACTIVE_NONE:
                 ret = load_endpoint_certificates(configuration_manager.sys_config.endpoint_config,
                                                  configuration_manager.bootstrap_chain_path,
-                                                 configuration_manager.controlplane_key_path,
-                                                 configuration_manager.controlplane_root_cert);
+                                                 configuration_manager.bootstrap_key_path,
+                                                 configuration_manager.bootstrap_altkey_path,
+                                                 configuration_manager.root_cert);
                 break;
         default:
                 LOG_ERROR("Invalid controlplane active configuration");
@@ -595,6 +594,7 @@ error:
 int load_endpoint_certificates(asl_endpoint_configuration* endpoint_config,
                                char* chain_path,
                                char* key_path,
+                               char* optional_key_path,
                                char* root_path)
 {
         if (!endpoint_config)
@@ -614,6 +614,12 @@ int load_endpoint_certificates(asl_endpoint_configuration* endpoint_config,
         {
                 LOG_ERROR("Failed to load controlplane private key");
                 return -1;
+        }
+        if (read_file(optional_key_path,
+                      (uint8_t**) &endpoint_config->private_key.additional_key_buffer,
+                      &endpoint_config->private_key.additional_key_size) < 0)
+        {
+                LOG_WARN("no additional key buffer. All good");
         }
 
         if (read_file(root_path,
@@ -686,24 +692,42 @@ void cleanup_configuration_manager(void)
                 free(configuration_manager.base_path);
 
         // controlplane
-        if (configuration_manager.controlplane_key_path)
-                free(configuration_manager.controlplane_key_path);
-        if (configuration_manager.controlplane_root_cert)
-                free(configuration_manager.controlplane_root_cert);
         if (configuration_manager.controlplane_1_chain_path)
                 free(configuration_manager.controlplane_1_chain_path);
+        if (configuration_manager.controlplane_1_key_path)
+                free(configuration_manager.controlplane_1_key_path);
+        if (configuration_manager.controlplane_1_altkey_path)
+                free(configuration_manager.controlplane_1_altkey_path);
         if (configuration_manager.controlplane_2_chain_path)
                 free(configuration_manager.controlplane_2_chain_path);
+        if (configuration_manager.controlplane_2_key_path)
+                free(configuration_manager.controlplane_2_key_path);
+        if (configuration_manager.controlplane_2_altkey_path)
+                free(configuration_manager.controlplane_2_altkey_path);
 
         // dataplane
-        if (configuration_manager.dataplane_key_path)
-                free(configuration_manager.dataplane_key_path);
-        if (configuration_manager.dataplane_root_cert)
-                free(configuration_manager.dataplane_root_cert);
         if (configuration_manager.dataplane_1_chain_path)
                 free(configuration_manager.dataplane_1_chain_path);
+        if (configuration_manager.dataplane_1_key_path)
+                free(configuration_manager.dataplane_1_key_path);
+        if (configuration_manager.dataplane_1_altkey_path)
+                free(configuration_manager.dataplane_1_altkey_path);
         if (configuration_manager.dataplane_2_chain_path)
                 free(configuration_manager.dataplane_2_chain_path);
+        if (configuration_manager.dataplane_2_key_path)
+                free(configuration_manager.dataplane_2_key_path);
+        if (configuration_manager.dataplane_2_altkey_path)
+                free(configuration_manager.dataplane_2_altkey_path);
+
+        // bootstrap
+        if (configuration_manager.bootstrap_chain_path)
+                free(configuration_manager.bootstrap_chain_path);
+        if (configuration_manager.bootstrap_key_path)
+                free(configuration_manager.bootstrap_key_path);
+        if (configuration_manager.bootstrap_altkey_path)
+                free(configuration_manager.bootstrap_altkey_path);
+        if (configuration_manager.root_cert)
+                free(configuration_manager.root_cert);
 
         // applications
         if (configuration_manager.application_1_path)
@@ -807,6 +831,10 @@ int get_active_hardware_config(struct application_manager_config* app_config,
                 free(buffer);
                 return -1;
         }
+        if (buffer){
+                free(buffer);
+                buffer = NULL;
+        }
 
         // Now load certificates for each group's endpoint configuration
         for (int i = 0; i < app_config->number_of_groups; i++)
@@ -814,7 +842,6 @@ int get_active_hardware_config(struct application_manager_config* app_config,
                 if (!app_config->group_config[i].endpoint_config)
                 {
                         LOG_ERROR("Endpoint configuration missing for group %d", i);
-                        free(buffer);
                         cleanup_application_config(app_config);
                         cleanup_hardware_configs(hw_configs);
                         return -1;
@@ -825,33 +852,43 @@ int get_active_hardware_config(struct application_manager_config* app_config,
                 switch (configuration_manager.sys_config.dataplane_cert_active)
                 {
                 case ACTIVE_ONE:
-                        chain_path = configuration_manager.dataplane_1_chain_path;
+
+                // Load certificates into this endpoint configuration
+                ret = load_endpoint_certificates(app_config->group_config[i].endpoint_config,
+                                                 configuration_manager.dataplane_1_chain_path,
+                                                 configuration_manager.dataplane_1_key_path,
+                                                 configuration_manager.dataplane_1_altkey_path,
+                                                 configuration_manager.root_cert);
                         break;
                 case ACTIVE_TWO:
-                        chain_path = configuration_manager.dataplane_2_chain_path;
+                ret = load_endpoint_certificates(app_config->group_config[i].endpoint_config,
+                                                 configuration_manager.dataplane_2_chain_path,
+                                                 configuration_manager.dataplane_2_key_path,
+                                                 configuration_manager.dataplane_2_altkey_path,
+                                                 configuration_manager.root_cert);
                         break;
                 case ACTIVE_NONE:
                         LOG_INFO("No active dataplane configuration is set, using "
                                  "dataplane_1_chain_path as default");
-                        chain_path = configuration_manager.dataplane_1_chain_path;
+
+                // Load certificates into this endpoint configuration
+                ret = load_endpoint_certificates(app_config->group_config[i].endpoint_config,
+                                                 configuration_manager.dataplane_1_chain_path,
+                                                 configuration_manager.dataplane_1_key_path,
+                                                 configuration_manager.dataplane_1_altkey_path,
+                                                 configuration_manager.root_cert);
+
                         break;
                 default:
                         LOG_ERROR("Invalid dataplane active configuration");
-                        free(buffer);
                         cleanup_application_config(app_config);
                         cleanup_hardware_configs(hw_configs);
                         return -1;
                 }
 
-                // Load certificates into this endpoint configuration
-                ret = load_endpoint_certificates(app_config->group_config[i].endpoint_config,
-                                                 chain_path,
-                                                 configuration_manager.dataplane_key_path,
-                                                 configuration_manager.dataplane_root_cert);
                 if (ret != 0)
                 {
                         LOG_ERROR("Failed to load certificates for group %d", i);
-                        free(buffer);
                         cleanup_application_config(app_config);
                         cleanup_hardware_configs(hw_configs);
                         return -1;
@@ -861,7 +898,6 @@ int get_active_hardware_config(struct application_manager_config* app_config,
         }
 
         LOG_INFO("Successfully loaded active hardware configuration from %s", source_path);
-        free(buffer);
         return 0;
 }
 
@@ -877,21 +913,11 @@ void cleanup_application_config(struct application_manager_config* config)
                 {
                         if (config->group_config[i].endpoint_config)
                         {
-                                if (config->group_config[i].endpoint_config->ciphersuites)
-                                        free((void*) config->group_config[i].endpoint_config->ciphersuites);
-                                if (config->group_config[i].endpoint_config->keylog_file)
-                                        free((void*) config->group_config[i].endpoint_config->keylog_file);
-                                if (config->group_config[i]
-                                            .endpoint_config->device_certificate_chain.buffer)
-                                        free((void*) config->group_config[i]
-                                                     .endpoint_config->device_certificate_chain.buffer);
-                                if (config->group_config[i].endpoint_config->private_key.buffer)
-                                        free((void*) config->group_config[i]
-                                                     .endpoint_config->private_key.buffer);
-                                if (config->group_config[i].endpoint_config->root_certificate.buffer)
-                                        free((void*) config->group_config[i]
-                                                     .endpoint_config->root_certificate.buffer);
-                                free(config->group_config[i].endpoint_config);
+                                cleanup_endpoint_config(config->group_config[i].endpoint_config);
+                                if (config->group_config[i].endpoint_config){
+                                        free(config->group_config[i].endpoint_config);
+                                        config->group_config[i].endpoint_config = NULL;
+                                }
                         }
 
                         // Free proxy wrappers
@@ -998,7 +1024,8 @@ static void* transaction_worker(void* arg)
         pthread_mutex_unlock(&transaction->mutex);
 
         // Fetch new configuration
-        ret = transaction->fetch(transaction->context, &new_config, &config_size);
+
+        ret = transaction->fetch(transaction->context,transaction->type,transaction->to_fetch);
         if (ret != 0)
         {
                 LOG_ERROR("Failed to fetch new configuration");
@@ -1011,7 +1038,7 @@ static void* transaction_worker(void* arg)
         pthread_mutex_unlock(&transaction->mutex);
 
         // Validate new configuration
-        ret = transaction->validate(transaction->context, new_config, config_size);
+        ret = transaction->validate(transaction->context, transaction->type, transaction->to_fetch);
         if (ret != 0)
         {
                 LOG_ERROR("Configuration validation failed");
@@ -1050,11 +1077,6 @@ static void* transaction_worker(void* arg)
         transaction->state = TRANSACTION_COMMITTED;
         pthread_mutex_unlock(&transaction->mutex);
 
-        // Notify caller
-        if (transaction->notify)
-        {
-                transaction->notify(transaction->context, TRANSACTION_COMMITTED);
-        }
 
 cleanup:
         if (new_config)
@@ -1088,14 +1110,17 @@ error:
         goto cleanup;
 }
 
+
 int init_config_transaction(struct config_transaction* transaction,
                             enum CONFIG_TYPE type,
-                            void* context,
-                            config_fetch_callback fetch,
-                            config_validate_callback validate,
-                            config_notify_callback notify)
+                            void* context, //defines how to reach out to the server
+                            void* to_fetch, //defines the return value
+                            config_fetch_callback fetch, //defines the function to fetch the config
+                            config_validate_callback validate, //defines the function to validate the config
+                            config_notify_callback notify //defines the function to notify the caller of the transaction
+                            )
 {
-        if (!transaction || !fetch || !validate)
+        if (!transaction || !fetch || !validate) 
         {
                 LOG_ERROR("Invalid transaction parameters");
                 return -1;
@@ -1104,7 +1129,7 @@ int init_config_transaction(struct config_transaction* transaction,
         memset(transaction, 0, sizeof(struct config_transaction));
         transaction->type = type;
         transaction->context = context;
-        transaction->fetch = fetch;
+        transaction->to_fetch = to_fetch;
         transaction->validate = validate;
         transaction->notify = notify;
         transaction->state = TRANSACTION_IDLE;

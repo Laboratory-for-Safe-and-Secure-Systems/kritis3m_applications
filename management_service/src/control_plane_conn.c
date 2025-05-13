@@ -224,7 +224,7 @@ int msgarrvd(void* context, char* topicName, int topicLen, MQTTAsync_message* me
                 }
                 else if (plane_type == 2)
                 {
-                        if ((ret = ctrlplane_cert_get_req()) < 0)
+                        if ((ret = cert_req()) < 0)
                         {
                                 LOG_ERROR("Failed to send controlplane cert request");
                                 goto cleanup;

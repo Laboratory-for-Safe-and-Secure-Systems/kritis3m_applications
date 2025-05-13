@@ -6,6 +6,7 @@
 #include "kritis3m_configuration.h"
 #include "tls_proxy.h"
 #include "kritis3m_application_manager.h"
+#include "pki_client.h"
 
 /**
  * @brief Starts the `kritis3m_service` module.
@@ -23,7 +24,6 @@
  */
 int start_kritis3m_service(char* config_file, int log_level);
 
-enum MSG_RESPONSE_CODE req_send_status_report(ApplicationManagerStatus manager_status);
 
 // stops kritis3m_scale service
 enum MSG_RESPONSE_CODE stop_kritis3m_service(void);
@@ -38,8 +38,8 @@ enum MSG_RESPONSE_CODE stop_kritis3m_service(void);
  */
 enum MSG_RESPONSE_CODE restart_kritis3m_service(void);
 
-enum MSG_RESPONSE_CODE ctrlplane_cert_get_req(void);
-enum MSG_RESPONSE_CODE dataplane_cert_get_req(void);
+//algo and alt_algo is optional. If provided, new keypairs will be generated 
+enum MSG_RESPONSE_CODE cert_req(enum CERT_TYPE type ,char* algo, char* alt_algo);
 
 // returns callback which is used by control plane conn to await signal for synchronous update
 // cb: callback function
