@@ -91,10 +91,6 @@ typedef struct service_message
         union kritis3m_service_payload
         {
                 int32_t return_code;
-                struct appl_manager_status
-                {
-                        ApplicationManagerStatus status;
-                } appl_status;
                 struct cert_apply_req
                 {
                         enum CERT_TYPE cert_type;
@@ -129,9 +125,11 @@ enum MSG_RESPONSE_CODE initiate_hello_message(bool is_timer);
 
 static void cleanup_hello_timer(struct kritis3m_service* svc);
 void cleanup_dataplane_update_coordinator(struct dataplane_update_coordinator* update);
-int fetch_certificate(void* context, enum CONFIG_TYPE type, void* to_fetch);
 
-int validate_dataplane_config(void* context, char* config, size_t size);
+static int fetch_certificate(void* context, enum CONFIG_TYPE type, void* to_fetch);
+int fetch_dataplane_config(void* context, enum CONFIG_TYPE type, void* to_fetch);
+
+int validate_dataplane_config(void* context, enum CONFIG_TYPE type, void* to_fetch);
 void handle_notify_dataplane_cert(enum TRANSACTION_STATE state, void* to_fetch);
 void handle_notify_controlplane_cert(enum TRANSACTION_STATE state, void* to_fetch);
 
@@ -216,42 +214,40 @@ int start_kritis3m_service(char* config_file, int log_level)
         bool restart_requested = false;
         if (sys_config->controlplane_cert_active == ACTIVE_NONE)
         {
-                struct config_transaction* transaction = malloc(sizeof(struct config_transaction));
-                memset(transaction, 0, sizeof(struct config_transaction));
+                struct config_transaction transaction = {0};
                 LOG_DEBUG("controlplane: starting with secp384 defaultwise");
                 init_est_configuration(&est_config, "secp384", NULL);
 
-                ret = init_config_transaction(transaction,
+                LOG_DEBUG("fetch_certificate=%p", fetch_certificate);
+                ret = init_config_transaction(&transaction,
                                               CONFIG_CONTROLPLANE,
                                               &svc.pki_clinet_config,
                                               &est_config,
                                               fetch_certificate,
                                               validate_controlplane_certificate,
                                               NULL);
-                ret = start_config_transaction(transaction);
+                ret = start_config_transaction(&transaction);
                 // await transaction to finish
-                pthread_join(transaction->worker_thread, NULL);
+                pthread_join(transaction.worker_thread, NULL);
                 restart_requested = true;
         }
 
         if (sys_config->dataplane_cert_active == ACTIVE_NONE)
         {
-                struct config_transaction* transaction = malloc(sizeof(struct config_transaction));
-                memset(transaction, 0, sizeof(struct config_transaction));
-
+                struct config_transaction transaction = {0};
                 LOG_DEBUG("dataplane: starting with secp384 defaultwise");
                 init_est_configuration(&est_config, "secp384", NULL);
 
-                ret = init_config_transaction(transaction,
+                ret = init_config_transaction(&transaction,
                                               CONFIG_DATAPLANE,
                                               &svc.pki_clinet_config,
                                               &est_config,
                                               fetch_certificate,
                                               validate_dataplane_certificate,
                                               NULL);
-                ret = start_config_transaction(transaction);
+                ret = start_config_transaction(&transaction);
                 // await transaction to finish
-                pthread_join(transaction->worker_thread, NULL);
+                pthread_join(transaction.worker_thread, NULL);
                 restart_requested = true;
         }
         if (restart_requested && max_retries > 0)
@@ -581,20 +577,17 @@ ManagementReturncode handle_svc_message(int socket,
                                 notify = handle_notify_controlplane_cert;
                         }
 
-                        struct config_transaction* transaction = malloc(
-                                sizeof(struct config_transaction));
+                        struct config_transaction transaction = {0};
 
-                        memset(transaction, 0, sizeof(struct config_transaction));
-
-                        ret = init_config_transaction(transaction,
+                        ret = init_config_transaction(&transaction,
                                                       cert_type,
                                                       &svc.pki_clinet_config,
-                                                      &est_config,
+                                                      est_config,
                                                       fetch_certificate,
                                                       validate_dataplane_certificate,
                                                       notify);
 
-                        ret = start_config_transaction(transaction);
+                        ret = start_config_transaction(&transaction);
                         if (ret < 0)
                         {
                                 LOG_ERROR("Failed to start dataplane transaction");
@@ -606,18 +599,17 @@ ManagementReturncode handle_svc_message(int socket,
                 {
                         LOG_INFO("Received data plane config apply request");
                         svc_respond_with(socket, MSG_OK);
-                        struct config_transaction* transaction = malloc(
-                                sizeof(struct config_transaction));
-                        memset(transaction, 0, sizeof(struct config_transaction));
+                        struct config_transaction transaction = {0};
 
-                        ret = init_config_transaction(transaction,
+                        ret = init_config_transaction(&transaction,
                                                       CONFIG_APPLICATION,
                                                       &coordinator,
+                                                      NULL, // to_fetch is 0, transaction mechanism changed to to multple returnvalues in certificate update, which required to_fetch. Cleanup required in the future!
                                                       fetch_dataplane_config,
                                                       // in this case, the testcase tests in production mode
                                                       validate_dataplane_config,
                                                       NULL);
-                        ret = start_config_transaction(transaction);
+                        ret = start_config_transaction(&transaction);
                         if (ret < 0)
                         {
                                 LOG_ERROR("Failed to start dataplane transaction");
@@ -672,7 +664,8 @@ enum MSG_RESPONSE_CODE dataplane_config_apply_send_status(struct coordinator_sta
                                            sizeof(struct coordinator_status));
 }
 
-enum MSG_RESPONSE_CODE cert_req(enum CERT_TYPE type, char* algo, char* alt_algo)
+//if algo && alt_algo is null, extisting keys will be used
+enum MSG_RESPONSE_CODE cert_req(enum CERT_TYPE type, char const* algo, char const* alt_algo)
 {
         if (!svc.initialized || svc.management_socket[THREAD_EXT] < 0)
         {
@@ -681,25 +674,14 @@ enum MSG_RESPONSE_CODE cert_req(enum CERT_TYPE type, char* algo, char* alt_algo)
         }
 
         service_message request = {0};
-        request.msg_type = SVC_MSG_CTRLPLANE_CERT_GET_REQ;
+        request.msg_type = SVC_MSG_CERT_GET_REQ;
+        request.payload.cert_req.cert_type = type;
         request.payload.cert_req.algo = algo;
         request.payload.cert_req.alt_algo = alt_algo;
 
         return external_management_request(svc.management_socket[THREAD_EXT], &request, sizeof(request));
 }
 
-enum MSG_RESPONSE_CODE dataplane_cert_get_req()
-{
-        if (!svc.initialized || svc.management_socket[THREAD_EXT] < 0)
-        {
-                LOG_ERROR("Kritis3m_service is not initialized");
-                return MSG_ERROR;
-        }
-
-        service_message request = {0};
-        request.msg_type = SVC_MSG_DATAPLANE_CERT_GET_REQ;
-        return external_management_request(svc.management_socket[THREAD_EXT], &request, sizeof(request));
-}
 
 enum MSG_RESPONSE_CODE dataplane_config_apply_req()
 {
@@ -758,7 +740,7 @@ static void cleanup_hello_timer(struct kritis3m_service* svc)
 }
 
 // used by transaction mechanism
-int fetch_certificate(void* context, enum CONFIG_TYPE type, void* to_fetch)
+static int fetch_certificate(void* context, enum CONFIG_TYPE type, void* to_fetch)
 {
         int ret = 0;
         if (!context || !to_fetch)
@@ -772,7 +754,7 @@ int fetch_certificate(void* context, enum CONFIG_TYPE type, void* to_fetch)
         if ((ret = blocking_est_request((struct pki_client_config_t*) context,
                                         CERT_TYPE_DATAPLANE,
                                         true,
-                                        (struct est_configuration*) to_fetch) < 0))
+                                        (struct est_configuration*) to_fetch)) < 0)
         {
                 LOG_ERROR("error occured in fetch dataplane certificate, with ret: %d", ret);
                 return -1;
@@ -844,9 +826,15 @@ void handle_notify_dataplane_cert(enum TRANSACTION_STATE state, void* to_fetch)
  * @param buffer_size: is not used
  * @return: 0 on success, -1 on failure
  */
-int fetch_dataplane_config(void* context, enum CONFIG_TYPE, void* to_fetch)
+int fetch_dataplane_config(void* context, enum CONFIG_TYPE type, void* to_fetch)
 {
         int ret = 0;
+        if (type != CONFIG_APPLICATION)
+        {
+                LOG_ERROR("Invalid config type");
+                return -1;
+        }
+
         struct dataplane_update_coordinator* update = NULL;
         if (!context)
                 goto cleanup;
@@ -966,7 +954,7 @@ static int handle_policy_status_update(struct dataplane_update_coordinator* upda
  * It follows a state machine pattern to handle different stages of the update process.
  * The function is part of a transaction interface, hence the unused parameters.
  */
-int validate_dataplane_config(void* context, char* config, size_t size)
+int validate_dataplane_config(void* context, enum CONFIG_TYPE type, void* to_fetch)
 {
         if (!context)
         {

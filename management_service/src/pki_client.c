@@ -1,12 +1,14 @@
 #include "pki_client.h"
 #include "asl.h"
 #include "asl_helper.h"
+#include "file_io.h"
 #include "http_client.h"
 #include "http_method.h"
 #include "kritis3m_pki_client.h"
 #include "kritis3m_pki_common.h"
 #include "logging.h"
 #include "networking.h"
+#include <ctype.h>
 #include <errno.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -16,7 +18,7 @@
 
 LOG_MODULE_CREATE("pki_client");
 
-#define HTTP_BUFFER_SIZE 16096
+#define HTTP_BUFFER_SIZE 40000
 #define HTTP_TIMEOUT_MS 50000
 
 // Forward declarations
@@ -25,6 +27,9 @@ static void pki_cleanup_connection(asl_endpoint* endpoint,
                                    int sock_fd,
                                    struct addrinfo* addr_info);
 static bool ping_server(int socket_fd);
+static void http_response_callback(struct http_response* rsp,
+                                   enum http_final_call final_data,
+                                   void* user_data);
 
 // Helper function to cleanup connection resources
 static void pki_cleanup_connection(asl_endpoint* endpoint,
@@ -87,15 +92,13 @@ static bool ping_server(int socket_fd)
         return true;
 }
 
-void init_est_configuration(struct est_configuration* config,
-                           const char* algo,
-                           const char* alt_algo)
+void init_est_configuration(struct est_configuration* config, const char* algo, const char* alt_algo)
 {
         if (!algo && alt_algo)
         {
                 LOG_WARN("only alternative algorithm specified, using existing keys instead");
-                config->algorithm=NULL;
-                config->alt_algoithm=NULL;
+                config->algorithm = NULL;
+                config->alt_algoithm = NULL;
         }
         else
         {
@@ -139,7 +142,7 @@ int blocking_est_request(struct pki_client_config_t* config,
                 goto cleanup;
         }
 
-        if ( est_config->algorithm)
+        if (est_config->algorithm)
         {
                 {
 
@@ -340,6 +343,13 @@ int blocking_est_request(struct pki_client_config_t* config,
                 ca_req.port = port_str;
                 ca_req.content_type_value = "application/pkcs7-mime";
 
+                const char* cert_headers[] = {"Accept: application/pkcs7-mime\r\n",
+                                              "Content-Transfer-Encoding: base64\r\n",
+                                              "Connection: close\r\n",
+                                              NULL};
+                ca_req.header_fields = cert_headers;
+                ca_req.response = http_response_callback;
+
                 // Set headers
                 const char* ca_headers[] = {"Accept: application/pkcs7-mime\r\n",
                                             "Content-Transfer-Encoding: base64\r\n",
@@ -355,7 +365,7 @@ int blocking_est_request(struct pki_client_config_t* config,
 
                 // Response handler
                 struct http_response ca_response = {0};
-                ca_req.response = NULL; // We'll handle the response directly
+                // We'll still need direct access to the response for parsing
 
                 // Send request with timeout
                 struct duration timeout = ms_to_duration(HTTP_TIMEOUT_MS);
@@ -421,25 +431,25 @@ int blocking_est_request(struct pki_client_config_t* config,
                 cert_req.host = config->host;
                 cert_req.port = port_str;
                 cert_req.content_type_value = "application/pkcs10";
+                const char* headers[] = {"Accept: application/pkcs7-mime\r\n",
+                                         "Content-Transfer-Encoding: base64\r\n",
+                                         "Connection: close\r\n",
+                                         NULL};
+                cert_req.header_fields = headers;
                 cert_req.payload = (char*) csr_buffer;
                 cert_req.payload_len = csr_size;
+                cert_req.response = http_response_callback;
 
-                // Set headers
-                const char* cert_headers[] = {"Accept: application/pkcs7-mime\r\n",
-                                              "Content-Transfer-Encoding: base64\r\n",
-                                              "Connection: close\r\n",
-                                              NULL};
-                cert_req.header_fields = cert_headers;
 
                 // Allocate buffer for response
                 uint8_t cert_rsp_buffer[MAX_KEY_SIZE];
                 memset(cert_rsp_buffer, 0, sizeof(cert_rsp_buffer));
+
                 cert_req.recv_buf = cert_rsp_buffer;
                 cert_req.recv_buf_len = sizeof(cert_rsp_buffer);
 
                 // Response handler
                 struct http_response cert_response = {0};
-                cert_req.response = NULL; // We'll handle the response directly
 
                 // Send request with timeout
                 struct duration timeout = ms_to_duration(HTTP_TIMEOUT_MS);
@@ -533,4 +543,67 @@ cleanup:
         }
 
         return ret;
+}
+
+// Response callback function to handle HTTP responses
+static void http_response_callback(struct http_response* rsp,
+                                   enum http_final_call final_data,
+                                   void* user_data)
+{
+        struct http_response* rsp_ptr = (struct http_response*) user_data;
+        if (!rsp)
+        {
+                LOG_ERROR("Received null HTTP response");
+                return;
+        }
+
+        // Check HTTP status code
+        if (rsp->http_status_code < 200 || rsp->http_status_code >= 300)
+        {
+                LOG_ERROR("HTTP request failed with status code: %d, status: %s",
+                          rsp->http_status_code,
+                          rsp->http_status);
+                return;
+        }
+
+        // Process content-length and data progress
+        if (rsp->cl_present)
+        {
+                LOG_DEBUG("Received HTTP response data: %zu of %zu bytes (%d%%)",
+                          rsp->processed,
+                          rsp->content_length,
+                          (int) (rsp->processed * 100 /
+                                 (rsp->content_length ? rsp->content_length : 1)));
+        }
+        else
+        {
+                LOG_DEBUG("Received HTTP response data: %zu bytes", rsp->processed);
+        }
+
+        // Log successful response on completion
+        if (final_data == HTTP_DATA_FINAL)
+        {
+                LOG_DEBUG("HTTP request completed successfully with status code: %d",
+                          rsp->http_status_code);
+
+                rsp_ptr->body_frag_start = rsp->body_frag_start;
+                rsp_ptr->body_frag_len = rsp->body_frag_len;
+                rsp_ptr->http_status_code = rsp->http_status_code;
+                rsp_ptr->cl_present = rsp->cl_present;
+                rsp_ptr->content_length = rsp->content_length;
+                rsp_ptr->processed = rsp->processed;
+                rsp_ptr->message_complete = rsp->message_complete;
+
+                // Log the message completion status
+                if (rsp->message_complete)
+                {
+                        LOG_DEBUG("HTTP message completely received");
+                        rsp_ptr->message_complete = rsp->message_complete;
+                }
+                else
+                {
+                        LOG_WARN("HTTP message not completely received despite final data "
+                                 "flag");
+                }
+        }
 }

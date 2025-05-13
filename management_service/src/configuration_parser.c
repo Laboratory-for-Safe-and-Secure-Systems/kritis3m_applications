@@ -14,6 +14,9 @@ LOG_MODULE_CREATE(kritis3m_config_paser);
 
 /*--------------------- FORWARD DECLARATION ------------------------------------*/
 
+// Helper function to map KEX string values to ASL key exchange method enum values
+enum asl_key_exchange_method map_kex_string_to_enum(const char* kex_str);
+
 int parse_sysconfig_to_json(struct sysconfig* config, char* json_buffer, int json_buffer_size)
 {
         if (!config || !json_buffer || json_buffer_size <= 0)
@@ -295,76 +298,13 @@ int parse_buffer_to_sysconfig(char* json_buffer, int json_buffer_size, struct sy
                 LOG_ERROR("Invalid or missing KEX configuration");
                 goto error;
         }
-        // Map KEX string to enum value
-        if (strcmp(kex->valuestring, "KEX_DEFAULT") == 0)
-        {
-                config->endpoint_config->key_exchange_method = ASL_KEX_DEFAULT;
-        }
-        else if (strcmp(kex->valuestring, "KEX_CLASSIC_SECP256") == 0)
-        {
-                config->endpoint_config->key_exchange_method = ASL_KEX_CLASSIC_SECP256;
-        }
-        else if (strcmp(kex->valuestring, "KEX_CLASSIC_SECP384") == 0)
-        {
-                config->endpoint_config->key_exchange_method = ASL_KEX_CLASSIC_SECP384;
-        }
-        else if (strcmp(kex->valuestring, "KEX_CLASSIC_SECP521") == 0)
-        {
-                config->endpoint_config->key_exchange_method = ASL_KEX_CLASSIC_SECP521;
-        }
-        else if (strcmp(kex->valuestring, "KEX_CLASSIC_X25519") == 0)
-        {
-                config->endpoint_config->key_exchange_method = ASL_KEX_CLASSIC_X25519;
-        }
-        else if (strcmp(kex->valuestring, "KEX_CLASSIC_X448") == 0)
-        {
-                config->endpoint_config->key_exchange_method = ASL_KEX_CLASSIC_X448;
-        }
-        else if (strcmp(kex->valuestring, "KEX_PQC_MLKEM512") == 0)
-        {
-                config->endpoint_config->key_exchange_method = ASL_KEX_PQC_MLKEM512;
-        }
-        else if (strcmp(kex->valuestring, "KEX_PQC_MLKEM768") == 0)
-        {
-                config->endpoint_config->key_exchange_method = ASL_KEX_PQC_MLKEM768;
-        }
-        else if (strcmp(kex->valuestring, "KEX_PQC_MLKEM1024") == 0)
-        {
-                config->endpoint_config->key_exchange_method = ASL_KEX_PQC_MLKEM1024;
-        }
-        else if (strcmp(kex->valuestring, "KEX_HYBRID_SECP256_MLKEM512") == 0)
-        {
-                config->endpoint_config->key_exchange_method = ASL_KEX_HYBRID_SECP256_MLKEM512;
-        }
-        else if (strcmp(kex->valuestring, "KEX_HYBRID_SECP384_MLKEM768") == 0)
-        {
-                config->endpoint_config->key_exchange_method = ASL_KEX_HYBRID_SECP384_MLKEM768;
-        }
-        else if (strcmp(kex->valuestring, "KEX_HYBRID_SECP256_MLKEM768") == 0)
-        {
-                config->endpoint_config->key_exchange_method = ASL_KEX_HYBRID_SECP256_MLKEM768;
-        }
-        else if (strcmp(kex->valuestring, "KEX_HYBRID_SECP521_MLKEM1024") == 0)
-        {
-                config->endpoint_config->key_exchange_method = ASL_KEX_HYBRID_SECP521_MLKEM1024;
-        }
-        else if (strcmp(kex->valuestring, "KEX_HYBRID_SECP384_MLKEM1024") == 0)
-        {
-                config->endpoint_config->key_exchange_method = ASL_KEX_HYBRID_SECP384_MLKEM1024;
-        }
-        else if (strcmp(kex->valuestring, "KEX_HYBRID_X25519_MLKEM512") == 0)
-        {
-                config->endpoint_config->key_exchange_method = ASL_KEX_HYBRID_X25519_MLKEM512;
-        }
-        else if (strcmp(kex->valuestring, "KEX_HYBRID_X448_MLKEM768") == 0)
-        {
-                config->endpoint_config->key_exchange_method = ASL_KEX_HYBRID_X448_MLKEM768;
-        }
-        else if (strcmp(kex->valuestring, "KEX_HYBRID_X25519_MLKEM768") == 0)
-        {
-                config->endpoint_config->key_exchange_method = ASL_KEX_HYBRID_X25519_MLKEM768;
-        }
-        else
+        
+        // Use the helper function to map the KEX string to enum value
+        config->endpoint_config->key_exchange_method = map_kex_string_to_enum(kex->valuestring);
+        
+        // Check if we got an unsupported KEX method
+        if (config->endpoint_config->key_exchange_method == ASL_KEX_DEFAULT && 
+            strcmp(kex->valuestring, "KEX_DEFAULT") != 0)
         {
                 LOG_ERROR("Unsupported KEX method: %s", kex->valuestring);
                 goto error;
@@ -412,6 +352,49 @@ error:
         cJSON_Delete(root);
         return -1;
 }
+
+// Helper function to map KEX string values to ASL key exchange method enum values
+enum asl_key_exchange_method map_kex_string_to_enum(const char* kex_str)
+{
+        if (strcmp(kex_str, "KEX_DEFAULT") == 0)
+                return ASL_KEX_DEFAULT;
+        else if (strcmp(kex_str, "KEX_CLASSIC_SECP256") == 0)
+                return ASL_KEX_CLASSIC_SECP256;
+        else if (strcmp(kex_str, "KEX_CLASSIC_SECP384") == 0)
+                return ASL_KEX_CLASSIC_SECP384;
+        else if (strcmp(kex_str, "KEX_CLASSIC_SECP521") == 0)
+                return ASL_KEX_CLASSIC_SECP521;
+        else if (strcmp(kex_str, "KEX_CLASSIC_X25519") == 0)
+                return ASL_KEX_CLASSIC_X25519;
+        else if (strcmp(kex_str, "KEX_CLASSIC_X448") == 0)
+                return ASL_KEX_CLASSIC_X448;
+        else if (strcmp(kex_str, "KEX_PQC_MLKEM512") == 0)
+                return ASL_KEX_PQC_MLKEM512;
+        else if (strcmp(kex_str, "KEX_PQC_MLKEM768") == 0)
+                return ASL_KEX_PQC_MLKEM768;
+        else if (strcmp(kex_str, "KEX_PQC_MLKEM1024") == 0)
+                return ASL_KEX_PQC_MLKEM1024;
+        else if (strcmp(kex_str, "KEX_HYBRID_SECP256_MLKEM512") == 0)
+                return ASL_KEX_HYBRID_SECP256_MLKEM512;
+        else if (strcmp(kex_str, "KEX_HYBRID_SECP384_MLKEM768") == 0)
+                return ASL_KEX_HYBRID_SECP384_MLKEM768;
+        else if (strcmp(kex_str, "KEX_HYBRID_SECP256_MLKEM768") == 0)
+                return ASL_KEX_HYBRID_SECP256_MLKEM768;
+        else if (strcmp(kex_str, "KEX_HYBRID_SECP521_MLKEM1024") == 0)
+                return ASL_KEX_HYBRID_SECP521_MLKEM1024;
+        else if (strcmp(kex_str, "KEX_HYBRID_SECP384_MLKEM1024") == 0)
+                return ASL_KEX_HYBRID_SECP384_MLKEM1024;
+        else if (strcmp(kex_str, "KEX_HYBRID_X25519_MLKEM512") == 0)
+                return ASL_KEX_HYBRID_X25519_MLKEM512;
+        else if (strcmp(kex_str, "KEX_HYBRID_X448_MLKEM768") == 0)
+                return ASL_KEX_HYBRID_X448_MLKEM768;
+        else if (strcmp(kex_str, "KEX_HYBRID_X25519_MLKEM768") == 0)
+                return ASL_KEX_HYBRID_X25519_MLKEM768;
+        else
+                return ASL_KEX_DEFAULT; // Default value for unsupported KEX methods
+}
+
+
 int parse_proxy(cJSON* proxy, struct proxy_wrapper* proxy_wrapper, int group_log_level)
 {
         if (!proxy || !proxy_wrapper)

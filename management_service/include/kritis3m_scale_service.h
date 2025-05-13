@@ -39,7 +39,7 @@ enum MSG_RESPONSE_CODE stop_kritis3m_service(void);
 enum MSG_RESPONSE_CODE restart_kritis3m_service(void);
 
 //algo and alt_algo is optional. If provided, new keypairs will be generated 
-enum MSG_RESPONSE_CODE cert_req(enum CERT_TYPE type ,char* algo, char* alt_algo);
+enum MSG_RESPONSE_CODE cert_req(enum CERT_TYPE type ,char const* algo, char const* alt_algo);
 
 // returns callback which is used by control plane conn to await signal for synchronous update
 // cb: callback function

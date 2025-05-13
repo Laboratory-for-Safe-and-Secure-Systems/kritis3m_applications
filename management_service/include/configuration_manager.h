@@ -23,6 +23,20 @@ enum PROXY_TYPE
         PROXY_TLS_TLS = 3,
 };
 
+#define  RSA2048   "rsa2048"
+#define  RSA3072   "rsa3072"
+#define  RSA4096   "rsa4096"
+#define  SECP256   "secp256"
+#define  SECP384   "secp384"
+#define  SECP521   "secp521"
+#define  ED25519   "ed25519"
+#define  ED448     "ed448"
+#define  MLDSA44   "mldsa44"
+#define  MLDSA65   "mldsa65"
+#define  MLDSA87   "mldsa87"
+#define  FALCON512 "falcon512"
+#define  FALCON102 "falcon10244"
+
 struct coordinator_status
 {
         int32_t module;
@@ -139,16 +153,10 @@ struct config_update
 struct config_state
 {
         enum ACTIVE active_path;
-        char* path_1;
-        char* path_2;
         bool is_validating;
         bool validation_success;
 };
 
-// New functions for improved update management
-int init_config_update(struct config_update* update, enum CONFIG_TYPE type, char* config, size_t size);
-int prepare_config_update(struct config_update* update);
-int commit_config_update(struct config_update* update);
 
 // Transaction states
 enum TRANSACTION_STATE
@@ -216,5 +224,9 @@ struct hardware_configs* deep_copy_hardware_configs(const struct hardware_config
  * @return struct application_manager_config* A newly allocated deep copy, or NULL on failure
  */
 struct application_manager_config* deep_copy_application_config(const struct application_manager_config* src);
+
+char const* get_algorithm(char* algo);
+
+
 
 #endif // CONFIGURATION_MANAGER_H

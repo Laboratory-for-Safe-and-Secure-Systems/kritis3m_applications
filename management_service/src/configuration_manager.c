@@ -1,14 +1,16 @@
-#include "configuration_manager.h"
-#include "asl.h"
-#include "configuration_parser.h"
-#include "file_io.h"
-#include "logging.h"
-#include "networking.h"
 #include <complex.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+#include "asl.h"
+#include "configuration_manager.h"
+#include "configuration_parser.h"
+#include "file_io.h"
+#include "logging.h"
+#include "networking.h"
+#include "pki_client.h"
 
 LOG_MODULE_CREATE(configuration_manager);
 
@@ -30,9 +32,9 @@ LOG_MODULE_CREATE(configuration_manager);
 #define DATAPLANE_2_KEY_PATH_FORMAT "%s/cert/2/dataplane_key.pem"
 #define DATAPLANE_2_ALTKEY_PATH_FORMAT "%s/cert/2/dataplane_altkey.pem"
 
-#define BOOTSTRAP_CHAIN_PATH_FORMAT "%s/cert/bootstrap_chain.pem"
-#define BOOTSTRAP_KEY_PATH_FORMAT "%s/cert/bootstrap_key.pem"
-#define BOOTSTRAP_ALTKEY_PATH_FORMAT "%s/cert/bootstrap_altkey.pem"
+#define BOOTSTRAP_CHAIN_PATH_FORMAT "%s/cert/chain.pem"
+#define BOOTSTRAP_KEY_PATH_FORMAT "%s/cert/key.pem"
+#define BOOTSTRAP_ALTKEY_PATH_FORMAT "%s/cert/altkey.pem"
 #define ROOT_PATH_FORMAT "%s/cert/root.pem"
 
 #define APPLICATION_1_PATH_FORMAT "%s/application/1/application.json"
@@ -63,7 +65,6 @@ struct configuration_manager
         char* sys_config_path;
 
         struct sysconfig sys_config;
-
 
         char* root_cert;
 
@@ -156,7 +157,8 @@ int get_application_inactive(struct application_manager_config* config,
                 free(buffer);
                 return -1;
         }
-        if (buffer){
+        if (buffer)
+        {
                 free(buffer);
                 buffer = NULL;
         }
@@ -182,19 +184,19 @@ int get_application_inactive(struct application_manager_config* config,
                 case ACTIVE_ONE:
                         chain_path = configuration_manager.dataplane_1_chain_path;
 
-                // Load certificates into this endpoint configuration
-                ret = load_endpoint_certificates(config->group_config[i].endpoint_config,
-                                                 configuration_manager.dataplane_1_chain_path,
-                                                 configuration_manager.dataplane_1_key_path,
-                                                 configuration_manager.dataplane_1_altkey_path,
-                                                 configuration_manager.root_cert);
+                        // Load certificates into this endpoint configuration
+                        ret = load_endpoint_certificates(config->group_config[i].endpoint_config,
+                                                         configuration_manager.dataplane_1_chain_path,
+                                                         configuration_manager.dataplane_1_key_path,
+                                                         configuration_manager.dataplane_1_altkey_path,
+                                                         configuration_manager.root_cert);
                         break;
                 case ACTIVE_TWO:
-                ret = load_endpoint_certificates(config->group_config[i].endpoint_config,
-                                                 configuration_manager.dataplane_2_chain_path,
-                                                 configuration_manager.dataplane_2_key_path,
-                                                 configuration_manager.dataplane_2_altkey_path,
-                                                 configuration_manager.root_cert);
+                        ret = load_endpoint_certificates(config->group_config[i].endpoint_config,
+                                                         configuration_manager.dataplane_2_chain_path,
+                                                         configuration_manager.dataplane_2_key_path,
+                                                         configuration_manager.dataplane_2_altkey_path,
+                                                         configuration_manager.root_cert);
                         break;
                 default:
                         LOG_ERROR("Invalid dataplane active configuration");
@@ -258,7 +260,6 @@ int application_store_inactive(char* buffer, size_t size)
         return 0;
 }
 
-
 int init_configuration_manager(char* base_path)
 {
         if (!base_path)
@@ -289,14 +290,14 @@ int init_configuration_manager(char* base_path)
         len = snprintf(helper_string, 300, BOOTSTRAP_ALTKEY_PATH_FORMAT, base_path);
         configuration_manager.bootstrap_altkey_path = duplicate_string(helper_string);
 
+        len = snprintf(helper_string, 300, BOOTSTRAP_CHAIN_PATH_FORMAT, base_path);
+        configuration_manager.bootstrap_chain_path = duplicate_string(helper_string);
+
         len = snprintf(helper_string, 300, CONTROLPLANE_1_ALTKEY_PATH_FORMAT, base_path);
         configuration_manager.controlplane_1_altkey_path = duplicate_string(helper_string);
 
         len = snprintf(helper_string, 300, CONTROLPLANE_1_KEY_PATH_FORMAT, base_path);
         configuration_manager.controlplane_1_key_path = duplicate_string(helper_string);
-
-        len = snprintf(helper_string, 300, CONTROLPLANE_1_CHAIN_PATH_FORMAT, base_path);
-        configuration_manager.controlplane_1_chain_path = duplicate_string(helper_string);
 
         len = snprintf(helper_string, 300, CONTROLPLANE_1_CHAIN_PATH_FORMAT, base_path);
         configuration_manager.controlplane_1_chain_path = duplicate_string(helper_string);
@@ -325,7 +326,7 @@ int init_configuration_manager(char* base_path)
         len = snprintf(helper_string, 300, DATAPLANE_2_KEY_PATH_FORMAT, base_path);
         configuration_manager.dataplane_2_key_path = duplicate_string(helper_string);
 
-        len = snprintf(helper_string, 300, DATAPLANE_1_CHAIN_PATH_FORMAT, base_path);
+        len = snprintf(helper_string, 300, DATAPLANE_2_CHAIN_PATH_FORMAT, base_path);
         configuration_manager.dataplane_2_chain_path = duplicate_string(helper_string);
 
         len = snprintf(helper_string, 300, APPLICATION_1_PATH_FORMAT, base_path);
@@ -333,9 +334,6 @@ int init_configuration_manager(char* base_path)
 
         len = snprintf(helper_string, 300, APPLICATION_2_PATH_FORMAT, base_path);
         configuration_manager.application_2_path = duplicate_string(helper_string);
-
-        len = snprintf(helper_string, 300, BOOTSTRAP_CHAIN_PATH_FORMAT, base_path);
-        configuration_manager.bootstrap_chain_path = duplicate_string(helper_string);
 
         size_t buffer_size = 0;
         ret = read_file(configuration_manager.sys_config_path, (uint8_t**) &buffer, &buffer_size);
@@ -390,115 +388,6 @@ error:
 
         cleanup_configuration_manager();
         return -1;
-}
-
-int init_config_update(struct config_update* update, enum CONFIG_TYPE type, char* config, size_t size)
-{
-        if (!update || (type != CONFIG_APPLICATION && (!config || size < 150)))
-        {
-                LOG_ERROR("Invalid update parameters");
-                return -1;
-        }
-
-        update->type = type;
-        update->new_config = config;
-        update->config_size = size;
-        update->validation_callback = NULL;
-        update->validation_context = NULL;
-
-        switch (type)
-        {
-        case CONFIG_APPLICATION:
-                update->active_path = &configuration_manager.sys_config.application_active;
-                // hacky workaround since application data is sent via a push msg and is not directly requested
-                update->path_1 = NULL;
-                update->path_2 = NULL;
-                break;
-        case CONFIG_DATAPLANE:
-                update->active_path = &configuration_manager.sys_config.dataplane_cert_active;
-                update->path_1 = configuration_manager.dataplane_1_chain_path;
-                update->path_2 = configuration_manager.dataplane_2_chain_path;
-                break;
-        case CONFIG_CONTROLPLANE:
-                update->active_path = &configuration_manager.sys_config.controlplane_cert_active;
-                update->path_1 = configuration_manager.controlplane_1_chain_path;
-                update->path_2 = configuration_manager.controlplane_2_chain_path;
-                break;
-        default:
-                LOG_ERROR("Invalid config type");
-                return -1;
-        }
-
-        return 0;
-}
-
-int prepare_config_update(struct config_update* update)
-{
-        int ret = 0;
-        char* target_path = NULL;
-        if (!update || !configuration_manager.initialized)
-        {
-                LOG_ERROR("Invalid update or configuration manager not initialized");
-                return -1;
-        }
-
-        if (update->type != CONFIG_APPLICATION)
-        {
-                switch (*update->active_path)
-                {
-                case ACTIVE_ONE:
-                        target_path = update->path_2;
-                        break;
-                case ACTIVE_TWO:
-                        target_path = update->path_1;
-                        break;
-                case ACTIVE_NONE:
-                        target_path = update->path_1;
-                        break;
-                default:
-                        target_path = NULL;
-                        LOG_ERROR("Invalid active path");
-                        return -1;
-                }
-                if ((ret = write_file(target_path,
-                                      (const uint8_t*) update->new_config,
-                                      update->config_size,
-                                      false)) < 0)
-                {
-                        LOG_ERROR("Failed to write configuration to %s", target_path);
-                        return -1;
-                }
-        }
-
-        return 0;
-}
-
-int commit_config_update(struct config_update* update)
-{
-        int ret = 0;
-        char* target_path = NULL;
-        if (!update || !configuration_manager.initialized)
-        {
-                LOG_ERROR("Invalid update or configuration manager not initialized");
-                return -1;
-        }
-
-        switch (*update->active_path)
-        {
-        case ACTIVE_ONE:
-                *update->active_path = ACTIVE_TWO;
-                break;
-        case ACTIVE_TWO:
-                *update->active_path = ACTIVE_ONE;
-                break;
-        case ACTIVE_NONE:
-                *update->active_path = ACTIVE_ONE;
-                break;
-        default:
-                LOG_ERROR("Invalid active path");
-                return -1;
-        }
-        return write_sysconfig();
 }
 
 int test_server_conn(char* host, asl_endpoint_configuration* endpoint_config)
@@ -831,7 +720,8 @@ int get_active_hardware_config(struct application_manager_config* app_config,
                 free(buffer);
                 return -1;
         }
-        if (buffer){
+        if (buffer)
+        {
                 free(buffer);
                 buffer = NULL;
         }
@@ -853,30 +743,30 @@ int get_active_hardware_config(struct application_manager_config* app_config,
                 {
                 case ACTIVE_ONE:
 
-                // Load certificates into this endpoint configuration
-                ret = load_endpoint_certificates(app_config->group_config[i].endpoint_config,
-                                                 configuration_manager.dataplane_1_chain_path,
-                                                 configuration_manager.dataplane_1_key_path,
-                                                 configuration_manager.dataplane_1_altkey_path,
-                                                 configuration_manager.root_cert);
+                        // Load certificates into this endpoint configuration
+                        ret = load_endpoint_certificates(app_config->group_config[i].endpoint_config,
+                                                         configuration_manager.dataplane_1_chain_path,
+                                                         configuration_manager.dataplane_1_key_path,
+                                                         configuration_manager.dataplane_1_altkey_path,
+                                                         configuration_manager.root_cert);
                         break;
                 case ACTIVE_TWO:
-                ret = load_endpoint_certificates(app_config->group_config[i].endpoint_config,
-                                                 configuration_manager.dataplane_2_chain_path,
-                                                 configuration_manager.dataplane_2_key_path,
-                                                 configuration_manager.dataplane_2_altkey_path,
-                                                 configuration_manager.root_cert);
+                        ret = load_endpoint_certificates(app_config->group_config[i].endpoint_config,
+                                                         configuration_manager.dataplane_2_chain_path,
+                                                         configuration_manager.dataplane_2_key_path,
+                                                         configuration_manager.dataplane_2_altkey_path,
+                                                         configuration_manager.root_cert);
                         break;
                 case ACTIVE_NONE:
                         LOG_INFO("No active dataplane configuration is set, using "
                                  "dataplane_1_chain_path as default");
 
-                // Load certificates into this endpoint configuration
-                ret = load_endpoint_certificates(app_config->group_config[i].endpoint_config,
-                                                 configuration_manager.dataplane_1_chain_path,
-                                                 configuration_manager.dataplane_1_key_path,
-                                                 configuration_manager.dataplane_1_altkey_path,
-                                                 configuration_manager.root_cert);
+                        // Load certificates into this endpoint configuration
+                        ret = load_endpoint_certificates(app_config->group_config[i].endpoint_config,
+                                                         configuration_manager.dataplane_1_chain_path,
+                                                         configuration_manager.dataplane_1_key_path,
+                                                         configuration_manager.dataplane_1_altkey_path,
+                                                         configuration_manager.root_cert);
 
                         break;
                 default:
@@ -914,7 +804,8 @@ void cleanup_application_config(struct application_manager_config* config)
                         if (config->group_config[i].endpoint_config)
                         {
                                 cleanup_endpoint_config(config->group_config[i].endpoint_config);
-                                if (config->group_config[i].endpoint_config){
+                                if (config->group_config[i].endpoint_config)
+                                {
                                         free(config->group_config[i].endpoint_config);
                                         config->group_config[i].endpoint_config = NULL;
                                 }
@@ -934,7 +825,7 @@ void cleanup_application_config(struct application_manager_config* config)
                                                              .proxy_wrapper[j]
                                                              .proxy_config.target_ip_address);
                                 }
-                                //deletes the whole array
+                                // deletes the whole array
                                 free(config->group_config[i].proxy_wrapper);
                         }
                 }
@@ -999,18 +890,209 @@ int store_alt_ctrl_cert(char* cert_buffer, size_t cert_size)
         return ret;
 }
 
-int store_alt_data_cert(char* buffer, size_t size)
+int store_transaction(void* context, enum CONFIG_TYPE type, void* to_fetch)
 {
-        if (!buffer || size == 0)
+        int ret = 0;
+        if (to_fetch == NULL)
         {
-                LOG_ERROR("Invalid buffer or size");
+                LOG_ERROR("No new config to store");
+                return -1;
+        }
+        char* key_path = NULL;
+        char* chain_path = NULL;
+        char* alt_key_path = NULL;
+
+        char* chain = NULL;
+        char* alt_key = NULL;
+        char* key = NULL;
+
+        struct est_configuration* est_config = (struct est_configuration*) to_fetch;
+        if (est_config == NULL)
+        {
+                LOG_ERROR("Invalid est config");
                 return -1;
         }
 
+        switch (type)
+        {
+        case CONFIG_CONTROLPLANE:
+                {
+                        if (configuration_manager.sys_config.controlplane_cert_active == ACTIVE_ONE)
+                        {
+                                key_path = configuration_manager.controlplane_2_key_path;
+                                chain_path = configuration_manager.controlplane_2_chain_path;
+                                alt_key_path = configuration_manager.controlplane_2_altkey_path;
+                        }
+                        else if (configuration_manager.sys_config.controlplane_cert_active == ACTIVE_TWO)
+                        {
+                                key_path = configuration_manager.controlplane_1_key_path;
+                                chain_path = configuration_manager.controlplane_1_chain_path;
+                                alt_key_path = configuration_manager.controlplane_1_altkey_path;
+                        }
+                        else if (configuration_manager.sys_config.controlplane_cert_active == ACTIVE_NONE)
+                        {
+                                LOG_INFO("no configuration specified, copying "
+                                         "controlplane_1_key_path to controlplane_2_key_path");
+                                key_path = configuration_manager.controlplane_1_key_path;
+                                chain_path = configuration_manager.controlplane_1_chain_path;
+                                alt_key_path = configuration_manager.controlplane_1_altkey_path;
+                        }
+                        break;
+                }
+        case CONFIG_DATAPLANE:
+                {
+                        if (configuration_manager.sys_config.dataplane_cert_active == ACTIVE_ONE)
+                        {
+                                key_path = configuration_manager.dataplane_2_key_path;
+                                chain_path = configuration_manager.dataplane_2_chain_path;
+                                alt_key_path = configuration_manager.dataplane_2_altkey_path;
+                        }
+                        else if (configuration_manager.sys_config.dataplane_cert_active == ACTIVE_TWO)
+                        {
+                                key_path = configuration_manager.dataplane_1_key_path;
+                                chain_path = configuration_manager.dataplane_1_chain_path;
+                                alt_key_path = configuration_manager.dataplane_1_altkey_path;
+                        }
+                        else if (configuration_manager.sys_config.dataplane_cert_active == ACTIVE_NONE)
+                        {
+                                LOG_INFO("no configuration specified, copying dataplane_1_key_path "
+                                         "to dataplane_2_key_path");
+                                key_path = configuration_manager.dataplane_1_key_path;
+                                chain_path = configuration_manager.dataplane_1_chain_path;
+                                alt_key_path = configuration_manager.dataplane_1_altkey_path;
+                        }
+                        else
+                        {
+                                LOG_ERROR("Invalid dataplane active configuration");
+                        }
+                        break;
+                }
+        case CONFIG_APPLICATION:
+                {
+                        return 0;
+                }
+        default:
+                LOG_ERROR("Invalid config type");
+                return -1;
+        }
+
+        if (key_path != NULL && chain_path != NULL && alt_key_path != NULL)
+        {
+                if ((ret = write_file(key_path,
+                                      (const uint8_t*) est_config->key,
+                                      est_config->key_size,
+                                      false)) < 0)
+                {
+                        LOG_ERROR("Failed to write key to file: %s", key_path);
+                        return -1;
+                }
+                if ((ret = write_file(chain_path,
+                                      (const uint8_t*) est_config->chain,
+                                      est_config->chain_size,
+                                      false)) < 0)
+                {
+                        LOG_ERROR("Failed to write chain to file: %s", chain_path);
+                        return -1;
+                }
+
+                if (est_config->alt_key != NULL)
+                {
+                        if (est_config->alt_key_size == 0)
+                        {
+                                //reset or create existing file, with size 0
+                                if ((ret = write_file(alt_key_path, "", 0, false)) < 0)
+                                {
+                                        LOG_WARN("setting existing alt key to 0"
+                                );
+                                        return 0;
+                                }
+                        }
+                        else
+                        {
+                                if ((ret = write_file(alt_key_path,
+                                                      (const uint8_t*) est_config->alt_key,
+                                                      est_config->alt_key_size,
+                                                      false)) < 0)
+                                {
+                                        LOG_WARN("Failed to write alt_key to file: %s. Fault "
+                                                 "tolerant, "
+                                                 "node continues without error",
+                                                 alt_key_path);
+                                        return 0;
+                                }
+                        }
+                }
+        }
+        else
+        {
+                LOG_ERROR("Invalid key, chain or alt_key path");
+                return -1;
+        }
+        return ret;
+}
+
+int commit_update(void* context, enum CONFIG_TYPE type, void* to_fetch)
+{
+        int ret = 0;
+        enum ACTIVE* cfg_type = NULL;
+
+        switch (type)
+        {
+        case CONFIG_APPLICATION:
+                cfg_type = &configuration_manager.sys_config.application_active;
+                break;
+        case CONFIG_DATAPLANE:
+                cfg_type = &configuration_manager.sys_config.dataplane_cert_active;
+                break;
+        case CONFIG_CONTROLPLANE:
+                cfg_type = &configuration_manager.sys_config.controlplane_cert_active;
+                break;
+        }
+        if (cfg_type == NULL)
+        {
+                LOG_ERROR("Invalid configuration type");
+                return -1;
+        }
+
+        if (*cfg_type == ACTIVE_ONE)
+        {
+                *cfg_type = ACTIVE_TWO;
+        }
+        else if (*cfg_type == ACTIVE_TWO)
+        {
+                *cfg_type = ACTIVE_ONE;
+        }
+        else if (*cfg_type == ACTIVE_NONE)
+        {
+                *cfg_type = ACTIVE_ONE;
+        }
+        else
+        {
+                LOG_ERROR("cfg_type has wrong state");
+                return -1;
+        }
+
+        if ((ret = write_sysconfig()) < 0)
+        {
+                LOG_ERROR("rolling back");
+
+                if (*cfg_type == ACTIVE_ONE)
+                {
+                        *cfg_type = ACTIVE_TWO;
+                }
+                else if (*cfg_type == ACTIVE_TWO)
+                {
+                        *cfg_type = ACTIVE_ONE;
+                }
+                else
+                {
+                        LOG_ERROR("cfg_type has wrong state");
+                        return -1;
+                }
+        }
         return 0;
 }
 
-// Worker thread function
 static void* transaction_worker(void* arg)
 {
         struct config_transaction* transaction = (struct config_transaction*) arg;
@@ -1024,8 +1106,19 @@ static void* transaction_worker(void* arg)
         pthread_mutex_unlock(&transaction->mutex);
 
         // Fetch new configuration
+        LOG_DEBUG("Transaction worker: fetch=%p, context=%p, type=%d, to_fetch=%p",
+                  transaction->fetch,
+                  transaction->context,
+                  transaction->type,
+                  transaction->to_fetch);
 
-        ret = transaction->fetch(transaction->context,transaction->type,transaction->to_fetch);
+        if (!transaction->fetch)
+        {
+                LOG_ERROR("Fetch function pointer is NULL");
+                goto error;
+        }
+
+        ret = transaction->fetch(transaction->context, transaction->type, transaction->to_fetch);
         if (ret != 0)
         {
                 LOG_ERROR("Failed to fetch new configuration");
@@ -1046,49 +1139,50 @@ static void* transaction_worker(void* arg)
         }
         LOG_INFO("Configuration validation successful");
         // Prepare update
-        struct config_update update = {0};
-        /**
-         * control plane update is currently bit hacky, since there is no buffer
-         * obtained from an http request, but the request is already obtained
-         * from the filesystem
-         * the current approach is to modify sysconfig accordingly
-         * @TODO: fetch_dataplane_config could be modified to return a buffer, so that only validated configs are in mem
-         */
-        // hacky as well
-
-        if (init_config_update(&update, transaction->type, new_config, config_size) != 0)
+        if (transaction->type == CONFIG_CONTROLPLANE || transaction->type == CONFIG_DATAPLANE)
         {
-                LOG_ERROR("Failed to initialize update");
+                ret = store_transaction(transaction->context, transaction->type, transaction->to_fetch);
+                if (ret < 0)
+                {
+                        LOG_ERROR("Failed to store transaction");
+                        goto error;
+                }
+                LOG_INFO("Transaction stored successfully");
+        }
+        else if (transaction->type == CONFIG_APPLICATION)
+        {
+                LOG_DEBUG("Application configuration, no need to store");
+        }
+        else
+        {
+                LOG_ERROR("Invalid configuration type");
                 goto error;
         }
-        if (prepare_config_update(&update) != 0)
-        {
-                LOG_ERROR("Failed to prepare update");
-                goto error;
-        }
-        // Commit the update
-        if (commit_config_update(&update) != 0)
+        LOG_INFO("commit update via config.json");
+        if ((ret = commit_update(transaction->context, transaction->type, transaction->to_fetch)) < 0)
         {
                 LOG_ERROR("Failed to commit update");
                 goto error;
         }
+        LOG_INFO("Update committed successfully");
+
         // Update successful
         pthread_mutex_lock(&transaction->mutex);
         transaction->state = TRANSACTION_COMMITTED;
         pthread_mutex_unlock(&transaction->mutex);
 
+        // Call notify callback if available
+        if (transaction->notify)
+        {
+                transaction->notify(TRANSACTION_COMMITTED, transaction->to_fetch);
+        }
 
 cleanup:
         if (new_config)
         {
                 free(new_config);
         }
-        if (transaction)
-        {
-
-                free(transaction);
-                transaction = NULL;
-        }
+        // Don't free the transaction as it may be allocated on the stack
         return NULL;
 
 error:
@@ -1098,42 +1192,41 @@ error:
 
         if (transaction->notify)
         {
-                transaction->notify(transaction->context, TRANSACTION_FAILED);
-        }
-        if (transaction)
-        {
-
-                free(transaction);
-                transaction = NULL;
+                transaction->notify(TRANSACTION_FAILED, transaction->to_fetch);
         }
 
         goto cleanup;
 }
 
-
-int init_config_transaction(struct config_transaction* transaction,
-                            enum CONFIG_TYPE type,
-                            void* context, //defines how to reach out to the server
-                            void* to_fetch, //defines the return value
-                            config_fetch_callback fetch, //defines the function to fetch the config
-                            config_validate_callback validate, //defines the function to validate the config
-                            config_notify_callback notify //defines the function to notify the caller of the transaction
-                            )
+int init_config_transaction(
+        struct config_transaction* transaction,
+        enum CONFIG_TYPE type,
+        void* context,                     // defines how to reach out to the server
+        void* to_fetch,                    // defines the return value
+        config_fetch_callback fetch,       // defines the function to fetch the config
+        config_validate_callback validate, // defines the function to validate the config
+        config_notify_callback notify // defines the function to notify the caller of the transaction
+)
 {
-        if (!transaction || !fetch || !validate) 
+        if (!transaction || !fetch || !validate)
         {
                 LOG_ERROR("Invalid transaction parameters");
                 return -1;
         }
 
+        LOG_DEBUG("Init transaction: fetch=%p, validate=%p, notify=%p", fetch, validate, notify);
+
         memset(transaction, 0, sizeof(struct config_transaction));
         transaction->type = type;
         transaction->context = context;
         transaction->to_fetch = to_fetch;
+        transaction->fetch = fetch;
         transaction->validate = validate;
         transaction->notify = notify;
         transaction->state = TRANSACTION_IDLE;
         transaction->thread_running = false;
+
+        LOG_DEBUG("After init: transaction->fetch=%p", transaction->fetch);
 
         if (pthread_mutex_init(&transaction->mutex, NULL) != 0)
         {
@@ -1228,220 +1321,342 @@ void cleanup_config_transaction(struct config_transaction* transaction)
 
 /**
  * @brief Creates a deep copy of hardware_configs structure
- * 
+ *
  * @param src The source hardware_configs structure to copy
  * @return struct hardware_configs* A newly allocated deep copy, or NULL on failure
  */
 struct hardware_configs* deep_copy_hardware_configs(const struct hardware_configs* src)
 {
-        if (!src) {
+        if (!src)
+        {
                 LOG_ERROR("Invalid source hardware_configs");
                 return NULL;
         }
 
         struct hardware_configs* dest = malloc(sizeof(struct hardware_configs));
-        if (!dest) {
+        if (!dest)
+        {
                 LOG_ERROR("Failed to allocate memory for hardware_configs");
                 return NULL;
         }
-        
+
         // Initialize with zeros
         memset(dest, 0, sizeof(struct hardware_configs));
-        
+
         // Copy number of configs
         dest->number_of_hw_configs = src->number_of_hw_configs;
-        
-        if (src->number_of_hw_configs > 0 && src->hw_configs) {
+
+        if (src->number_of_hw_configs > 0 && src->hw_configs)
+        {
                 // Allocate memory for hw_configs array
                 dest->hw_configs = malloc(src->number_of_hw_configs * sizeof(HardwareConfiguration));
-                if (!dest->hw_configs) {
+                if (!dest->hw_configs)
+                {
                         LOG_ERROR("Failed to allocate memory for hw_configs array");
                         free(dest);
                         return NULL;
                 }
-                
+
                 // Copy each hardware configuration
-                for (int i = 0; i < src->number_of_hw_configs; i++) {
+                for (int i = 0; i < src->number_of_hw_configs; i++)
+                {
                         memcpy(&dest->hw_configs[i], &src->hw_configs[i], sizeof(HardwareConfiguration));
                 }
         }
-        
+
         return dest;
 }
 
 /**
  * @brief Creates a deep copy of application_manager_config structure
- * 
+ *
  * @param src The source application_manager_config structure to copy
  * @return struct application_manager_config* A newly allocated deep copy, or NULL on failure
  */
-struct application_manager_config* deep_copy_application_config(const struct application_manager_config* src)
+struct application_manager_config*
+        deep_copy_application_config(const struct application_manager_config* src)
 {
-        if (!src) {
+        if (!src)
+        {
                 LOG_ERROR("Invalid source application_config");
                 return NULL;
         }
 
         struct application_manager_config* dest = malloc(sizeof(struct application_manager_config));
-        if (!dest) {
+        if (!dest)
+        {
                 LOG_ERROR("Failed to allocate memory for application_manager_config");
                 return NULL;
         }
-        
+
         // Initialize with zeros
         memset(dest, 0, sizeof(struct application_manager_config));
-        
+
         // Copy number of groups
         dest->number_of_groups = src->number_of_groups;
-        
-        if (src->number_of_groups > 0 && src->group_config) {
+
+        if (src->number_of_groups > 0 && src->group_config)
+        {
                 // Allocate memory for group_config array
                 dest->group_config = malloc(src->number_of_groups * sizeof(struct group_config));
-                if (!dest->group_config) {
+                if (!dest->group_config)
+                {
                         LOG_ERROR("Failed to allocate memory for group_config array");
                         free(dest);
                         return NULL;
                 }
-                
+
                 // Initialize group_config array with zeros
                 memset(dest->group_config, 0, src->number_of_groups * sizeof(struct group_config));
-                
+
                 // Copy each group configuration
-                for (int i = 0; i < src->number_of_groups; i++) {
+                for (int i = 0; i < src->number_of_groups; i++)
+                {
                         // Copy number of proxies
                         dest->group_config[i].number_proxies = src->group_config[i].number_proxies;
-                        
+
                         // Copy endpoint configuration if it exists
-                        if (src->group_config[i].endpoint_config) {
-                                dest->group_config[i].endpoint_config = malloc(sizeof(asl_endpoint_configuration));
-                                if (!dest->group_config[i].endpoint_config) {
-                                        LOG_ERROR("Failed to allocate memory for endpoint_config");
+                        if (src->group_config[i].endpoint_config)
+                        {
+                                dest->group_config[i].endpoint_config = malloc(
+                                        sizeof(asl_endpoint_configuration));
+                                if (!dest->group_config[i].endpoint_config)
+                                {
+                                        LOG_ERROR("Failed to allocate memory for "
+                                                  "endpoint_config");
                                         cleanup_application_config(dest);
                                         free(dest);
                                         return NULL;
                                 }
-                                
+
                                 // Copy the main endpoint structure
-                                memcpy(dest->group_config[i].endpoint_config, 
-                                       src->group_config[i].endpoint_config, 
+                                memcpy(dest->group_config[i].endpoint_config,
+                                       src->group_config[i].endpoint_config,
                                        sizeof(asl_endpoint_configuration));
-                                
+
                                 // Now handle the dynamically allocated members of endpoint_config
-                                if (src->group_config[i].endpoint_config->ciphersuites) {
-                                        dest->group_config[i].endpoint_config->ciphersuites = 
-                                                duplicate_string(src->group_config[i].endpoint_config->ciphersuites);
+                                if (src->group_config[i].endpoint_config->ciphersuites)
+                                {
+                                        dest->group_config[i].endpoint_config->ciphersuites = duplicate_string(
+                                                src->group_config[i].endpoint_config->ciphersuites);
                                 }
-                                
-                                if (src->group_config[i].endpoint_config->keylog_file) {
-                                        dest->group_config[i].endpoint_config->keylog_file = 
-                                                duplicate_string(src->group_config[i].endpoint_config->keylog_file);
+
+                                if (src->group_config[i].endpoint_config->keylog_file)
+                                {
+                                        dest->group_config[i].endpoint_config->keylog_file = duplicate_string(
+                                                src->group_config[i].endpoint_config->keylog_file);
                                 }
-                                
+
                                 // Deep copy device certificate chain buffer
-                                if (src->group_config[i].endpoint_config->device_certificate_chain.buffer && 
-                                    src->group_config[i].endpoint_config->device_certificate_chain.size > 0) {
-                                        uint8_t* new_buffer = malloc(src->group_config[i].endpoint_config->device_certificate_chain.size);
-                                        if (!new_buffer) {
-                                                LOG_ERROR("Failed to allocate memory for device_certificate_chain buffer");
+                                if (src->group_config[i].endpoint_config->device_certificate_chain.buffer &&
+                                    src->group_config[i].endpoint_config->device_certificate_chain.size >
+                                            0)
+                                {
+                                        uint8_t* new_buffer = malloc(
+                                                src->group_config[i]
+                                                        .endpoint_config->device_certificate_chain.size);
+                                        if (!new_buffer)
+                                        {
+                                                LOG_ERROR("Failed to allocate memory for "
+                                                          "device_certificate_chain buffer");
                                                 cleanup_application_config(dest);
                                                 free(dest);
                                                 return NULL;
                                         }
-                                        
-                                        memcpy(new_buffer, 
-                                               src->group_config[i].endpoint_config->device_certificate_chain.buffer,
-                                               src->group_config[i].endpoint_config->device_certificate_chain.size);
-                                               
-                                        dest->group_config[i].endpoint_config->device_certificate_chain.buffer = new_buffer;
-                                        dest->group_config[i].endpoint_config->device_certificate_chain.size = 
-                                                src->group_config[i].endpoint_config->device_certificate_chain.size;
+
+                                        memcpy(new_buffer,
+                                               src->group_config[i]
+                                                       .endpoint_config->device_certificate_chain.buffer,
+                                               src->group_config[i]
+                                                       .endpoint_config->device_certificate_chain.size);
+
+                                        dest->group_config[i]
+                                                .endpoint_config->device_certificate_chain.buffer = new_buffer;
+                                        dest->group_config[i]
+                                                .endpoint_config->device_certificate_chain
+                                                .size = src->group_config[i]
+                                                                .endpoint_config
+                                                                ->device_certificate_chain.size;
                                 }
-                                
+
                                 // Deep copy root certificate buffer
-                                if (src->group_config[i].endpoint_config->root_certificate.buffer && 
-                                    src->group_config[i].endpoint_config->root_certificate.size > 0) {
-                                        uint8_t* new_buffer = malloc(src->group_config[i].endpoint_config->root_certificate.size);
-                                        if (!new_buffer) {
-                                                LOG_ERROR("Failed to allocate memory for root_certificate buffer");
+                                if (src->group_config[i].endpoint_config->root_certificate.buffer &&
+                                    src->group_config[i].endpoint_config->root_certificate.size > 0)
+                                {
+                                        uint8_t* new_buffer = malloc(
+                                                src->group_config[i]
+                                                        .endpoint_config->root_certificate.size);
+                                        if (!new_buffer)
+                                        {
+                                                LOG_ERROR("Failed to allocate memory for "
+                                                          "root_certificate buffer");
                                                 cleanup_application_config(dest);
                                                 free(dest);
                                                 return NULL;
                                         }
-                                        
-                                        memcpy(new_buffer, 
-                                               src->group_config[i].endpoint_config->root_certificate.buffer,
-                                               src->group_config[i].endpoint_config->root_certificate.size);
-                                               
+
+                                        memcpy(new_buffer,
+                                               src->group_config[i]
+                                                       .endpoint_config->root_certificate.buffer,
+                                               src->group_config[i]
+                                                       .endpoint_config->root_certificate.size);
+
                                         dest->group_config[i].endpoint_config->root_certificate.buffer = new_buffer;
-                                        dest->group_config[i].endpoint_config->root_certificate.size = 
-                                                src->group_config[i].endpoint_config->root_certificate.size;
+                                        dest->group_config[i]
+                                                .endpoint_config->root_certificate
+                                                .size = src->group_config[i]
+                                                                .endpoint_config->root_certificate.size;
                                 }
-                                
+
                                 // Deep copy private key buffer
-                                if (src->group_config[i].endpoint_config->private_key.buffer && 
-                                    src->group_config[i].endpoint_config->private_key.size > 0) {
-                                        uint8_t* new_buffer = malloc(src->group_config[i].endpoint_config->private_key.size);
-                                        if (!new_buffer) {
-                                                LOG_ERROR("Failed to allocate memory for private_key buffer");
+                                if (src->group_config[i].endpoint_config->private_key.buffer &&
+                                    src->group_config[i].endpoint_config->private_key.size > 0)
+                                {
+                                        uint8_t* new_buffer = malloc(
+                                                src->group_config[i].endpoint_config->private_key.size);
+                                        if (!new_buffer)
+                                        {
+                                                LOG_ERROR("Failed to allocate memory for "
+                                                          "private_key buffer");
                                                 cleanup_application_config(dest);
                                                 free(dest);
                                                 return NULL;
                                         }
-                                        
-                                        memcpy(new_buffer, 
+
+                                        memcpy(new_buffer,
                                                src->group_config[i].endpoint_config->private_key.buffer,
                                                src->group_config[i].endpoint_config->private_key.size);
-                                               
+
                                         dest->group_config[i].endpoint_config->private_key.buffer = new_buffer;
-                                        dest->group_config[i].endpoint_config->private_key.size = 
-                                                src->group_config[i].endpoint_config->private_key.size;
+                                        dest->group_config[i]
+                                                .endpoint_config->private_key
+                                                .size = src->group_config[i]
+                                                                .endpoint_config->private_key.size;
                                 }
                         }
-                        
+
                         // Copy proxy_wrapper array if it exists
-                        if (src->group_config[i].number_proxies > 0 && src->group_config[i].proxy_wrapper) {
-                                dest->group_config[i].proxy_wrapper = 
-                                        malloc(src->group_config[i].number_proxies * sizeof(struct proxy_wrapper));
-                                        
-                                if (!dest->group_config[i].proxy_wrapper) {
-                                        LOG_ERROR("Failed to allocate memory for proxy_wrapper array");
+                        if (src->group_config[i].number_proxies > 0 && src->group_config[i].proxy_wrapper)
+                        {
+                                dest->group_config[i].proxy_wrapper = malloc(
+                                        src->group_config[i].number_proxies *
+                                        sizeof(struct proxy_wrapper));
+
+                                if (!dest->group_config[i].proxy_wrapper)
+                                {
+                                        LOG_ERROR("Failed to allocate memory for "
+                                                  "proxy_wrapper "
+                                                  "array");
                                         cleanup_application_config(dest);
                                         free(dest);
                                         return NULL;
                                 }
-                                
+
                                 // Copy each proxy wrapper
-                                for (int j = 0; j < src->group_config[i].number_proxies; j++) {
+                                for (int j = 0; j < src->group_config[i].number_proxies; j++)
+                                {
                                         // Copy basic fields
-                                        dest->group_config[i].proxy_wrapper[j].proxy_id = src->group_config[i].proxy_wrapper[j].proxy_id;
-                                        dest->group_config[i].proxy_wrapper[j].direction = src->group_config[i].proxy_wrapper[j].direction;
-                                        
+                                        dest->group_config[i]
+                                                .proxy_wrapper[j]
+                                                .proxy_id = src->group_config[i].proxy_wrapper[j].proxy_id;
+                                        dest->group_config[i]
+                                                .proxy_wrapper[j]
+                                                .direction = src->group_config[i].proxy_wrapper[j].direction;
+
                                         // Copy proxy config
                                         memcpy(&dest->group_config[i].proxy_wrapper[j].proxy_config,
                                                &src->group_config[i].proxy_wrapper[j].proxy_config,
                                                sizeof(proxy_config));
-                                               
+
                                         // Deep copy own_ip_address
-                                        if (src->group_config[i].proxy_wrapper[j].proxy_config.own_ip_address) {
-                                                dest->group_config[i].proxy_wrapper[j].proxy_config.own_ip_address = 
-                                                        duplicate_string(src->group_config[i].proxy_wrapper[j].proxy_config.own_ip_address);
+                                        if (src->group_config[i].proxy_wrapper[j].proxy_config.own_ip_address)
+                                        {
+                                                dest->group_config[i]
+                                                        .proxy_wrapper[j]
+                                                        .proxy_config.own_ip_address = duplicate_string(
+                                                        src->group_config[i]
+                                                                .proxy_wrapper[j]
+                                                                .proxy_config.own_ip_address);
                                         }
-                                        
+
                                         // Deep copy target_ip_address
-                                        if (src->group_config[i].proxy_wrapper[j].proxy_config.target_ip_address) {
-                                                dest->group_config[i].proxy_wrapper[j].proxy_config.target_ip_address = 
-                                                        duplicate_string(src->group_config[i].proxy_wrapper[j].proxy_config.target_ip_address);
+                                        if (src->group_config[i].proxy_wrapper[j].proxy_config.target_ip_address)
+                                        {
+                                                dest->group_config[i]
+                                                        .proxy_wrapper[j]
+                                                        .proxy_config.target_ip_address = duplicate_string(
+                                                        src->group_config[i]
+                                                                .proxy_wrapper[j]
+                                                                .proxy_config.target_ip_address);
                                         }
-                                        
+
                                         // Deep copy name
-                                        if (src->group_config[i].proxy_wrapper[j].name) {
-                                                dest->group_config[i].proxy_wrapper[j].name = 
-                                                        duplicate_string(src->group_config[i].proxy_wrapper[j].name);
+                                        if (src->group_config[i].proxy_wrapper[j].name)
+                                        {
+                                                dest->group_config[i].proxy_wrapper[j].name = duplicate_string(
+                                                        src->group_config[i].proxy_wrapper[j].name);
                                         }
                                 }
                         }
                 }
         }
-        
+
         return dest;
+}
+
+char const* get_algorithm(char* algo)
+{
+        if (strcmp(algo, RSA2048) == 0)
+        {
+                return RSA2048;
+        }
+        else if (strcmp(algo, RSA3072) == 0)
+        {
+                return RSA3072;
+        }
+        else if (strcmp(algo, RSA4096) == 0)
+        {
+                return RSA4096;
+        }
+        else if (strcmp(algo, SECP256) == 0)
+        {
+                return SECP256;
+        }
+        else if (strcmp(algo, SECP384) == 0)
+        {
+                return SECP384;
+        }
+        else if (strcmp(algo, SECP521) == 0)
+        {
+                return SECP521;
+        }
+        else if (strcmp(algo, ED25519) == 0)
+        {
+                return ED25519;
+        }
+        else if (strcmp(algo, ED448) == 0)
+        {
+                return ED448;
+        }
+        else if (strcmp(algo, MLDSA44) == 0)
+        {
+                return MLDSA44;
+        }
+        else if (strcmp(algo, MLDSA65) == 0)
+        {
+                return MLDSA65;
+        }
+        else if (strcmp(algo, MLDSA87) == 0)
+        {
+                return MLDSA87;
+        }
+        else if (strcmp(algo, FALCON512) == 0)
+        {
+                return FALCON512;
+        }
+        else if (strcmp(algo, FALCON102) == 0)
+        {
+                return FALCON102;
+        }
+        return NULL;
 }

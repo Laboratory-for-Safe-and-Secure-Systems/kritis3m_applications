@@ -13,9 +13,9 @@
 #include "ipc.h"
 #include "kritis3m_configuration.h"
 #include "kritis3m_scale_service.h"
+#include "log_buffer.h"
 #include "logging.h"
 #include "networking.h"
-#include "log_buffer.h"
 
 LOG_MODULE_CREATE("CONTROL_PLANE_CONN");
 
@@ -194,6 +194,8 @@ int msgarrvd(void* context, char* topicName, int topicLen, MQTTAsync_message* me
         {
                 int plane_type = -1;
                 int ret = 0;
+                char const* algo = NULL;
+                char const* alt_algo = NULL;
                 bool value = (strncmp(payload, "true", message->payloadlen) == 0);
                 LOG_INFO("Received cert request status: %s", value ? "true" : "false");
                 cJSON* json = cJSON_ParseWithLength(payload, message->payloadlen);
@@ -209,22 +211,51 @@ int msgarrvd(void* context, char* topicName, int topicLen, MQTTAsync_message* me
                         goto cleanup;
                 }
                 plane_type = json_cert_type->valueint;
-
                 LOG_DEBUG("Received cert type for plane: %s",
                           plane_type == 1 ? "dataplane" : "controlplane");
-                cJSON* json_cert_req = cJSON_GetObjectItem(json, "cert_req");
-                if (plane_type == 1)
+
+                cJSON* json_algo = cJSON_GetObjectItem(json, "algo");
+                if (json_algo == NULL)
+                {
+                        LOG_DEBUG("Algo not provided, using default");
+                }
+                else
+                {
+                        algo = get_algorithm(json_algo->valuestring);
+                        if (algo == NULL)
+                        {
+                                LOG_ERROR("Failed to get algo from certificate request");
+                                goto cleanup;
+                        }
+                }
+                cJSON* json_alt_algo = cJSON_GetObjectItem(json, "alt_algo");
+                if (json_alt_algo == NULL)
+                {
+                        LOG_DEBUG("Algo not provided, using default");
+                }
+                else
+                {
+                        alt_algo = get_algorithm(json_alt_algo->valuestring);
+                        if (alt_algo == NULL)
+                        {
+                                LOG_ERROR("Failed to get algo from certificate request");
+                                goto cleanup;
+                        }
+                }
+
+
+                if (plane_type == 1) // dataplane
                 {
 
-                        if ((ret = dataplane_cert_get_req()) < 0)
+                        if ((ret = cert_req(CONFIG_DATAPLANE, algo, alt_algo)) < 0)
                         {
                                 LOG_ERROR("Failed to send dataplane cert request");
                                 goto cleanup;
                         }
                 }
-                else if (plane_type == 2)
+                else if (plane_type == 2) // controlplane
                 {
-                        if ((ret = cert_req()) < 0)
+                        if ((ret = cert_req(CONFIG_CONTROLPLANE, algo, alt_algo)) < 0)
                         {
                                 LOG_ERROR("Failed to send controlplane cert request");
                                 goto cleanup;
@@ -378,35 +409,40 @@ void close_mqtt_client()
 }
 
 // Add this new function before control_plane_conn_thread
-static void cleanup_thread_resources(struct control_plane_conn_t* conn, bool is_error) 
+static void cleanup_thread_resources(struct control_plane_conn_t* conn, bool is_error)
 {
-    // In error case, close both sockets immediately
-    if (is_error) {
-        if (conn->socket_pair[THREAD_INT] != -1) {
-            closesocket(conn->socket_pair[THREAD_INT]);
-            conn->socket_pair[THREAD_INT] = -1;
+        // In error case, close both sockets immediately
+        if (is_error)
+        {
+                if (conn->socket_pair[THREAD_INT] != -1)
+                {
+                        closesocket(conn->socket_pair[THREAD_INT]);
+                        conn->socket_pair[THREAD_INT] = -1;
+                }
+                if (conn->socket_pair[THREAD_EXT] != -1)
+                {
+                        closesocket(conn->socket_pair[THREAD_EXT]);
+                        conn->socket_pair[THREAD_EXT] = -1;
+                }
         }
-        if (conn->socket_pair[THREAD_EXT] != -1) {
-            closesocket(conn->socket_pair[THREAD_EXT]);
-            conn->socket_pair[THREAD_EXT] = -1;
+
+        // Always cleanup MQTT resources
+        if (conn->client && MQTTAsync_isConnected(conn->client))
+        {
+                LOG_INFO("Disconnecting from MQTT broker");
+                MQTTAsync_disconnectOptions disc_opts = MQTTAsync_disconnectOptions_initializer;
+                disc_opts.timeout = 1000; // 1 second timeout
+                MQTTAsync_disconnect(conn->client, &disc_opts);
         }
-    }
+        MQTTAsync_destroy(&conn->client);
 
-    // Always cleanup MQTT resources
-    if (conn->client && MQTTAsync_isConnected(conn->client)) {
-        LOG_INFO("Disconnecting from MQTT broker");
-        MQTTAsync_disconnectOptions disc_opts = MQTTAsync_disconnectOptions_initializer;
-        disc_opts.timeout = 1000; // 1 second timeout
-        MQTTAsync_disconnect(conn->client, &disc_opts);
-    }
-    MQTTAsync_destroy(&conn->client);
-
-    // For non-error case, only close internal socket
-    // External socket will be closed by the main thread
-    if (!is_error && conn->socket_pair[THREAD_INT] != -1) {
-        closesocket(conn->socket_pair[THREAD_INT]);
-        conn->socket_pair[THREAD_INT] = -1;
-    }
+        // For non-error case, only close internal socket
+        // External socket will be closed by the main thread
+        if (!is_error && conn->socket_pair[THREAD_INT] != -1)
+        {
+                closesocket(conn->socket_pair[THREAD_INT]);
+                conn->socket_pair[THREAD_INT] = -1;
+        }
 }
 
 void* control_plane_conn_thread(void* arg)
@@ -533,12 +569,14 @@ static int handle_management_message(struct control_plane_conn_t* conn)
         case CONTROL_PLANE_SEND_HELLO:
                 {
                         rc = handle_hello_request(conn, message.data.hello.msg);
-                        if (rc != MQTTASYNC_SUCCESS) {
+                        if (rc != MQTTASYNC_SUCCESS)
+                        {
                                 LOG_ERROR("Failed to send hello message: %d", rc);
                                 return_code = MSG_ERROR;
                         }
                         // Always free the message after handling
-                        if (message.data.hello.msg) {
+                        if (message.data.hello.msg)
+                        {
                                 free(message.data.hello.msg);
                                 message.data.hello.msg = NULL;
                         }
@@ -554,14 +592,15 @@ static int handle_management_message(struct control_plane_conn_t* conn)
                         {
                                 LOG_ERROR("Failed to send log message: %d", rc);
                                 return_code = MSG_ERROR;
-                        }else{
+                        }
+                        else
+                        {
                                 return_code = MSG_OK;
                         }
                         if (message.data.log.message)
                         {
                                 free(message.data.log.message);
                                 message.data.log.message = NULL;
-
                         }
                 }
                 else
@@ -611,7 +650,8 @@ int start_control_plane_conn(struct control_plane_conn_config_t* conn_config)
 
         // Initialize log buffer
         ret = log_buffer_init();
-        if (ret != 0) {
+        if (ret != 0)
+        {
                 LOG_ERROR("Failed to initialize log buffer");
                 goto exit;
         }
@@ -782,14 +822,16 @@ static int publish_message(struct control_plane_conn_t* conn,
 {
         int rc = MQTTASYNC_SUCCESS;
         char* topic = create_topic(topic_format, conn->serialnumber);
-        if (topic == NULL) {
+        if (topic == NULL)
+        {
                 LOG_ERROR("Failed to create topic");
                 return -1;
         }
 
         MQTTAsync_responseOptions opts = MQTTAsync_responseOptions_initializer;
         rc = MQTTAsync_send(conn->client, topic, payloadlen, payload, qos, retained, &opts);
-        if (rc != MQTTASYNC_SUCCESS) {
+        if (rc != MQTTASYNC_SUCCESS)
+        {
                 LOG_ERROR("Failed to publish message to topic %s, rc=%d", topic, rc);
         }
 
@@ -799,13 +841,15 @@ static int publish_message(struct control_plane_conn_t* conn,
 
 static int handle_hello_request(struct control_plane_conn_t* conn, char* msg)
 {
-        if (!msg) {
+        if (!msg)
+        {
                 LOG_ERROR("Invalid hello message");
                 return -1;
         }
 
         int rc = publish_message(conn, conn->topic_hello, msg, strlen(msg), QOS, 0);
-        if (rc != MQTTASYNC_SUCCESS) {
+        if (rc != MQTTASYNC_SUCCESS)
+        {
                 LOG_ERROR("Failed to publish hello message: %d", rc);
         }
         return rc;
@@ -870,8 +914,10 @@ static int handle_policy_status(struct control_plane_conn_t* conn, struct coordi
 
 enum MSG_RESPONSE_CODE send_hello_message(char* msg)
 {
-        if (!control_plane_running()) {
-                if (msg) {
+        if (!control_plane_running())
+        {
+                if (msg)
+                {
                         free(msg);
                 }
                 return MSG_ERROR;
@@ -880,11 +926,13 @@ enum MSG_RESPONSE_CODE send_hello_message(char* msg)
         struct control_plane_conn_message message;
         message.type = CONTROL_PLANE_SEND_HELLO;
         message.data.hello.msg = msg;
-        
+
         int ret = external_management_request(conn.socket_pair[THREAD_EXT], &message, sizeof(message));
-        if (ret < 0) {
+        if (ret < 0)
+        {
                 // If the request failed, we need to free the message
-                if (message.data.hello.msg) {
+                if (message.data.hello.msg)
+                {
                         free(message.data.hello.msg);
                         message.data.hello.msg = NULL;
                 }
@@ -919,7 +967,7 @@ enum MSG_RESPONSE_CODE send_log_message(const char* message)
                 return MSG_ERROR;
         }
 
-        int ret=  external_management_request(conn.socket_pair[THREAD_EXT], &msg, sizeof(msg));
+        int ret = external_management_request(conn.socket_pair[THREAD_EXT], &msg, sizeof(msg));
         if (ret < 0)
         {
                 LOG_ERROR("Failed to send log message");
@@ -963,16 +1011,17 @@ enum MSG_RESPONSE_CODE stop_control_plane_conn()
                 LOG_ERROR("Failed to stop control plane connection");
                 return MSG_ERROR;
         }
-        
+
         // Wait for thread to finish
         pthread_join(conn.conn_thread, NULL);
-        
+
         // Now it's safe to close the external socket
-        if (conn.socket_pair[THREAD_EXT] != -1) {
-            closesocket(conn.socket_pair[THREAD_EXT]);
-            conn.socket_pair[THREAD_EXT] = -1;
+        if (conn.socket_pair[THREAD_EXT] != -1)
+        {
+                closesocket(conn.socket_pair[THREAD_EXT]);
+                conn.socket_pair[THREAD_EXT] = -1;
         }
-        
+
         return MSG_OK;
 }
 
