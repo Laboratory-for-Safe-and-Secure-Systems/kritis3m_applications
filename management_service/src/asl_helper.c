@@ -2,6 +2,8 @@
 #include "asl.h"
 #include "networking.h"
 #include <unistd.h>
+#include <errno.h>
+#include <string.h>
 
 #include "logging.h"
 

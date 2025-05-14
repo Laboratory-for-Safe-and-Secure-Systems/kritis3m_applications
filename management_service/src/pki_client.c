@@ -462,12 +462,13 @@ int blocking_est_request(struct pki_client_config_t* config,
                         ret = ASL_CERTIFICATE_ERROR;
                         goto cleanup;
                 }
-
+                write_file("/tmp/cert_est_response.txt", cert_response.body_frag_start, cert_response.body_frag_len,false);
                 // Parse the EST response to get device certificate
                 ret = parseESTResponse(cert_response.body_frag_start,
                                        cert_response.body_frag_len,
                                        &cert_buffer,
                                        &cert_size);
+
                 if (ret != KRITIS3M_PKI_SUCCESS || !cert_buffer || cert_size <= 0)
                 {
                         LOG_ERROR("Failed to parse certificate response: %d", ret);

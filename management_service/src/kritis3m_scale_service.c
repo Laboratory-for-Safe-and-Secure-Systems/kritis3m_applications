@@ -6,6 +6,7 @@
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
+#include <errno.h>
 
 #include "asl.h"
 #include "asl_helper.h"
@@ -15,7 +16,6 @@
 #include "networking.h"
 #include "pki_client.h"
 #include "poll_set.h"
-
 #include "kritis3m_application_manager.h"
 #include "kritis3m_scale_service.h"
 
@@ -178,6 +178,8 @@ int start_kritis3m_service(char* config_file, int log_level)
         /** -------------- set log level ----------------------------- */
         LOG_LVL_SET(log_level);
         set_kritis3m_serivce_defaults(&svc);
+
+
         init_control_plane_conn();
         ret = init_configuration_manager(config_file);
         if (ret < 0)
@@ -186,8 +188,7 @@ int start_kritis3m_service(char* config_file, int log_level)
                 goto error_occured;
         }
         asl_configuration asl_config = asl_default_config();
-        asl_config.log_level = LOG_LVL_INFO;
-
+        asl_config.log_level = LOG_LVL_WARN;
         asl_init(&asl_config);
         ret = init_hello_timer(&svc);
         if (ret < 0)
@@ -200,6 +201,12 @@ int start_kritis3m_service(char* config_file, int log_level)
         conn_config.serialnumber = sys_config->serial_number;
         conn_config.endpoint_config = sys_config->endpoint_config;
         conn_config.mqtt_broker_host = sys_config->broker_host;
+
+        // kritis3m_pki_configuration kritis3m_config = {
+        //         .log_level = KRITIS3M_PKI_LOG_LEVEL_DBG,
+        //         .logging_enabled= true,
+        // };
+        // kritis3m_pki_init(&kritis3m_config);
 
         // hacky, copy due to const member, will be fixed in the future
         struct pki_client_config_t pki_clinet_config = {
@@ -1114,8 +1121,6 @@ void cleanup_dataplane_update_coordinator(struct dataplane_update_coordinator* u
 int validate_controlplane_certificate(void* config, enum CONFIG_TYPE type, void* to_fetch)
 {
         int ret = 0;
-        asl_endpoint* endpoint = NULL;
-        asl_session* session = NULL;
         int sock_fd = -1;
 
         if (!config || !to_fetch)
@@ -1135,7 +1140,7 @@ int validate_controlplane_certificate(void* config, enum CONFIG_TYPE type, void*
                          {
                                  .buffer = est_config->key,
                                  .size = est_config->key_size,
-                                 .additional_key_buffer = est_config->alt_key,
+                                 .additional_key_buffer = est_config->alt_key_size? est_config->alt_key : NULL, 
                                  .additional_key_size = est_config->alt_key_size,
                          },
                  .root_certificate = pki_clinet_config->endpoint_config->root_certificate,
@@ -1155,16 +1160,6 @@ int validate_controlplane_certificate(void* config, enum CONFIG_TYPE type, void*
         return ret;
 cleanup:
         ret = -1;
-        if (endpoint)
-        {
-                asl_free_endpoint(endpoint);
-                endpoint = NULL;
-        }
-        if (session)
-        {
-                asl_close_session(session);
-                session = NULL;
-        }
         LOG_ERROR("error occured in validate controlplane certificate");
         return ret;
 }
