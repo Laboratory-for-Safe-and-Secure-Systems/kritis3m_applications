@@ -579,13 +579,7 @@ int parse_config(char* buffer,
         }
 
         // Get the node_update_item object which contains all config data
-        cJSON* node_update_item = cJSON_GetObjectItem(root, "node_update_item");
-        if (!node_update_item || !cJSON_IsObject(node_update_item))
-        {
-                LOG_ERROR("Invalid or missing node_update_item object");
-                cJSON_Delete(root);
-                return -1;
-        }
+        cJSON* node_update_item = root;
 
         // Parse hardware configurations
         cJSON* hw_config_json = cJSON_GetObjectItem(node_update_item, "hardware_config");

@@ -136,7 +136,12 @@ void log_buffer_cleanup(void) {
     }
     
     log_buffer->running = false;
-    pthread_join(log_buffer->flush_thread, NULL);
+    
+    // Check if flush_thread is valid before joining
+    if (log_buffer->flush_thread != 0) {
+        pthread_join(log_buffer->flush_thread, NULL);
+    }
+    
     pthread_mutex_destroy(&log_buffer->mutex);
     
     free(log_buffer);

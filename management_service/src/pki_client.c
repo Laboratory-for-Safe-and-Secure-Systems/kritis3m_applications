@@ -112,6 +112,9 @@ void init_est_configuration(struct est_configuration* config, const char* algo, 
         config->key_buffer_size = MAX_KEY_SIZE;
         memset(config->alt_key, 0, MAX_KEY_SIZE);
         config->alt_key_buffer_size = MAX_KEY_SIZE;
+        config->chain_size = 0;
+        config->key_size = 0;
+        config->alt_key_size = 0;
 }
 
 int blocking_est_request(struct pki_client_config_t* config,

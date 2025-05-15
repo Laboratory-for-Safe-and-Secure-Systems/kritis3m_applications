@@ -512,8 +512,9 @@ int load_endpoint_certificates(asl_endpoint_configuration* endpoint_config,
         }
         if (endpoint_config->private_key.additional_key_size == 0)
         {
-                if (endpoint_config->private_key.additional_key_buffer){
-                        free((void*)endpoint_config->private_key.additional_key_buffer);
+                if (endpoint_config->private_key.additional_key_buffer)
+                {
+                        free((void*) endpoint_config->private_key.additional_key_buffer);
                 }
                 endpoint_config->private_key.additional_key_buffer = NULL;
         }
@@ -1006,13 +1007,20 @@ int store_transaction(void* context, enum CONFIG_TYPE type, void* to_fetch)
                 {
                         if (est_config->alt_key_size == 0)
                         {
-                                //reset or create existing file, with size 0
-                                if ((ret = write_file(alt_key_path, "", 0, false)) < 0)
+                                // reset or create existing file, with size 0
+                                if (access(alt_key_path, F_OK) == 0)
                                 {
-                                        LOG_WARN("setting existing alt key to 0"
-                                );
-                                        return 0;
+                                        // File exists, delete it
+                                        if (unlink(alt_key_path) < 0)
+                                        {
+                                                LOG_WARN("Failed to delete existing alt key file: %s", alt_key_path);
+                                        }
+                                        else
+                                        {
+                                                LOG_INFO("Deleted existing alt key file: %s", alt_key_path);
+                                        }
                                 }
+                                return 0;
                         }
                         else
                         {
@@ -1539,6 +1547,28 @@ struct application_manager_config*
                                                 .endpoint_config->private_key
                                                 .size = src->group_config[i]
                                                                 .endpoint_config->private_key.size;
+                                }
+                                if (src->group_config[i].endpoint_config->private_key.additional_key_buffer){
+                                        uint8_t* new_buffer = malloc(
+                                                src->group_config[i].endpoint_config->private_key.additional_key_size);
+                                        if (!new_buffer)
+                                        {
+                                                LOG_ERROR("Failed to allocate memory for "
+                                                          "private_key_additonal_buffer");
+                                                cleanup_application_config(dest);
+                                                free(dest);
+                                                return NULL;
+                                        }
+
+                                        memcpy(new_buffer,
+                                               src->group_config[i].endpoint_config->private_key.additional_key_buffer,
+                                               src->group_config[i].endpoint_config->private_key.additional_key_size);
+
+                                        dest->group_config[i].endpoint_config->private_key.additional_key_buffer = new_buffer;
+                                        dest->group_config[i]
+                                                .endpoint_config->private_key
+                                                .additional_key_size = src->group_config[i]
+                                                                .endpoint_config->private_key.additional_key_size;
                                 }
                         }
 

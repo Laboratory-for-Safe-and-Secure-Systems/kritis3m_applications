@@ -1,3 +1,4 @@
+#include <errno.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <string.h>
@@ -6,18 +7,17 @@
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
-#include <errno.h>
 
 #include "asl.h"
 #include "asl_helper.h"
 #include "configuration_manager.h"
 #include "control_plane_conn.h"
+#include "kritis3m_application_manager.h"
+#include "kritis3m_scale_service.h"
 #include "logging.h"
 #include "networking.h"
 #include "pki_client.h"
 #include "poll_set.h"
-#include "kritis3m_application_manager.h"
-#include "kritis3m_scale_service.h"
 
 LOG_MODULE_CREATE(kritis3m_service);
 
@@ -61,7 +61,8 @@ struct dataplane_update_coordinator
         pthread_attr_t thread_attr;
 };
 
-struct appl_manager{
+struct appl_manager
+{
         struct application_manager_config appl_manager;
         struct hardware_configs hw_configs;
 };
@@ -112,7 +113,7 @@ ManagementReturncode handle_svc_message(int socket,
                                         service_message* msg,
                                         int cfg_id,
                                         int version_number,
-                                        struct est_configuration* est_config, 
+                                        struct est_configuration* est_config,
                                         struct config_transaction* transaction);
 // init
 void* kritis3m_service_main_thread(void* arg);
@@ -178,7 +179,6 @@ int start_kritis3m_service(char* config_file, int log_level)
         /** -------------- set log level ----------------------------- */
         LOG_LVL_SET(log_level);
         set_kritis3m_serivce_defaults(&svc);
-
 
         init_control_plane_conn();
         ret = init_configuration_manager(config_file);
@@ -349,24 +349,29 @@ void* kritis3m_service_main_thread(void* arg)
                 if (ret == 0)
                 {
                         LOG_DEBUG("check control plane health");
-                        enum MSG_RESPONSE_CODE ret = initiate_hello_message(true);
-                        if (ret != MSG_OK)
+
+                        switch (control_plane_status())
                         {
-                                LOG_ERROR("Failed to send hello message: "
-                                          "%d",
-                                          ret);
-                                LOG_WARN("control plane not running, trying to restart");
+                        case CONTROL_PLANE_NOT_INITIALIZED:
+                                LOG_WARN("Control plane not running, restarting connection");
                                 const struct sysconfig* sys_config = get_sysconfig();
                                 struct control_plane_conn_config_t conn_config = {0};
                                 conn_config.serialnumber = sys_config->serial_number;
                                 conn_config.endpoint_config = sys_config->endpoint_config;
                                 conn_config.mqtt_broker_host = sys_config->broker_host;
                                 stop_control_plane_conn();
-                                sleep(1);
+                                sleep(0.2);
                                 start_control_plane_conn(&conn_config);
+                                try_reconnect_control_plane();
+                                break;
+                        case CONTROL_PLANE_DISCON:
+                                try_reconnect_control_plane();
+                                break;
+                        case CONTROL_PLANE_HEALTHY:
+                                break;
                         }
-                        continue;
                 }
+
                 for (int i = 0; i < svc->pollfd.num_fds; i++)
                 {
                         int fd = svc->pollfd.fds[i].fd;
@@ -431,6 +436,27 @@ void* kritis3m_service_main_thread(void* arg)
                                         LOG_ERROR("hello timer error");
                                 }
                         }
+                }
+                switch (control_plane_status())
+                {
+                case CONTROL_PLANE_NOT_INITIALIZED:
+                        LOG_WARN("Control plane not running, restarting connection");
+                        const struct sysconfig* sys_config = get_sysconfig();
+                        struct control_plane_conn_config_t conn_config = {0};
+                        conn_config.serialnumber = sys_config->serial_number;
+                        conn_config.endpoint_config = sys_config->endpoint_config;
+                        conn_config.mqtt_broker_host = sys_config->broker_host;
+                        stop_control_plane_conn();
+                        sleep(0.2);
+                        start_control_plane_conn(&conn_config);
+                        sleep(0.2);
+                        try_reconnect_control_plane();
+                        break;
+                case CONTROL_PLANE_DISCON:
+                        try_reconnect_control_plane();
+                        break;
+                case CONTROL_PLANE_HEALTHY:
+                        break;
                 }
         }
 
@@ -522,7 +548,7 @@ ManagementReturncode handle_svc_message(int socket,
                                         service_message* msg,
                                         int cfg_id,
                                         int version_number,
-                                        struct est_configuration* est_config, 
+                                        struct est_configuration* est_config,
                                         struct config_transaction* transaction)
 {
         int ret = 0;
@@ -564,7 +590,8 @@ ManagementReturncode handle_svc_message(int socket,
                         config_notify_callback notify = NULL;
                         config_validate_callback validate = NULL;
                         response_code = MSG_OK;
-                        if (cert_type != CONFIG_DATAPLANE && cert_type != CONFIG_CONTROLPLANE || est_config == NULL)
+                        if (cert_type != CONFIG_DATAPLANE && cert_type != CONFIG_CONTROLPLANE ||
+                            est_config == NULL)
                         {
                                 svc_respond_with(socket, MSG_ERROR);
                                 return_code = MGMT_ERR;
@@ -592,11 +619,12 @@ ManagementReturncode handle_svc_message(int socket,
                                 config_type = CONFIG_CONTROLPLANE;
                                 notify = handle_notify_controlplane_cert;
                                 validate = validate_controlplane_certificate;
-                        }else{
+                        }
+                        else
+                        {
                                 LOG_ERROR("Invalid cert type");
                                 break;
                         }
-
 
                         ret = init_config_transaction(transaction,
                                                       config_type,
@@ -621,7 +649,9 @@ ManagementReturncode handle_svc_message(int socket,
                         ret = init_config_transaction(transaction,
                                                       CONFIG_APPLICATION,
                                                       &coordinator,
-                                                      NULL, // to_fetch is 0, transaction mechanism changed to to multple returnvalues in certificate update, which required to_fetch. Cleanup required in the future!
+                                                      NULL, // to_fetch is 0, transaction mechanism
+                                                            // changed to to multple returnvalues in
+                                                            // certificate update, which required to_fetch. Cleanup required in the future!
                                                       fetch_dataplane_config,
                                                       // in this case, the testcase tests in production mode
                                                       validate_dataplane_config,
@@ -681,7 +711,7 @@ enum MSG_RESPONSE_CODE dataplane_config_apply_send_status(struct coordinator_sta
                                            sizeof(struct coordinator_status));
 }
 
-//if algo && alt_algo is null, extisting keys will be used
+// if algo && alt_algo is null, extisting keys will be used
 enum MSG_RESPONSE_CODE cert_req(enum CERT_TYPE type, char const* algo, char const* alt_algo)
 {
         if (!svc.initialized || svc.management_socket[THREAD_EXT] < 0)
@@ -698,7 +728,6 @@ enum MSG_RESPONSE_CODE cert_req(enum CERT_TYPE type, char const* algo, char cons
 
         return external_management_request(svc.management_socket[THREAD_EXT], &request, sizeof(request));
 }
-
 
 enum MSG_RESPONSE_CODE dataplane_config_apply_req()
 {
@@ -767,13 +796,17 @@ static int fetch_certificate(void* context, enum CONFIG_TYPE type, void* to_fetc
         if (type == CONFIG_APPLICATION)
         {
                 return -1;
-        }else if (type == CONFIG_DATAPLANE)
+        }
+        else if (type == CONFIG_DATAPLANE)
         {
                 cert_type = CERT_TYPE_DATAPLANE;
-        }else if (type == CONFIG_CONTROLPLANE)
+        }
+        else if (type == CONFIG_CONTROLPLANE)
         {
                 cert_type = CERT_TYPE_CONTROLPLANE;
-        }else{
+        }
+        else
+        {
                 return -1;
         }
 
@@ -1140,7 +1173,8 @@ int validate_controlplane_certificate(void* config, enum CONFIG_TYPE type, void*
                          {
                                  .buffer = est_config->key,
                                  .size = est_config->key_size,
-                                 .additional_key_buffer = est_config->alt_key_size? est_config->alt_key : NULL, 
+                                 .additional_key_buffer = est_config->alt_key_size ? est_config->alt_key :
+                                                                                     NULL,
                                  .additional_key_size = est_config->alt_key_size,
                          },
                  .root_certificate = pki_clinet_config->endpoint_config->root_certificate,

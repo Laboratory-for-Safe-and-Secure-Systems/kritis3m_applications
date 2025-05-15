@@ -15,6 +15,13 @@ struct control_plane_conn_config_t
         int hello_period_min;
 };
 
+enum CONTROLPLANE_STATUS
+{
+        CONTROL_PLANE_NOT_INITIALIZED = -2,//full restart
+        CONTROL_PLANE_DISCON = -1,//try to reconnect
+        CONTROL_PLANE_HEALTHY = 0,
+};
+
 /* Initialize the control plane core
  * Preperation of internal data structures
  *
@@ -42,6 +49,18 @@ void cleanup_control_plane_conn();
 enum MSG_RESPONSE_CODE send_hello_message(char* msg);
 
 /**
+ * Attempts to reconnect to the MQTT broker if the connection is lost
+ * 
+ * This function checks if the control plane is initialized but disconnected from
+ * the MQTT broker. If so, it attempts to reconnect using the existing configuration.
+ * 
+ * @return true if reconnection was attempted or not needed, false if reconnection failed
+ */
+bool try_reconnect_control_plane();
+
+enum CONTROLPLANE_STATUS control_plane_status();
+
+/**
  * Send a log message to the control plane
  * @param message The log message to send
  * @return Returns a ManagementReturncode indicating the result
@@ -53,6 +72,12 @@ enum MSG_RESPONSE_CODE send_log_message(const char* message);
  * @return Returns 0 on success, non-zero error code otherwise
  */
 enum MSG_RESPONSE_CODE stop_control_plane_conn();
+
+/**
+ * Check if the control plane connection is currently running
+ * @return Returns true if the connection is running, false otherwise
+ */
+bool control_plane_running();
 
 enum policy_status
 {

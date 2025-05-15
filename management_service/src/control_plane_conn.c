@@ -59,7 +59,7 @@ static struct control_plane_conn_t conn;
 
 #define TOPIC_FORMAT_LOG "%s/log"
 #define TOPIC_FORMAT_HELLO "%s/control/hello"
-#define TOPIC_FORMAT_POLICY "%s/control/qos"
+#define TOPIC_FORMAT_POLICY "%s/control/state"
 #define TOPIC_FORMAT_SYNC "%s/control/sync"
 #define TOPIC_FORMAT_CONFIG "%s/config"
 #define TOPIC_FORMAT_CERT_REQ "%s/control/cert_req"
@@ -945,8 +945,9 @@ enum MSG_RESPONSE_CODE send_hello_message(char* msg)
 // #todo not sure about mem management, dyn or static
 enum MSG_RESPONSE_CODE send_log_message(const char* message)
 {
-        if (!control_plane_running())
+        if ( control_plane_status() != CONTROL_PLANE_HEALTHY)
                 return MSG_ERROR;
+
         if (message == NULL)
         {
                 LOG_WARN("Cannot send NULL log message");
@@ -1047,8 +1048,68 @@ void handle_enable_sync(bool enable_sync)
         }
 }
 
-bool control_plane_running()
-{
+bool control_plane_running(){
         return conn.client != NULL && conn.socket_pair[THREAD_INT] != -1 &&
                conn.socket_pair[THREAD_EXT] != -1;
+}
+
+enum CONTROLPLANE_STATUS control_plane_status(){
+        if (!control_plane_running()){
+                LOG_WARN("thread is not running");
+                return CONTROL_PLANE_NOT_INITIALIZED;
+        }else if(control_plane_running() && !MQTTAsync_isConnected(conn.client) ) {
+                LOG_WARN("control plane module is running but not connected to broker");
+                return CONTROL_PLANE_DISCON;
+        }else{
+                LOG_INFO("control plane module is running and connected to broker");
+                return CONTROL_PLANE_HEALTHY;
+        }
+
+}
+
+/**
+ * @brief Attempts to reconnect to the MQTT broker if the connection is lost
+ * 
+ * This function checks if the control plane is initialized but disconnected from
+ * the MQTT broker. If so, it attempts to reconnect using the existing configuration.
+ * 
+ * @return true if reconnection was attempted or not needed, false if reconnection failed
+ */
+bool try_reconnect_control_plane()
+{
+        // Check if control plane is initialized but not connected to broker
+        if (!conn.client || conn.socket_pair[THREAD_INT] == -1 || conn.socket_pair[THREAD_EXT] == -1)
+        {
+                LOG_ERROR("Control plane not properly initialized, cannot reconnect");
+                return false;
+        }
+        
+        // Check if already connected
+        if (MQTTAsync_isConnected(conn.client))
+        {
+                LOG_DEBUG("Control plane already connected to broker");
+                return true;
+        }
+        
+        LOG_INFO("Attempting to reconnect to MQTT broker");
+        
+        // Set up connection options
+        MQTTAsync_connectOptions conn_opts = MQTTAsync_connectOptions_initializer;
+        conn_opts.ep_config = conn.endpoint_config;
+        conn_opts.keepAliveInterval = 60;
+        conn_opts.cleansession = 1;
+        conn_opts.onSuccess = onConnect;
+        conn_opts.onFailure = onConnectFailure;
+        conn_opts.context = &conn;
+        
+        // Attempt to reconnect
+        int rc = MQTTAsync_connect(conn.client, &conn_opts);
+        if (rc != MQTTASYNC_SUCCESS)
+        {
+                LOG_ERROR("Failed to reconnect to MQTT broker: %d", rc);
+                return false;
+        }
+        
+        LOG_INFO("Reconnection attempt initiated");
+        return true;
 }
