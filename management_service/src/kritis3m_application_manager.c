@@ -160,6 +160,10 @@ void init_application_manager(void)
         pthread_mutex_init(&manager.manager_mutex, NULL);
 }
 
+void appl_manager_log_level_set(int log_level){
+        LOG_LVL_SET(log_level);
+}
+
 // start application manager
 int start_application_manager()
 {
@@ -587,6 +591,7 @@ static int handle_config_change_request(struct application_manager* manager,
                 if (ret < 0) {
                         LOG_WARN("Failed to stop some proxies, continuing with configuration change");
                 }
+                LOG_DEBUG("stopping tls proxy backend");
                 tls_proxy_backend_terminate();
         }
         

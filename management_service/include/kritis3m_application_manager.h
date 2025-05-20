@@ -12,6 +12,9 @@
  */
 void init_application_manager(void);
 
+
+void appl_manager_log_level_set(int log_level);
+
 /**
  * @brief Start the application manager main thread.
  *

@@ -21,6 +21,7 @@ enum MSG_RESPONSE_CODE
 
 typedef int32_t common_response_t;
 
+void ipc_log_level_set(int log_level);
 enum MSG_RESPONSE_CODE external_management_request(int socket, void* message, size_t message_size);
 int sockpair_write(int socket, void* buffer, size_t length, size_t* retries);
 enum MSG_RESPONSE_CODE sockpair_read(int socket, void* buffer, size_t length);

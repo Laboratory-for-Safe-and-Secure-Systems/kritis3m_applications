@@ -299,6 +299,10 @@ cleanup:
         return 1;
 }
 
+void ctrl_conn_log_level_set(int log_level){
+        LOG_LVL_SET(log_level);
+}
+
 void onDisconnectFailure(void* context, MQTTAsync_failureData* response)
 {
         LOG_ERROR("Disconnect failed, rc %d\n", response->code);
@@ -646,9 +650,6 @@ int start_control_plane_conn(struct control_plane_conn_config_t* conn_config)
 {
         int ret = 0;
 
-        LOG_LVL_SET(LOG_LVL_DEBUG);
-
-        // Initialize log buffer
         ret = log_buffer_init();
         if (ret != 0)
         {
@@ -892,7 +893,7 @@ static int handle_policy_status(struct control_plane_conn_t* conn, struct coordi
                 }
         }
 
-        char ret_val[900];
+        char ret_val[1200];
         int ret = snprintf(ret_val,
                            sizeof(ret_val),
                            "{\"status\": %d,\n \"serial-number\": \"%s\",\n \"module\": "

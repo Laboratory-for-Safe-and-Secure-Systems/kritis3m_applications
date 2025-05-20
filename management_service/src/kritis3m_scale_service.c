@@ -14,6 +14,7 @@
 #include "control_plane_conn.h"
 #include "kritis3m_application_manager.h"
 #include "kritis3m_scale_service.h"
+#include "kritis3m_pki_common.h"
 #include "logging.h"
 #include "networking.h"
 #include "pki_client.h"
@@ -28,6 +29,8 @@ LOG_MODULE_CREATE(kritis3m_service);
 #define POLICY_RESP_BUFFER_SIZE 1000
 #define HEARTBEAT_REQ_BUFFER_SIZE 1000
 #define HELLO_INTERVAL_SEC 10 // Send hello message every 60 seconds
+
+static int asl_log_level = 1;
 
 // main kritis3m_service module type
 struct kritis3m_service
@@ -155,6 +158,10 @@ void set_kritis3m_serivce_defaults(struct kritis3m_service* svc)
         svc->timer_initialized = false;
 }
 
+void scale_log_level_set(int log_level){
+        LOG_LVL_SET(log_level);
+}
+
 /**
  * @brief Starts the `kritis3m_service` module.
  *
@@ -175,11 +182,9 @@ int start_kritis3m_service(char* config_file, int log_level)
         static int max_retries = 3;
         struct est_configuration est_config = {0};
         int ret = 0;
+        asl_log_level = log_level;
 
-        /** -------------- set log level ----------------------------- */
-        LOG_LVL_SET(log_level);
         set_kritis3m_serivce_defaults(&svc);
-
         init_control_plane_conn();
         ret = init_configuration_manager(config_file);
         if (ret < 0)
@@ -188,8 +193,31 @@ int start_kritis3m_service(char* config_file, int log_level)
                 goto error_occured;
         }
         asl_configuration asl_config = asl_default_config();
-        asl_config.log_level = LOG_LVL_WARN;
+
+        //logging part
+        asl_config.log_level = asl_log_level;
+        int lvl = get_sysconfig()->log_level;
+        scale_log_level_set(lvl);
+        ipc_log_level_set(lvl);
+        ctrl_conn_log_level_set(lvl);
+        pki_client_log_level_set(lvl);
+        appl_manager_log_level_set(lvl);
+        asl_helper_log_level_set(lvl);
+        cfg_manager_log_level_set(lvl);
+        cfg_parser_log_level_set(lvl);
+
+
         asl_init(&asl_config);
+
+        //pki init
+        kritis3m_pki_configuration kritis3m_config = {
+                .log_level = asl_log_level,
+                .logging_enabled = true,
+        };
+        kritis3m_pki_init(&kritis3m_config);
+
+
+
         ret = init_hello_timer(&svc);
         if (ret < 0)
         {
@@ -263,7 +291,7 @@ int start_kritis3m_service(char* config_file, int log_level)
                 max_retries--;
                 cleanup_configuration_manager();
                 cleanup_kritis3m_service();
-                start_kritis3m_service(config_file, log_level);
+                start_kritis3m_service(config_file, asl_log_level);
                 return 0;
         }
         else if (restart_requested && max_retries == 0)
@@ -524,7 +552,7 @@ enum MSG_RESPONSE_CODE restart_kritis3m_service(void)
         }
 
         // Start the service with the stored config file and log level 4
-        int start_result = start_kritis3m_service(base_path_copy, 4);
+        int start_result = start_kritis3m_service(base_path_copy,asl_log_level);
         if (start_result < 0)
         {
                 LOG_ERROR("Failed to restart kritis3m service");
@@ -993,6 +1021,7 @@ static int handle_policy_status_update(struct dataplane_update_coordinator* upda
                 break;
 
         case UPDATE_ACK:
+                LOG_INFO("sucesfully updated new to new configuration");
                 return 1; // Signal to finish
 
         default:
@@ -1020,6 +1049,7 @@ int validate_dataplane_config(void* context, enum CONFIG_TYPE type, void* to_fet
                 LOG_ERROR("Invalid context");
                 return -1;
         }
+        LOG_DEBUG("in validate_dataplane config");
 
         struct dataplane_update_coordinator* update = (struct dataplane_update_coordinator*) context;
         int ret = 0;
@@ -1072,7 +1102,7 @@ int validate_dataplane_config(void* context, enum CONFIG_TYPE type, void* to_fet
                 if (ret == 0)
                 {
                         // in case of timeout, we rollback
-                        LOG_ERROR("Timeout occurred");
+                        LOG_ERROR("coordinator Timeout occurred");
                         policy_msg.state = UPDATE_ERROR;
                         policy_msg.msg = "Timeout occurred";
                         send_policy_status_message(&policy_msg);
@@ -1091,6 +1121,7 @@ int validate_dataplane_config(void* context, enum CONFIG_TYPE type, void* to_fet
                         policy_msg.state = UPDATE_ERROR;
                         policy_msg.msg = "Internal error";
                         send_policy_status_message(&policy_msg);
+                        LOG_DEBUG("coordinator pollerr");
 
                         if (update->state == UPDATE_APPLIED)
                         {

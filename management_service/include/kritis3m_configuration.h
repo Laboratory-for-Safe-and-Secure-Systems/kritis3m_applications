@@ -31,6 +31,7 @@
 #define THREAD_INT 0
 #define THREAD_EXT 1
 
+
 typedef enum ManagementReturncode
 {
         MGMT_BAD_REQUEST = -6,

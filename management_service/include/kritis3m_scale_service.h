@@ -6,6 +6,8 @@
 #include "kritis3m_configuration.h"
 #include "tls_proxy.h"
 #include "kritis3m_application_manager.h"
+#include "asl_helper.h"
+#include "configuration_parser.h"
 #include "pki_client.h"
 
 /**
@@ -23,6 +25,8 @@
  * for the service to be initialized and run.
  */
 int start_kritis3m_service(char* config_file, int log_level);
+
+void scale_log_level_set(int log_level);
 
 
 // stops kritis3m_scale service

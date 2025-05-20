@@ -91,6 +91,9 @@ static bool ping_server(int socket_fd)
         setblocking(socket_fd, true);
         return true;
 }
+void pki_client_log_level_set(int log_level){
+LOG_LVL_SET(log_level);
+}
 
 void init_est_configuration(struct est_configuration* config, const char* algo, const char* alt_algo)
 {

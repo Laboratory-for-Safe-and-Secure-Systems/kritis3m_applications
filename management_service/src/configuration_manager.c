@@ -390,6 +390,10 @@ error:
         return -1;
 }
 
+void cfg_manager_log_level_set(int log_level){
+        LOG_LVL_SET(log_level);
+}
+
 int test_server_conn(char* host, asl_endpoint_configuration* endpoint_config)
 {
         if (!host || !endpoint_config)

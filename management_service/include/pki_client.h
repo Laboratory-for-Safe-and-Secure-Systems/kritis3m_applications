@@ -37,6 +37,7 @@ struct est_configuration{
        size_t chain_buffer_size;
        size_t chain_size;
 };
+void pki_client_log_level_set(int log_level);
 
 void init_est_configuration(struct est_configuration* est_config,const char* algo, const char* alt_algo);
 

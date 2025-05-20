@@ -454,6 +454,9 @@ error_occured:
         LOG_ERROR("Error parsing proxy");
         return -1;
 }
+void cfg_parser_log_level_set(int log_level){
+        LOG_LVL_SET(log_level);
+}
 int parse_endpoint_config(asl_endpoint_configuration* endpoint_config, cJSON* endpoint_json)
 {
         if (!endpoint_config || !endpoint_json)

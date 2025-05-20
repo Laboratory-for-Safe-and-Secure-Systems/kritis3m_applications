@@ -97,6 +97,8 @@ struct application_manager_config
 
 
 
+void cfg_manager_log_level_set(int log_level);
+
 const struct sysconfig* get_sysconfig();
 
 int get_application_inactive(struct application_manager_config* config,

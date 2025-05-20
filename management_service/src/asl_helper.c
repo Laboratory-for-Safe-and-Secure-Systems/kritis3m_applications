@@ -9,6 +9,10 @@
 
 LOG_MODULE_CREATE("asl_helper");
 
+void asl_helper_log_level_set(int log_level){
+        LOG_LVL_SET(log_level);
+}
+
 int establish_connection(char const* host,
                          uint16_t port,
                          asl_endpoint_configuration const* endpoint_config,

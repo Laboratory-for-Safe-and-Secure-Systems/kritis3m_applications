@@ -22,6 +22,7 @@ enum CONTROLPLANE_STATUS
         CONTROL_PLANE_HEALTHY = 0,
 };
 
+void ctrl_conn_log_level_set(int log_level);
 /* Initialize the control plane core
  * Preperation of internal data structures
  *

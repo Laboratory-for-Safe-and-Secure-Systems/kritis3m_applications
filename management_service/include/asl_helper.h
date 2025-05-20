@@ -13,4 +13,6 @@ int establish_connection(char const* host,
 
 int test_endpoint(char const* host, uint16_t port, asl_endpoint_configuration const* endpoint_config);
 
+void asl_helper_log_level_set(int log_level);
+
 #endif // ASL_HELPER_H

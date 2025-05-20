@@ -58,6 +58,10 @@ enum MSG_RESPONSE_CODE sockpair_read(int socket, void* buffer, size_t length)
         return 0;
 }
 
+void ipc_log_level_set(int log_level){
+        LOG_LVL_SET(log_level);
+}
+
 /* Write to a socket pair
  * Return value is the number of bytes written or -1 in case of an error
  */
