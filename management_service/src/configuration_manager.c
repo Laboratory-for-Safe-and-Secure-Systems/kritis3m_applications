@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <pthread.h>
+#include <stdbool.h>
 
 #include "asl.h"
 #include "configuration_manager.h"
@@ -13,6 +15,11 @@
 #include "pki_client.h"
 
 LOG_MODULE_CREATE(configuration_manager);
+
+// Global transaction lock
+static pthread_mutex_t global_transaction_lock = PTHREAD_MUTEX_INITIALIZER;
+static bool transaction_in_progress = false;
+static enum CONFIG_TYPE active_transaction_type = 0;
 
 #define SYS_CONFIG_PATH_FORMAT "%s/sys_config.json"
 
@@ -99,6 +106,19 @@ const struct sysconfig* get_sysconfig()
 {
         return (const struct sysconfig*) &configuration_manager.sys_config;
 }
+const char* strr_transactiontype(enum CONFIG_TYPE cfg_type){
+        
+        switch(cfg_type){
+                case CONFIG_APPLICATION:
+                return "dataplane policy transaction";
+                case CONFIG_DATAPLANE:
+                return "dataplane certificate transaction";
+                case CONFIG_CONTROLPLANE:
+                return "controlplane certificate transaction";
+        }
+        return "";
+}
+
 
 int get_application_inactive(struct application_manager_config* config,
                              struct hardware_configs* hw_config)
@@ -1140,7 +1160,8 @@ static void* transaction_worker(void* arg)
         ret = transaction->fetch(transaction->context, transaction->type, transaction->to_fetch);
         if (ret != 0)
         {
-                LOG_ERROR("Failed to fetch new configuration");
+                LOG_ERROR("Failed to fetch new configuration for transaction, %s", strr_transactiontype(transaction->type));
+                
                 goto error;
         }
 
@@ -1153,7 +1174,7 @@ static void* transaction_worker(void* arg)
         ret = transaction->validate(transaction->context, transaction->type, transaction->to_fetch);
         if (ret != 0)
         {
-                LOG_ERROR("Configuration validation failed");
+                LOG_ERROR("Configuration validation failed, for transaction, %s", strr_transactiontype(transaction->type));
                 goto error;
         }
         LOG_INFO("Configuration validation successful");
@@ -1201,6 +1222,12 @@ cleanup:
         {
                 free(new_config);
         }
+        
+        // Release the global transaction lock
+        pthread_mutex_lock(&global_transaction_lock);
+        transaction_in_progress = false;
+        pthread_mutex_unlock(&global_transaction_lock);
+        
         // Don't free the transaction as it may be allocated on the stack
         return NULL;
 
@@ -1271,10 +1298,34 @@ int start_config_transaction(struct config_transaction* transaction)
                 return -1;
         }
 
+        // Try to acquire the global transaction lock
+        if (pthread_mutex_lock(&global_transaction_lock) != 0) {
+                LOG_ERROR("Failed to lock global transaction mutex");
+                return -1;
+        }
+
+        // Check if another transaction is already in progress
+        if (transaction_in_progress) {
+                LOG_WARN("Another transaction (%s) is already in progress. Cannot start new %s",
+                         strr_transactiontype(active_transaction_type), 
+                         strr_transactiontype(transaction->type));
+                pthread_mutex_unlock(&global_transaction_lock);
+                return -2; // Special return code for "transaction already in progress"
+        }
+
+        // Mark that we now have an active transaction
+        transaction_in_progress = true;
+        active_transaction_type = transaction->type;
+        pthread_mutex_unlock(&global_transaction_lock);
+
         pthread_mutex_lock(&transaction->mutex);
         if (transaction->thread_running)
         {
                 pthread_mutex_unlock(&transaction->mutex);
+                // Release the global transaction lock if we can't start
+                pthread_mutex_lock(&global_transaction_lock);
+                transaction_in_progress = false;
+                pthread_mutex_unlock(&global_transaction_lock);
                 LOG_ERROR("Transaction already running");
                 return -1;
         }
@@ -1288,6 +1339,10 @@ int start_config_transaction(struct config_transaction* transaction)
                 pthread_mutex_lock(&transaction->mutex);
                 transaction->thread_running = false;
                 pthread_mutex_unlock(&transaction->mutex);
+                // Release the global transaction lock if we failed to start
+                pthread_mutex_lock(&global_transaction_lock);
+                transaction_in_progress = false;
+                pthread_mutex_unlock(&global_transaction_lock);
                 return -1;
         }
 
@@ -1316,6 +1371,11 @@ int cancel_config_transaction(struct config_transaction* transaction)
 
         // Wait for thread to finish
         pthread_join(transaction->worker_thread, NULL);
+
+        // Release the global transaction lock
+        pthread_mutex_lock(&global_transaction_lock);
+        transaction_in_progress = false;
+        pthread_mutex_unlock(&global_transaction_lock);
 
         return 0;
 }
@@ -1700,4 +1760,14 @@ char const* get_algorithm(char* algo)
                 return FALCON102;
         }
         return NULL;
+}
+
+// Add a new function to check if a transaction is in progress
+bool is_transaction_in_progress()
+{
+        bool result;
+        pthread_mutex_lock(&global_transaction_lock);
+        result = transaction_in_progress;
+        pthread_mutex_unlock(&global_transaction_lock);
+        return result;
 }

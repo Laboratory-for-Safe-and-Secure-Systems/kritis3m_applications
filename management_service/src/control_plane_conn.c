@@ -650,7 +650,7 @@ int start_control_plane_conn(struct control_plane_conn_config_t* conn_config)
 {
         int ret = 0;
 
-        ret = log_buffer_init();
+        ret = log_buffer_init(send_log_message);
         if (ret != 0)
         {
                 LOG_ERROR("Failed to initialize log buffer");

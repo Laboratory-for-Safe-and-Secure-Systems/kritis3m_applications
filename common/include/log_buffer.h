@@ -5,7 +5,7 @@
 #include <stdint.h>
 
 // Initialize the log buffer system
-int log_buffer_init(void);
+int log_buffer_init(int (*external_cb)(const char* message));
 
 // Clean up the log buffer system
 void log_buffer_cleanup(void);

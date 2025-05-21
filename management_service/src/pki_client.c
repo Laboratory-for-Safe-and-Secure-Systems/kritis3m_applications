@@ -138,6 +138,14 @@ int blocking_est_request(struct pki_client_config_t* config,
                 LOG_ERROR("Invalid arguments");
                 return -1;
         }
+       //debug algo 
+       LOG_DEBUG("algorithm is %s", est_config->algorithm ? est_config->algorithm : "no_algo");
+       LOG_DEBUG("alt algorithm is %s", est_config->alt_algoithm ? est_config->alt_algoithm : "no_alt_algo");
+
+       memset(est_config->alt_key,0, est_config->alt_key_buffer_size);
+       memset(est_config->key,0, est_config->key_buffer_size);
+
+
 
         // Generate or use existing keys
         private_key = privateKey_new();
@@ -164,7 +172,6 @@ int blocking_est_request(struct pki_client_config_t* config,
                         if (est_config->key && est_config->key_buffer_size > 0)
                         {
                                 size_t key_size = est_config->key_buffer_size;
-                                memset(est_config->key, 0, est_config->key_buffer_size);
                                 ret = privateKey_writeKeyToBuffer(private_key,
                                                                   (uint8_t*) est_config->key,
                                                                   &key_size);
@@ -194,7 +201,6 @@ int blocking_est_request(struct pki_client_config_t* config,
                         if (est_config->alt_key && est_config->alt_key_buffer_size > 0)
                         {
                                 size_t alt_key_size = est_config->alt_key_buffer_size;
-                                memset(est_config->alt_key, 0, est_config->alt_key_buffer_size);
                                 ret = privateKey_writeAltKeyToBuffer(private_key,
                                                                      (uint8_t*) est_config->alt_key,
                                                                      &alt_key_size);
@@ -218,12 +224,12 @@ int blocking_est_request(struct pki_client_config_t* config,
                 {
                         if (est_config->key && est_config->key_buffer_size > 0)
                         {
-
-                                memset(est_config->key, 0, est_config->key_buffer_size);
                                 memcpy(est_config->key,
                                        config->endpoint_config->private_key.buffer,
                                        config->endpoint_config->private_key.size);
                                 est_config->key_size = config->endpoint_config->private_key.size;
+                        }else{
+                                LOG_ERROR("this should not happen\n\n");
                         }
 
                         ret = privateKey_loadKeyFromBuffer(private_key,
@@ -243,10 +249,10 @@ int blocking_est_request(struct pki_client_config_t* config,
                                 if (est_config->alt_key && est_config->alt_key_buffer_size > 0)
                                 {
 
-                                        memset(est_config->alt_key, 0, est_config->alt_key_buffer_size);
                                         memcpy(est_config->alt_key,
                                                config->endpoint_config->private_key.additional_key_buffer,
                                                config->endpoint_config->private_key.additional_key_size);
+
                                         est_config->alt_key_size = config->endpoint_config
                                                                            ->private_key.additional_key_size;
 
@@ -260,11 +266,13 @@ int blocking_est_request(struct pki_client_config_t* config,
                                                 goto cleanup;
                                         }
                                 }
+                        }else{
+                                LOG_DEBUG("no addiontal buffer");
                         }
                 }
                 else
                 {
-                        LOG_ERROR("No private key available");
+                        LOG_ERROR("No private key available, this shouldnt happen\n\n\n");
                         ret = ASL_ARGUMENT_ERROR;
                         goto cleanup;
                 }

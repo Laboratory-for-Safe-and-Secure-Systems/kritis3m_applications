@@ -6,6 +6,7 @@
 #include "tls_proxy.h"
 #include <pthread.h>
 #include <time.h>
+#include <stdbool.h>
 
 int init_configuration_manager(char* base_path);
 
@@ -212,6 +213,14 @@ int cancel_config_transaction(struct config_transaction* transaction);
 void cleanup_config_transaction(struct config_transaction* transaction);
 
 /**
+ * @brief Checks if any transaction is currently in progress
+ * 
+ * @return true If a transaction is in progress
+ * @return false If no transaction is in progress
+ */
+bool is_transaction_in_progress(void);
+
+/**
  * @brief Creates a deep copy of hardware_configs structure
  * 
  * @param src The source hardware_configs structure to copy
@@ -228,6 +237,7 @@ struct hardware_configs* deep_copy_hardware_configs(const struct hardware_config
 struct application_manager_config* deep_copy_application_config(const struct application_manager_config* src);
 
 char const* get_algorithm(char* algo);
+const char* strr_transactiontype(enum CONFIG_TYPE cfg_type);
 
 
 

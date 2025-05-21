@@ -571,7 +571,7 @@ int svc_respond_with(int socket, enum MSG_RESPONSE_CODE response_code)
         return sockpair_write(socket, &response, sizeof(response), &retries);
 }
 
-// cfg_id and version number are temporary arguments and will be cleaned up after the testing
+// Modify the handle_svc_message function to check for transaction in progress
 ManagementReturncode handle_svc_message(int socket,
                                         service_message* msg,
                                         int cfg_id,
@@ -626,6 +626,14 @@ ManagementReturncode handle_svc_message(int socket,
                                 goto error_occured;
                         }
 
+                        // Check if a transaction is already in progress
+                        if (is_transaction_in_progress())
+                        {
+                                LOG_WARN("Cannot start certificate transaction - another transaction is already in progress");
+                                svc_respond_with(socket, MSG_BUSY);
+                                return MGMT_OK;
+                        }
+
                         // cert_request(endpoint_config, config, CERT_TYPE_DATAPLANE, callback);
                         svc_respond_with(socket, response_code);
                         if (ret < 0)
@@ -663,7 +671,13 @@ ManagementReturncode handle_svc_message(int socket,
                                                       notify);
 
                         ret = start_config_transaction(transaction);
-                        if (ret < 0)
+                        if (ret == -2)
+                        {
+                                LOG_WARN("Another transaction is already in progress, cannot start %s transaction", 
+                                         strr_transactiontype(config_type));
+                                return MGMT_OK;
+                        }
+                        else if (ret < 0)
                         {
                                 LOG_ERROR("Failed to start dataplane transaction");
                                 goto error_occured;
@@ -673,6 +687,15 @@ ManagementReturncode handle_svc_message(int socket,
         case SVC_MSG_DATAPLANE_CONFIG_APPLY_REQ:
                 {
                         LOG_INFO("Received data plane config apply request");
+                        
+                        // Check if a transaction is already in progress
+                        if (is_transaction_in_progress())
+                        {
+                                LOG_WARN("Cannot start dataplane config apply - another transaction is already in progress");
+                                svc_respond_with(socket, MSG_BUSY);
+                                return MGMT_OK;
+                        }
+                        
                         svc_respond_with(socket, MSG_OK);
                         ret = init_config_transaction(transaction,
                                                       CONFIG_APPLICATION,
@@ -685,7 +708,12 @@ ManagementReturncode handle_svc_message(int socket,
                                                       validate_dataplane_config,
                                                       NULL);
                         ret = start_config_transaction(transaction);
-                        if (ret < 0)
+                        if (ret == -2)
+                        {
+                                LOG_WARN("Another transaction is already in progress, cannot start dataplane config apply transaction");
+                                return MGMT_OK;
+                        }
+                        else if (ret < 0)
                         {
                                 LOG_ERROR("Failed to start dataplane transaction");
                                 goto error_occured;
