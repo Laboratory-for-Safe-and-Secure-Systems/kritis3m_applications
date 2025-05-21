@@ -693,6 +693,11 @@ int parse_config(char* buffer,
                                         config->group_config[i].proxy_wrapper = malloc(
                                                 config->group_config[i].number_proxies *
                                                 sizeof(struct proxy_wrapper));
+                                        if (config->group_config[i].proxy_wrapper) {
+                                                memset(config->group_config[i].proxy_wrapper, 0, 
+                                                       config->group_config[i].number_proxies * sizeof(struct proxy_wrapper));
+                                        }
+
                                         for (int j = 0; j < config->group_config[i].number_proxies; j++)
                                         {
                                                 // call parse_proxy

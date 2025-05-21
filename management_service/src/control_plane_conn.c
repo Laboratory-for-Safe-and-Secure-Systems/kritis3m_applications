@@ -84,7 +84,7 @@ void handle_enable_sync(bool value);
 // Forward declarations for the new functions
 static int subscribe_to_topics(struct control_plane_conn_t* conn);
 static int handle_management_message(struct control_plane_conn_t* conn);
-static int handle_hello_request(struct control_plane_conn_t* conn, char* msg);
+static int handle_hello_request(struct control_plane_conn_t* conn, char const* msg, size_t len);
 static int handle_log_request(struct control_plane_conn_t* conn, const char* message);
 static int handle_policy_status(struct control_plane_conn_t* conn, struct coordinator_status* status);
 static int publish_message(struct control_plane_conn_t* conn,
@@ -117,7 +117,8 @@ struct control_plane_conn_message
                 } log;
                 struct
                 {
-                        char* msg;
+                        size_t len;
+                        char const* msg;
                 } hello;
                 struct
                 {
@@ -572,7 +573,7 @@ static int handle_management_message(struct control_plane_conn_t* conn)
 
         case CONTROL_PLANE_SEND_HELLO:
                 {
-                        rc = handle_hello_request(conn, message.data.hello.msg);
+                        rc = handle_hello_request(conn, message.data.hello.msg, message.data.hello.len);
                         if (rc != MQTTASYNC_SUCCESS)
                         {
                                 LOG_ERROR("Failed to send hello message: %d", rc);
@@ -581,7 +582,6 @@ static int handle_management_message(struct control_plane_conn_t* conn)
                         // Always free the message after handling
                         if (message.data.hello.msg)
                         {
-                                free(message.data.hello.msg);
                                 message.data.hello.msg = NULL;
                         }
                         break;
@@ -840,7 +840,7 @@ static int publish_message(struct control_plane_conn_t* conn,
         return rc;
 }
 
-static int handle_hello_request(struct control_plane_conn_t* conn, char* msg)
+static int handle_hello_request(struct control_plane_conn_t* conn, char const* msg, size_t len)
 {
         if (!msg)
         {
@@ -848,7 +848,7 @@ static int handle_hello_request(struct control_plane_conn_t* conn, char* msg)
                 return -1;
         }
 
-        int rc = publish_message(conn, conn->topic_hello, msg, strlen(msg), QOS, 0);
+        int rc = publish_message(conn, conn->topic_hello, msg, len, QOS, 0);
         if (rc != MQTTASYNC_SUCCESS)
         {
                 LOG_ERROR("Failed to publish hello message: %d", rc);
@@ -912,31 +912,22 @@ static int handle_policy_status(struct control_plane_conn_t* conn, struct coordi
 
         return publish_message(conn, conn->topic_policy, ret_val, ret, QOS, 0);
 }
-
-enum MSG_RESPONSE_CODE send_hello_message(char* msg)
+// not async
+enum MSG_RESPONSE_CODE send_hello_message(char const* msg, size_t len)
 {
-        if (!control_plane_running())
+        if (!control_plane_running() || !msg || len == 0)
         {
-                if (msg)
-                {
-                        free(msg);
-                }
                 return MSG_ERROR;
         }
 
-        struct control_plane_conn_message message;
+        struct control_plane_conn_message message={0};
         message.type = CONTROL_PLANE_SEND_HELLO;
         message.data.hello.msg = msg;
+        message.data.hello.len = len;
 
         int ret = external_management_request(conn.socket_pair[THREAD_EXT], &message, sizeof(message));
         if (ret < 0)
         {
-                // If the request failed, we need to free the message
-                if (message.data.hello.msg)
-                {
-                        free(message.data.hello.msg);
-                        message.data.hello.msg = NULL;
-                }
                 LOG_ERROR("Failed to send hello message");
                 return MSG_ERROR;
         }
@@ -986,10 +977,10 @@ enum MSG_RESPONSE_CODE send_log_message(const char* message)
 enum MSG_RESPONSE_CODE send_policy_status(struct coordinator_status* status)
 {
 
-        if (!control_plane_running())
+        if (!control_plane_running() || !status)
                 return MSG_ERROR;
 
-        struct control_plane_conn_message msg;
+        struct control_plane_conn_message msg={0};
         msg.type = CONTROL_PLANE_SEND_POLICY_STATUS;
         msg.data.policy.status = *status;
         return external_management_request(conn.socket_pair[THREAD_EXT], &msg, sizeof(msg));
@@ -1003,7 +994,7 @@ enum MSG_RESPONSE_CODE stop_control_plane_conn()
         LOG_DEBUG("Stopping control plane connection");
 
         // Create stop message
-        struct control_plane_conn_message message;
+        struct control_plane_conn_message message={0};
         message.type = CONTROL_PLANE_CONN_STOP;
 
         // Send stop message to thread
@@ -1031,7 +1022,7 @@ enum MSG_RESPONSE_CODE enable_sync(bool value)
 {
         if (!control_plane_running())
                 return MSG_ERROR;
-        struct control_plane_conn_message message;
+        struct control_plane_conn_message message={0};
         message.type = CONTROL_PLANE_ENABLE_SYNC;
         message.data.enable_sync = value;
         return external_management_request(conn.socket_pair[THREAD_EXT], &message, sizeof(message));

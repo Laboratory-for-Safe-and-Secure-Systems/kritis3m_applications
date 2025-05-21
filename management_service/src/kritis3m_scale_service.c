@@ -1276,13 +1276,17 @@ enum MSG_RESPONSE_CODE initiate_hello_message(bool is_timer)
                 LOG_WARN("Proxy reporting is disabled");
                 return MSG_OK;
         }
+        size_t proxy_status_len = 4096;
+        char proxy_status[4096]={0};
 
-        uint8_t* proxy_status = get_proxy_status();
-        if (!proxy_status)
+        int ret = get_proxy_status(proxy_status, &proxy_status_len);
+        if (ret < 0)
         {
                 LOG_ERROR("Failed to get proxy status JSON");
                 return MSG_ERROR;
+        }else{
+                LOG_DEBUG("Proxy status: len %d", proxy_status_len);
         }
 
-        return send_hello_message((char*) proxy_status);
+        return send_hello_message((char const*) proxy_status, proxy_status_len);
 }

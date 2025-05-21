@@ -86,7 +86,7 @@ int start_application(struct application_manager_config* config, struct hardware
  */
 int application_manager_rollback();
 
-uint8_t* get_proxy_status(void);
+int get_proxy_status(char* result, size_t* result_size);
 
 
 

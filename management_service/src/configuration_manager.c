@@ -584,16 +584,18 @@ void cleanup_endpoint_config(asl_endpoint_configuration* endpoint_config)
 
 void cleanup_sysconfig()
 {
+        if (configuration_manager.sys_config.serial_number)
+                free(configuration_manager.sys_config.serial_number);
         if (configuration_manager.sys_config.broker_host)
                 free(configuration_manager.sys_config.broker_host);
         if (configuration_manager.sys_config.est_host)
                 free(configuration_manager.sys_config.est_host);
         if (configuration_manager.sys_config.endpoint_config)
         {
-
                 cleanup_endpoint_config(configuration_manager.sys_config.endpoint_config);
                 free(configuration_manager.sys_config.endpoint_config);
         }
+                
         memset(&configuration_manager.sys_config, 0, sizeof(struct sysconfig));
 }
 

@@ -55,6 +55,7 @@ enum application_management_message_type
         ACKNOWLEDGE_APPLICATION_REQUEST,
         APPLICATION_CONNECTION_REQUEST,
         APPLICATION_ROLLBACK_REQUEST,
+        APPLICATION_STATUS_REQUEST,
 };
 
 typedef struct application_management_message
@@ -75,6 +76,11 @@ typedef struct application_management_message
                         struct hardware_configs* hw_configs;
                         int (*callback)(struct coordinator_status*);
                 } change_config;
+                struct
+                {
+                        char* buffer;
+                        size_t* buffer_len;
+                } status_request;
 
         } data;
 } application_management_message;
@@ -94,7 +100,7 @@ struct application_manager
         pthread_attr_t thread_attr;
         sem_t thread_setup_sem;
 
-        cJSON* proxy_status_json; // will be collected every 40 seconds
+        char proxy_status_buffer[4096]; // Pre-formatted JSON string buffer
         int status_timer_fd;  // Timer for status updates
 
         bool timer_initialized;
@@ -110,7 +116,6 @@ static struct application_manager manager = {
         .app_config = NULL,
         .backup_hw_configs = NULL,
         .backup_app_config = NULL,
-        .proxy_status_json = NULL,
         .status_timer_fd = -1,
         .timer_initialized = false,
 };
@@ -118,6 +123,8 @@ static struct application_manager manager = {
 /*-------------------------------  FORWARD DECLARATIONS---------------------------------*/
 // mainthread
 void* application_service_main_thread(void* arg);
+
+int handle_proxy_status(char* result, size_t* result_size);
 // ipc
 int respond_with(int socket, enum MSG_RESPONSE_CODE response_code);
 
@@ -152,6 +159,7 @@ void init_application_manager(void)
         manager.backup_hw_configs = NULL;
         manager.app_config = NULL;
         manager.backup_app_config = NULL;
+        memset(manager.proxy_status_buffer, 0, sizeof(manager.proxy_status_buffer));
         pthread_attr_init(&manager.thread_attr);
         pthread_attr_setdetachstate(&manager.thread_attr, PTHREAD_CREATE_JOINABLE);
         sem_init(&manager.thread_setup_sem, 0, 0);
@@ -423,6 +431,20 @@ int handle_management_message(struct application_manager* manager)
                 {
                         LOG_INFO("Received application connection request - not implemented yet");
                         respond_with(manager->management_pair[THREAD_INT], MSG_OK);
+                        break;
+                }
+
+        case APPLICATION_STATUS_REQUEST:
+                {
+                        LOG_INFO("Received application status request");
+                        ret = handle_proxy_status(msg.data.status_request.buffer, msg.data.status_request.buffer_len);
+                        if (ret < 0) {
+                                LOG_ERROR("Failed to get proxy status");
+                                respond_with(manager->management_pair[THREAD_INT], MSG_ERROR);
+                                return ret;
+                        }else{
+                                respond_with(manager->management_pair[THREAD_INT], MSG_OK);
+                        }
                         break;
                 }
         default:
@@ -1084,12 +1106,8 @@ void cleanup_application_manager(void)
                 manager.backup_app_config = NULL;
         }
 
-        // Free proxy status JSON
-        if (manager.proxy_status_json != NULL)
-        {
-                cJSON_Delete(manager.proxy_status_json);
-                manager.proxy_status_json = NULL;
-        }
+        // Clear proxy status buffer
+        memset(manager.proxy_status_buffer, 0, sizeof(manager.proxy_status_buffer));
         
         pthread_mutex_unlock(&manager.manager_mutex);
 
@@ -1264,53 +1282,50 @@ static void update_proxy_status_json(struct application_manager* manager)
         // Lock the mutex before accessing manager data
         pthread_mutex_lock(&manager->manager_mutex);
 
-        // Free existing JSON if it exists
-        if (manager->proxy_status_json != NULL) {
-                cJSON_Delete(manager->proxy_status_json);
-                manager->proxy_status_json = NULL;
-        }
-
-        // Create new JSON object
-        manager->proxy_status_json = cJSON_CreateObject();
-        if (manager->proxy_status_json == NULL) {
-                LOG_ERROR("Failed to create JSON object");
+        // Check if application manager is running
+        if (!is_running() || manager->app_config == NULL) {
+                strcpy(manager->proxy_status_buffer, "{\"status\":\"not_running\",\"message\":\"Application manager not initialized\"}");
                 pthread_mutex_unlock(&manager->manager_mutex);
                 return;
         }
 
-        // Check if application manager is running
-        if (!is_running() || manager->app_config == NULL) {
-                cJSON_AddStringToObject(manager->proxy_status_json, "status", "not_running");
-                cJSON_AddStringToObject(manager->proxy_status_json, "message", "Application manager not initialized");
+        // Create root JSON object
+        cJSON* root = cJSON_CreateObject();
+        if (!root) {
+                LOG_ERROR("Failed to create JSON object");
+                strcpy(manager->proxy_status_buffer, "{\"status\":\"error\",\"message\":\"Failed to create JSON\"}");
                 pthread_mutex_unlock(&manager->manager_mutex);
                 return;
         }
 
         // Add overall status
-        cJSON_AddStringToObject(manager->proxy_status_json, "status", "running");
+        cJSON_AddStringToObject(root, "status", "running");
 
         // Create array for proxy statuses
         cJSON* proxy_statuses = cJSON_CreateArray();
-        if (proxy_statuses == NULL) {
+        if (!proxy_statuses) {
                 LOG_ERROR("Failed to create proxy statuses array");
-                cJSON_Delete(manager->proxy_status_json);
-                manager->proxy_status_json = NULL;
+                cJSON_Delete(root); // Free the root object
+                strcpy(manager->proxy_status_buffer, "{\"status\":\"error\",\"message\":\"Failed to create proxy array\"}");
                 pthread_mutex_unlock(&manager->manager_mutex);
                 return;
         }
-        cJSON_AddItemToObject(manager->proxy_status_json, "proxies", proxy_statuses);
+        cJSON_AddItemToObject(root, "proxies", proxy_statuses);
 
         // Take a local copy of needed information while holding the lock
         struct application_manager_config* app_config_copy = manager->app_config;
         
-        // We're done with direct manager access, release the lock
+        // We're done with direct manager access for now
         pthread_mutex_unlock(&manager->manager_mutex);
 
+        // Flag to track if we need to cleanup early
+        bool error_occurred = false;
+
         // Iterate through all proxy groups
-        for (int i = 0; i < app_config_copy->number_of_groups; i++) {
+        for (int i = 0; i < app_config_copy->number_of_groups && !error_occurred; i++) {
                 struct group_config* group = &app_config_copy->group_config[i];
                 
-                for (int j = 0; j < group->number_proxies; j++) {
+                for (int j = 0; j < group->number_proxies && !error_occurred; j++) {
                         struct proxy_wrapper* proxy = &group->proxy_wrapper[j];
                         
                         if (proxy->proxy_id >= 0) {
@@ -1326,41 +1341,112 @@ static void update_proxy_status_json(struct application_manager* manager)
 
                                 // Create status object for this proxy
                                 cJSON* proxy_status_obj = cJSON_CreateObject();
-                                if (proxy_status_obj == NULL) {
-                                        LOG_ERROR("Failed to create proxy status object");
-                                        continue;
+                                if (!proxy_status_obj) {
+                                        LOG_ERROR("Failed to create proxy status object, stopping processing");
+                                        error_occurred = true;
+                                        break;
                                 }
 
                                 // Add proxy information
-                                cJSON_AddStringToObject(proxy_status_obj, "name", proxy->name);
-                                cJSON_AddNumberToObject(proxy_status_obj, "id", proxy->proxy_id);
-                                cJSON_AddStringToObject(proxy_status_obj, "state", 
-                                        status.is_running ? "running" : "not_running");
+                                if (!cJSON_AddStringToObject(proxy_status_obj, "name", proxy->name) ||
+                                    !cJSON_AddNumberToObject(proxy_status_obj, "id", proxy->proxy_id) ||
+                                    !cJSON_AddStringToObject(proxy_status_obj, "state", status.is_running ? "running" : "not_running")) {
+                                        LOG_ERROR("Failed to add properties to proxy status object");
+                                        cJSON_Delete(proxy_status_obj);
+                                        error_occurred = true;
+                                        break;
+                                }
                                 
-                                // Add to array
-                                cJSON_AddItemToArray(proxy_statuses, proxy_status_obj);
+                                // Add to array - note: proxy_status_obj is now owned by the array
+                                if (!cJSON_AddItemToArray(proxy_statuses, proxy_status_obj)) {
+                                        LOG_ERROR("Failed to add proxy status to array");
+                                        cJSON_Delete(proxy_status_obj);
+                                        error_occurred = true;
+                                        break;
+                                }
                         }
                 }
         }
+        
+        // Lock mutex again to update the pre-formatted string
+        pthread_mutex_lock(&manager->manager_mutex);
+        
+        // Format the JSON to string and store in buffer
+        char* json_str = cJSON_PrintUnformatted(root);
+        
+        if (json_str) {
+                // Copy to the buffer with length check
+                strncpy(manager->proxy_status_buffer, json_str, sizeof(manager->proxy_status_buffer) - 1);
+                manager->proxy_status_buffer[sizeof(manager->proxy_status_buffer) - 1] = '\0';
+                
+                // Free the temporary string
+                free(json_str);
+        } else {
+                LOG_ERROR("Failed to format JSON to string");
+                strcpy(manager->proxy_status_buffer, "{\"status\":\"error\",\"message\":\"Failed to format JSON\"}");
+        }
+        
+        // Always delete the root object, which will free all child objects
+        cJSON_Delete(root);
+        
+        pthread_mutex_unlock(&manager->manager_mutex);
 }
 
-uint8_t* get_proxy_status(void) {
-        if (!is_running() || manager.app_config == NULL || manager.proxy_status_json == NULL) {
-                // Create a simple not running status JSON
-                cJSON* not_running_json = cJSON_CreateObject();
-                if (!not_running_json) {
-                        LOG_ERROR("Failed to create not running status JSON");
-                        return NULL;
+int handle_proxy_status(char* result, size_t* result_size) {
+        if (result == NULL || result_size == NULL) {
+                LOG_ERROR("Invalid arguments");
+                return -1;
+        }
+        
+        if (!is_running() || manager.app_config == NULL || manager.proxy_status_buffer[0] == '\0') {
+                // Create a simple not running status directly in result
+                const char* not_running_json = "{\"status\":\"not_running\",\"message\":\"Application manager not initialized\"}";
+                size_t len = strlen(not_running_json);
+                
+                if (*result_size <= len) {
+                        return -1; // Buffer too small
                 }
                 
-                cJSON_AddStringToObject(not_running_json, "status", "not_running");
-                cJSON_AddStringToObject(not_running_json, "message", "Application manager not initialized");
+                strcpy(result, not_running_json);
+                *result_size = len;
+        } else {
+                // Use the pre-formatted JSON string
+                size_t len = strlen(manager.proxy_status_buffer);
                 
-                uint8_t* result = (uint8_t*)cJSON_PrintUnformatted(not_running_json);
-                cJSON_Delete(not_running_json);
-                return result;
+                if (*result_size <= len) {
+                        return -1; // Buffer too small
+                }
+                
+                strcpy(result, manager.proxy_status_buffer);
+                *result_size = len;
         }
+        
+        return 0;
+}
 
-        // Return formatted JSON for running status
-        return (uint8_t*)cJSON_PrintUnformatted((const cJSON*)manager.proxy_status_json);
+int get_proxy_status(char* result, size_t* result_size){
+
+        if (!is_running()) {
+                if (result == NULL || result_size == NULL) {
+                        LOG_ERROR("Invalid arguments");
+                        return -1;
+                }
+                // Create a simple not running status directly in result
+                const char* not_running_json = "{\"status\":\"not_running\",\"message\":\"Application manager not initialized\"}";
+                size_t len = strlen(not_running_json);
+                
+                if (*result_size <= len) {
+                        return -1; // Buffer too small
+                }
+                
+                strcpy(result, not_running_json);
+                *result_size = len;
+                return 0;
+        }else{
+        application_management_message msg = {0};
+        msg.msg_type = APPLICATION_STATUS_REQUEST;
+        msg.data.status_request.buffer = result;
+        msg.data.status_request.buffer_len = result_size;
+        return external_management_request(manager.management_pair[THREAD_EXT], &msg, sizeof(msg));
+        }
 }

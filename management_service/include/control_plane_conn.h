@@ -47,7 +47,7 @@ void cleanup_control_plane_conn();
  * @param value The hello value to send (true/false)
  * @return Returns a ManagementReturncode indicating the result
  */
-enum MSG_RESPONSE_CODE send_hello_message(char* msg);
+enum MSG_RESPONSE_CODE send_hello_message(const char* msg, size_t len);
 
 /**
  * Attempts to reconnect to the MQTT broker if the connection is lost
