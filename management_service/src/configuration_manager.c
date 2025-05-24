@@ -586,6 +586,7 @@ void cleanup_sysconfig()
 {
         if (configuration_manager.sys_config.serial_number)
                 free(configuration_manager.sys_config.serial_number);
+
         if (configuration_manager.sys_config.broker_host)
                 free(configuration_manager.sys_config.broker_host);
         if (configuration_manager.sys_config.est_host)
