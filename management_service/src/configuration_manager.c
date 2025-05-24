@@ -859,6 +859,8 @@ void cleanup_application_config(struct application_manager_config* config)
                                                 free(config->group_config[i]
                                                              .proxy_wrapper[j]
                                                              .proxy_config.target_ip_address);
+                                        if (config->group_config[i].proxy_wrapper[j].name)
+                                                free(config->group_config[i].proxy_wrapper[j].name);
                                 }
                                 // deletes the whole array
                                 free(config->group_config[i].proxy_wrapper);

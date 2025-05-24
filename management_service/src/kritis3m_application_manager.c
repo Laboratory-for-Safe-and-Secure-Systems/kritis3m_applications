@@ -395,8 +395,8 @@ int handle_management_message(struct application_manager* manager)
                         if (!callback) {
                                 LOG_DEBUG("No callback function provided, notifying coordinator about successful configuration change");
                         }
-
                         ret = handle_config_change_request(manager, new_config, new_hw_configs, callback);
+
                         return ret;
                 }
         case APPLICATION_ROLLBACK_REQUEST:

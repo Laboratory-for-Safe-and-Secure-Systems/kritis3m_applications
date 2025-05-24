@@ -292,7 +292,7 @@ int msgarrvd(void* context, char* topicName, int topicLen, MQTTAsync_message* me
 cleanup:
         if (json)
         {
-                free(json);
+                cJSON_Delete(json);
                 json = NULL;
         }
         MQTTAsync_freeMessage(&message);
@@ -946,7 +946,7 @@ enum MSG_RESPONSE_CODE send_log_message(const char* message)
                 return MSG_ERROR;
         }
 
-        struct control_plane_conn_message msg;
+        struct control_plane_conn_message msg = {0}; // Initialize to zero
         msg.type = CONTROL_PLANE_SEND_LOG;
         msg.data.log.message = strdup(message);
         if (msg.data.log.message == NULL)

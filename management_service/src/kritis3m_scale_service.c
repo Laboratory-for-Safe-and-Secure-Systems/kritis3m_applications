@@ -924,8 +924,12 @@ void handle_notify_dataplane_cert(enum TRANSACTION_STATE state, void* to_fetch)
                         // get hwconfigs and appl config
                         struct hardware_configs hw_configs = {0};
                         struct application_manager_config app_config = {0};
-                        get_active_hardware_config(&app_config, &hw_configs);
-                        change_application_config(&app_config, &hw_configs, NULL);
+                        int ret = get_active_hardware_config(&app_config, &hw_configs);
+                        if (ret == 0) {
+                                change_application_config(&app_config, &hw_configs, NULL);
+                        }
+                        cleanup_application_config(&app_config);
+                        cleanup_hardware_configs(&hw_configs);
                 }
                 break;
         case TRANSACTION_FAILED:
