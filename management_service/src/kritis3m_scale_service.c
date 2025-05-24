@@ -319,6 +319,7 @@ int start_kritis3m_service(char* config_file, int log_level)
 error_occured:
         LOG_INFO("exit kritis3m_service");
         cleanup_kritis3m_service();
+        cleanup_configuration_manager();
         return ret;
 }
 
@@ -490,8 +491,8 @@ void* kritis3m_service_main_thread(void* arg)
 
 terminate:
         LOG_DEBUG("Leaving kritis3m_service main thread");
-
         stop_application_manager();
+        cleanup_configuration_manager();
         cleanup_kritis3m_service();
         stop_control_plane_conn();
         pthread_detach(pthread_self());
