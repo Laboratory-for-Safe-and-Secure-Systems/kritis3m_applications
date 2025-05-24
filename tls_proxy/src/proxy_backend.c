@@ -843,7 +843,7 @@ void* proxy_backend_thread(void* ptr)
                         }
                         else
                         {
-                                LOG_ERROR("Received event for unknown fd %d", fd);
+                                LOG_ERROR("Received event for unknown fd %d\n\n", fd);
                         }
                 }
         }

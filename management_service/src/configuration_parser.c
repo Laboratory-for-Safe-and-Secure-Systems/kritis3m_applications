@@ -321,7 +321,11 @@ int parse_buffer_to_sysconfig(char* json_buffer, int json_buffer_size, struct sy
         cJSON* keylog_path = cJSON_GetObjectItem(endpoint_config, "keylog_path");
         if (keylog_path && cJSON_IsString(keylog_path))
         {
-                config->endpoint_config->keylog_file = duplicate_string(keylog_path->valuestring);
+                if (strcmp(keylog_path->valuestring, "") == 0){
+                        config->endpoint_config->keylog_file = NULL;
+                }else{
+                        config->endpoint_config->keylog_file = duplicate_string(keylog_path->valuestring);
+                }
         }
         else
         {

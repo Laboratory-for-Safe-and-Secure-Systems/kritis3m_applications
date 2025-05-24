@@ -1526,6 +1526,8 @@ struct application_manager_config*
                                 {
                                         dest->group_config[i].endpoint_config->keylog_file = duplicate_string(
                                                 src->group_config[i].endpoint_config->keylog_file);
+                                }else{
+                                        dest->group_config[i].endpoint_config->keylog_file = NULL;
                                 }
 
                                 // Deep copy device certificate chain buffer

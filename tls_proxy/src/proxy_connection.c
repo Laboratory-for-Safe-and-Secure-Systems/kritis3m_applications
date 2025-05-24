@@ -698,6 +698,7 @@ static bool handle_asset_to_tunnel(proxy_connection* connection, short event, po
                 else
                 {
                         ret = -1;
+                        printf("ret: %d, with errno: %d, and msg: %s\n", ret, errno, strerror(errno));
                 }
         }
         if (event & POLLOUT)
@@ -836,7 +837,7 @@ static void* connection_handler_thread(void* ptr)
                         }
                         else if (fd == connection->asset_sock)
                         {
-                                shutdown = handle_asset_to_tunnel(connection, event, &poll_set);
+                               shutdown = handle_asset_to_tunnel(connection, event, &poll_set);
                         }
                 }
         }

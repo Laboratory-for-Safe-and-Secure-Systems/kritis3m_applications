@@ -1,4 +1,3 @@
-
 #include <errno.h>
 #include <pthread.h>
 #include <stdint.h>
@@ -30,6 +29,11 @@ int send_management_message(int socket, proxy_management_message const* msg)
 
         while ((ret <= 0) && (retries < max_retries))
         {
+                //check socket is valid
+                if (socket < 0){
+                        LOG_ERROR("Invalid socket");
+                        return -1;
+                }
                 ret = send(socket, (char const*) msg, sizeof(proxy_management_message), 0);
                 if (ret < 0)
                 {
@@ -61,6 +65,14 @@ int send_management_message(int socket, proxy_management_message const* msg)
 
 int read_management_message(int socket, proxy_management_message* msg)
 {
+        if (msg == NULL){
+                LOG_ERROR("Invalid message pointer");
+                return -1;
+        }
+        if (socket < 0){
+                LOG_ERROR("Invalid socket");
+                return -1;
+        }
         int ret = recv(socket, (char*) msg, sizeof(proxy_management_message), 0);
         if (ret < 0)
         {

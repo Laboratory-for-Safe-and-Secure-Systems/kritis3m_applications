@@ -607,14 +607,14 @@ static int handle_config_change_request(struct application_manager* manager,
                 manager->app_config = NULL;
                 
                 pthread_mutex_unlock(&manager->manager_mutex);  // Unlock during potentially long operation
-                ret = stop_running_proxies(backup_config);
+                // ret = stop_running_proxies(backup_config);
+                ret =tls_proxy_backend_terminate();
                 pthread_mutex_lock(&manager->manager_mutex);    // Re-lock
                 
                 if (ret < 0) {
                         LOG_WARN("Failed to stop some proxies, continuing with configuration change");
                 }
                 LOG_DEBUG("stopping tls proxy backend");
-                tls_proxy_backend_terminate();
         }
         
         // Step 2: Save current hardware configuration as backup if it exists
