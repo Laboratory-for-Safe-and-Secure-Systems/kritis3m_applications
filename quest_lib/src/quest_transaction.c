@@ -14,14 +14,16 @@ LOG_MODULE_CREATE(quest_transaction);
 
 /// @brief establishes the TCP connection to the QKD KMS based on the derivated con-
 ///        nection information from the quest_endpoint.
-/// @param qkd_transaction reference to the transaction, which contains the 
+/// @param qkd_transaction reference to the transaction, which contains the
 ///        quest_endpoint reference, as well as the associated connection information.
 /// @return returns E_OK if working correctly, otherwise returns an error code less than zero.
 static enum kritis3m_status_info establish_host_connection(quest_transaction* qkd_transaction)
 {
         int status = E_OK;
 
-        qkd_transaction->endpoint->connection_info.socket_fd = create_client_socket(AF_INET);
+        qkd_transaction->endpoint->connection_info.socket_fd = create_client_socket(
+                qkd_transaction->endpoint->connection_info.target_addr->ai_family);
+
         if (qkd_transaction->endpoint->connection_info.socket_fd < 0)
         {
                 LOG_ERROR("connection failed, error code: %d\n", errno);
@@ -30,8 +32,8 @@ static enum kritis3m_status_info establish_host_connection(quest_transaction* qk
         }
 
         if (connect(qkd_transaction->endpoint->connection_info.socket_fd,
-                    (struct sockaddr*) qkd_transaction->endpoint->connection_info.IP_v4->ai_addr,
-                    qkd_transaction->endpoint->connection_info.IP_v4->ai_addrlen) < 0)
+                    (struct sockaddr*) qkd_transaction->endpoint->connection_info.target_addr->ai_addr,
+                    qkd_transaction->endpoint->connection_info.target_addr->ai_addrlen) < 0)
         {
                 LOG_ERROR("connection failed, error code: %d\n", errno);
                 status = SOCKET_ERR;
@@ -69,18 +71,18 @@ SOCKET_CON_ERR:
 /// @param qkd_transaction reference to the quest_transaction, which shall be configured.
 /// @param endpoint reference to the quest_endpoint, which contains the configuration parameter.
 /// @param req_type specifies the type of HTTP(S) request which shall be sent.
-/// @param sae_ID secure application entity identifier used in the request url.
-/// @param identity OPTIONAL parameter, which must be set, if a key with a specific key identifier 
+/// @param remote_sae_ID secure application entity identifier used in the request url.
+/// @param identity OPTIONAL parameter, which must be set, if a key with a specific key identifier
 ///                 shall be requested (req_type must then be HTTP_KEY_WITH_ID).
-/// @return returns E_OK if working correctly, otherwise returns an error code less than zero. 
+/// @return returns E_OK if working correctly, otherwise returns an error code less than zero.
 static enum kritis3m_status_info configure_transaction(quest_transaction* qkd_transaction,
                                                        quest_endpoint* endpoint,
                                                        enum http_get_request_type req_type,
-                                                       char* sae_ID,
+                                                       char* remote_sae_ID,
                                                        char* identity)
 {
         /* sanity check: required parameter */
-        if ((qkd_transaction == NULL) || (endpoint == NULL) || (sae_ID == NULL))
+        if ((qkd_transaction == NULL) || (endpoint == NULL) || (remote_sae_ID == NULL))
                 return PARAM_ERR;
 
         /* sanity check: if a key should be requested with a
@@ -97,7 +99,7 @@ static enum kritis3m_status_info configure_transaction(quest_transaction* qkd_tr
         qkd_transaction->security_param.enable_secure_con = endpoint->security_param.enable_secure_con;
 
         /* set sae_ID in the transaction url parameter */
-        qkd_transaction->url_param.sae_ID = sae_ID;
+        qkd_transaction->url_param.remote_sae_ID = remote_sae_ID;
 
         /* set request type and key identity, if identity is passed to the function. */
         qkd_transaction->request_type = req_type;
@@ -112,7 +114,7 @@ static enum kritis3m_status_info configure_transaction(quest_transaction* qkd_tr
 /*------------------------------- public functions -------------------------------*/
 quest_transaction* quest_setup_transaction(quest_endpoint* endpoint,
                                            enum http_get_request_type req_type,
-                                           char* sae_ID,
+                                           char* remote_sae_ID,
                                            char* identity)
 {
         enum kritis3m_status_info status = E_OK;
@@ -134,7 +136,7 @@ quest_transaction* quest_setup_transaction(quest_endpoint* endpoint,
         /* Ensure all buffers of the transaction are zero */
         memset(qkd_transaction, 0, sizeof(struct quest_transaction));
 
-        status = configure_transaction(qkd_transaction, endpoint, req_type, sae_ID, identity);
+        status = configure_transaction(qkd_transaction, endpoint, req_type, remote_sae_ID, identity);
         if (status != E_OK)
         {
                 free(qkd_transaction);
@@ -165,7 +167,7 @@ quest_transaction* quest_setup_transaction(quest_endpoint* endpoint,
                               qkd_transaction->response,
                               qkd_transaction->endpoint->connection_info.hostname,
                               qkd_transaction->endpoint->connection_info.hostport,
-                              qkd_transaction->url_param.sae_ID,
+                              qkd_transaction->url_param.remote_sae_ID,
                               qkd_transaction->url_param.key_ID);
 
         return qkd_transaction;
@@ -196,23 +198,23 @@ enum kritis3m_status_info quest_execute_transaction(quest_transaction* qkd_trans
                 LOG_ERROR("establishing host connection was unsuccessful, error code %d\n", errno);
                 goto QKD_CON_ERR;
         }
-        
+
         /* if enable_secure_con is true, we use HTTPS */
         if (qkd_transaction->security_param.enable_secure_con)
         {
                 /* function return is the number */
                 total_bytes_sent = https_client_req(qkd_transaction->endpoint->connection_info.socket_fd,
-                                          qkd_transaction->security_param.tls_session,
-                                          qkd_transaction->request,
-                                          timeout,
-                                          qkd_transaction->response);
+                                                    qkd_transaction->security_param.tls_session,
+                                                    qkd_transaction->request,
+                                                    timeout,
+                                                    qkd_transaction->response);
         }
         else /* otherwise we use standard HTTP */
         {
                 total_bytes_sent = http_client_req(qkd_transaction->endpoint->connection_info.socket_fd,
-                                         qkd_transaction->request,
-                                         timeout,
-                                         qkd_transaction->response);
+                                                   qkd_transaction->request,
+                                                   timeout,
+                                                   qkd_transaction->response);
         }
 
         if (total_bytes_sent < 0)

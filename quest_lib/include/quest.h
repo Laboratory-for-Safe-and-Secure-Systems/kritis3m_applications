@@ -16,7 +16,6 @@
 #include "kritis3m_http.h"
 #include "networking.h"
 
-typedef struct quest_configuration quest_configuration;
 typedef struct quest_transaction quest_transaction;
 typedef struct quest_endpoint quest_endpoint;
 
@@ -37,21 +36,24 @@ enum kritis3m_status_info
         PARAM_ERR = -9,
 };
 
-struct quest_configuration
+typedef struct quest_configuration
 {
         /* Verbose flag to configure runtime information */
         bool verbose;
 
         struct
         {
+                /* Our own SAE ID */
+                char* own_sae_ID;
+
+                /* Remote peer SAE ID */
+                char* remote_sae_ID;
+
                 /* Hostname of the QKD Server REST-API */
                 char* hostname;
 
-                /* Identifier of the QKD endpoint SAE */
-                char* host_sae_ID;
-
                 /* Hostport of the QKD Server */
-                char* hostport;
+                uint16_t hostport;
 
         } connection_info;
 
@@ -64,7 +66,16 @@ struct quest_configuration
                 asl_endpoint* client_endpoint;
 
         } security_param;
-};
+
+} quest_configuration;
+
+typedef struct quest_connection
+{
+        quest_endpoint* local_endpoint;
+
+        char const* remote_sae_ID;
+
+} quest_connection;
 
 /*------------------------------ quest configuration ------------------------------*/
 
@@ -76,7 +87,7 @@ quest_configuration* quest_default_config(void);
 /// @brief Frees the allocated quest_configuration.
 /// @param config reference to the configuration, which shall be freed.
 /// @return returns E_OK if working correctly, otherwise returns an error code less than zero.
-enum kritis3m_status_info quest_deinit(quest_configuration* config);
+enum kritis3m_status_info quest_config_deinit(quest_configuration* config);
 
 /*--------------------------------- quest endpoint --------------------------------*/
 
@@ -105,12 +116,12 @@ enum kritis3m_status_info quest_free_endpoint(quest_endpoint* endpoint);
 ///                 information.
 /// @param req_type specifies the request type. Currently supported: HTTP_KEY_NO_ID,
 ///                 HTTP_KEY_WITH_ID and HTTP_STATUS.
-/// @param sae_ID   secure application entity identifiert used in the request url.
+/// @param sae_ID   remote secure application entity identifier used in the request url.
 /// @param identity if HTTP_KEY_WITH_ID is requested, the key identifier must be referenced here.
 /// @return returns a refernce to the allocated quest_transaction object or NULL, if an error occured.
 quest_transaction* quest_setup_transaction(quest_endpoint* endpoint,
                                            enum http_get_request_type req_type,
-                                           char* sae_ID,
+                                           char* remote_sae_ID,
                                            char* identity);
 
 /// @brief Executes the configured transaction by establishing a connection to the QKD KMS and

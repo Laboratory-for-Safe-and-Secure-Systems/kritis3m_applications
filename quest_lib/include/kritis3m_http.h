@@ -103,7 +103,7 @@ void deinit_http_request(struct http_request* request, enum http_get_request_typ
 void populate_http_request(struct http_request* request,
                            struct http_get_response* response,
                            char* hostname,
-                           char* hostport,
+                           uint16_t hostport,
                            char* sae_ID,
                            char* key_ID);
 

@@ -117,14 +117,14 @@ static void http_get_cb(struct http_response* rsp, enum http_final_call final_da
 
 /*------------------------------- private functions -------------------------------*/
 
-/// @brief Dynamically allocates memory and assembles the url for the http_get request. 
+/// @brief Dynamically allocates memory and assembles the url for the http_get request.
 /// @param request reference to the http_request object allocated before.
 /// @param sae_ID secure application entity identifier used in the url.
 /// @param type_url specified url type. (set in populate_request_url() function)
 /// @param key_ID OPTIONAL parameter, if a http_get request for a referenced key_ID is neccessary.
 static void assemble_url(struct http_request* request, char* sae_ID, char* type_url, char* key_ID)
 {
-        if((request == NULL) || (sae_ID == NULL) || (type_url == NULL))
+        if ((request == NULL) || (sae_ID == NULL) || (type_url == NULL))
         {
                 LOG_ERROR("invalid parameter configuration in url assembly\n");
                 return;
@@ -142,7 +142,7 @@ static void assemble_url(struct http_request* request, char* sae_ID, char* type_
         size_t total_len = base_url_len + sae_id_len + type_url_len + 1; // +1 for null terminator
 
         /* If the key_ID parameter is set, we reserve the additional length of the identifier */
-        if(key_ID != NULL)
+        if (key_ID != NULL)
         {
                 size_t key_id_len = strlen(key_ID);
                 total_len += key_id_len;
@@ -156,20 +156,20 @@ static void assemble_url(struct http_request* request, char* sae_ID, char* type_
         }
 
         /* Initialize request url buffer with zero values */
-        memset((char*)request->url, 0, total_len);
+        memset((char*) request->url, 0, total_len);
 
         // Copy the base URL and concatenate the key
         strcpy((char*) request->url, base_url);
         strcat((char*) request->url, sae_ID);
         strcat((char*) request->url, type_url);
 
-        if(key_ID != NULL)
+        if (key_ID != NULL)
         {
                 strcat((char*) request->url, key_ID);
         }
 }
 
-/// @brief Populate the request url depending on the request type. This function specifies the 
+/// @brief Populate the request url depending on the request type. This function specifies the
 ///        url assembly depending on the type set in the http_get_response.
 /// @param request reference to the http_request object allocated before.
 /// @param response reference to the http_get_response object allocated before.
@@ -222,7 +222,7 @@ ALLOC_ERR:
 void populate_http_request(struct http_request* request,
                            struct http_get_response* response,
                            char* hostname,
-                           char* hostport,
+                           uint16_t hostport,
                            char* sae_ID,
                            char* key_ID)
 {
@@ -233,7 +233,16 @@ void populate_http_request(struct http_request* request,
 
         /* set hostname and port of the server */
         request->host = hostname;
-        request->port = hostport;
+
+        char* hostport_str = malloc(6); // Max length for port is 5 digits + null terminator
+        if (hostport_str == NULL)
+        {
+                LOG_ERROR("failed to allocate memory for hostport string.\n");
+                request->port = NULL;
+                return;
+        }
+        snprintf(hostport_str, 6, "%u", hostport);
+        request->port = hostport_str;
 
         /* reference receive buffer and associated size */
         request->recv_buf = response->buffer;
@@ -251,6 +260,10 @@ void deinit_http_request(struct http_request* request, enum http_get_request_typ
         if (request->url != NULL)
                 free((char*) request->url);
 
+        /* Free allocated hostport string */
+        if (request->port != NULL)
+                free((char*) request->port);
+
+        /* Free the request object itself */
         free(request);
 }
-

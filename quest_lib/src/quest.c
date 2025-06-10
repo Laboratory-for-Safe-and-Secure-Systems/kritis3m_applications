@@ -14,9 +14,11 @@ quest_configuration* quest_default_config(void)
 
         default_config->verbose = false;
 
-        default_config->connection_info.hostname = "im-lfd-qkd-bob.othr.de";
-        default_config->connection_info.host_sae_ID = "bob_sae_etsi_1";
-        default_config->connection_info.hostport = "9120";
+        default_config->connection_info.own_sae_ID = NULL;
+        default_config->connection_info.remote_sae_ID = NULL;
+
+        default_config->connection_info.hostname = NULL;
+        default_config->connection_info.hostport = 0;
 
         default_config->security_param.enable_secure_con = false;
         default_config->security_param.client_endpoint = NULL;
@@ -24,10 +26,28 @@ quest_configuration* quest_default_config(void)
         return default_config;
 }
 
-enum kritis3m_status_info quest_deinit(quest_configuration* config)
+enum kritis3m_status_info quest_config_deinit(quest_configuration* config)
 {
         if (config == NULL)
                 return E_OK;
+
+        if (config->connection_info.hostname != NULL)
+        {
+                free(config->connection_info.hostname);
+                config->connection_info.hostname = NULL;
+        }
+
+        if (config->connection_info.own_sae_ID != NULL)
+        {
+                free(config->connection_info.own_sae_ID);
+                config->connection_info.own_sae_ID = NULL;
+        }
+
+        if (config->connection_info.remote_sae_ID != NULL)
+        {
+                free(config->connection_info.remote_sae_ID);
+                config->connection_info.remote_sae_ID = NULL;
+        }
 
         /* free quest configuration */
         free(config);

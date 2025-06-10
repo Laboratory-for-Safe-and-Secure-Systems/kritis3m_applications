@@ -8,7 +8,7 @@
 #define KEY_ID_LEN 64
 
 /*------------------------------ private structures ------------------------------*/
-struct quest_transaction
+typedef struct quest_transaction
 {
         /* quest endpoint containing connection parameter */
         quest_endpoint* endpoint;
@@ -23,16 +23,15 @@ struct quest_transaction
 
         } security_param;
 
-        struct 
+        struct
         {
-                /* Secure Application Entity Identifier */
-                char* sae_ID;
-                
+                /* Remote SAE ID */
+                char* remote_sae_ID;
+
                 /* OPTIONAL parameter for HTTP-GET WITH KEY ID */
                 char key_ID[KEY_ID_LEN];
-        
+
         } url_param;
-        
 
         /* Specify which type of HTTP-GET message shall be sent */
         enum http_get_request_type request_type;
@@ -42,9 +41,10 @@ struct quest_transaction
 
         /* HTTP-GET Response struct reference */
         struct http_get_response* response;
-};
 
-struct quest_endpoint
+} quest_transaction;
+
+typedef struct quest_endpoint
 {
         /* Verbose flag to configure runtime information */
         bool verbose;
@@ -54,20 +54,17 @@ struct quest_endpoint
                 /* File-descriptor for the socket connection */
                 int socket_fd;
 
+                /* Our own SAE ID*/
+                char* sae_ID;
+
                 /* Hostname of the QKD Server REST-API */
                 char* hostname;
 
-                /* Identifier of the QKD endpoint SAE */
-                char* host_sae_ID;
-
                 /* Hostport of the QKD Server */
-                char* hostport;
+                uint16_t hostport;
 
-                /* IP_v4 address used for host connection */
-                struct addrinfo* IP_v4;
-
-                /* IP_v4 string for log entries */
-                char IP_str[INET6_ADDRSTRLEN];
+                /* Target address used for host connection */
+                struct addrinfo* target_addr;
 
         } connection_info;
 
@@ -80,6 +77,7 @@ struct quest_endpoint
                 asl_endpoint* client_endpoint;
 
         } security_param;
-};
+
+} quest_endpoint;
 
 #endif
