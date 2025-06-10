@@ -292,6 +292,11 @@ int init_configuration_manager(char* base_path)
         memset(&configuration_manager, 0, sizeof(struct configuration_manager));
 
         configuration_manager.base_path = duplicate_string(base_path);
+        if (!configuration_manager.base_path)
+        {
+                LOG_ERROR("Failed to allocate base path");
+                goto error;
+        }
 
         char helper_string[300];
         int ret = 0;
@@ -299,10 +304,20 @@ int init_configuration_manager(char* base_path)
         // sysconfig
         int len = snprintf(helper_string, 300, SYS_CONFIG_PATH_FORMAT, base_path);
         configuration_manager.sys_config_path = duplicate_string(helper_string);
+        if (!configuration_manager.sys_config_path)
+        {
+                LOG_ERROR("Failed to allocate sys_config_path");
+                goto error;
+        }
 
         // controlplane
         len = snprintf(helper_string, 300, ROOT_PATH_FORMAT, base_path);
         configuration_manager.root_cert = duplicate_string(helper_string);
+        if (!configuration_manager.root_cert)
+        {
+                LOG_ERROR("Failed to allocate root_cert");
+                goto error;
+        }
 
         len = snprintf(helper_string, 300, BOOTSTRAP_KEY_PATH_FORMAT, base_path);
         configuration_manager.bootstrap_key_path = duplicate_string(helper_string);
@@ -399,6 +414,13 @@ int init_configuration_manager(char* base_path)
 
         if (ret < 0)
                 goto error;
+        
+        if (buffer)
+        {
+                free(buffer);
+                buffer = NULL;
+        }
+        
         configuration_manager.initialized = true;
         return 0;
 
@@ -1143,6 +1165,7 @@ static void* transaction_worker(void* arg)
         char* new_config = NULL;
         size_t config_size = 0;
         int ret = 0;
+        bool global_lock_acquired = false;
 
         // Lock transaction
         pthread_mutex_lock(&transaction->mutex);
@@ -1222,16 +1245,21 @@ static void* transaction_worker(void* arg)
                 transaction->notify(TRANSACTION_COMMITTED, transaction->to_fetch);
         }
 
+        // Success path cleanup
+        global_lock_acquired = true;
+
 cleanup:
         if (new_config)
         {
                 free(new_config);
         }
         
-        // Release the global transaction lock
-        pthread_mutex_lock(&global_transaction_lock);
-        transaction_in_progress = false;
-        pthread_mutex_unlock(&global_transaction_lock);
+        // Release the global transaction lock only if we acquired it or need to release it
+        if (global_lock_acquired || pthread_mutex_lock(&global_transaction_lock) == 0)
+        {
+                transaction_in_progress = false;
+                pthread_mutex_unlock(&global_transaction_lock);
+        }
         
         // Don't free the transaction as it may be allocated on the stack
         return NULL;

@@ -209,6 +209,7 @@ int msgarrvd(void* context, char* topicName, int topicLen, MQTTAsync_message* me
                 if (json_cert_type == NULL)
                 {
                         LOG_ERROR("Failed to get cert type from certificate request");
+                        cJSON_Delete(json);
                         goto cleanup;
                 }
                 plane_type = json_cert_type->valueint;
@@ -226,6 +227,7 @@ int msgarrvd(void* context, char* topicName, int topicLen, MQTTAsync_message* me
                         if (algo == NULL)
                         {
                                 LOG_ERROR("Failed to get algo from certificate request");
+                                cJSON_Delete(json);
                                 goto cleanup;
                         }
                 }
@@ -240,6 +242,7 @@ int msgarrvd(void* context, char* topicName, int topicLen, MQTTAsync_message* me
                         if (alt_algo == NULL)
                         {
                                 LOG_ERROR("Failed to get algo from certificate request");
+                                cJSON_Delete(json);
                                 goto cleanup;
                         }
                 }
@@ -251,6 +254,7 @@ int msgarrvd(void* context, char* topicName, int topicLen, MQTTAsync_message* me
                         if ((ret = cert_req(CONFIG_DATAPLANE, algo, alt_algo)) < 0)
                         {
                                 LOG_ERROR("Failed to send dataplane cert request");
+                                cJSON_Delete(json);
                                 goto cleanup;
                         }
                 }
@@ -259,9 +263,14 @@ int msgarrvd(void* context, char* topicName, int topicLen, MQTTAsync_message* me
                         if ((ret = cert_req(CONFIG_CONTROLPLANE, algo, alt_algo)) < 0)
                         {
                                 LOG_ERROR("Failed to send controlplane cert request");
+                                cJSON_Delete(json);
                                 goto cleanup;
                         }
                 }
+
+                // Clean up JSON before continuing
+                cJSON_Delete(json);
+                json = NULL;
 
                 // type
         }
@@ -809,6 +818,12 @@ void cleanup_control_plane_conn()
         {
                 free(conn.topic_cert_req);
                 conn.topic_cert_req = NULL;
+        }
+        
+        if (conn.topic_sync)
+        {
+                free(conn.topic_sync);
+                conn.topic_sync = NULL;
         }
 
         return;

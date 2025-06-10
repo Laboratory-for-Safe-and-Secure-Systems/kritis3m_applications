@@ -380,11 +380,12 @@ int handle_management_message(struct application_manager* manager)
 
                         if ( new_config == NULL) {
                                 respond_with(manager->management_pair[THREAD_INT], MSG_ERROR);
-                                LOG_ERROR("No callback function provided or invalid configuration");
                                 if (new_config != NULL) {
+                                        cleanup_application_config(new_config);
                                         free(new_config);
                                 }
                                 if (new_hw_configs != NULL) {
+                                        cleanup_hardware_configs(new_hw_configs);
                                         free(new_hw_configs);
                                 }
                                 return 0;
