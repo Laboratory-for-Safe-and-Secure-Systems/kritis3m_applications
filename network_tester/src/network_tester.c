@@ -456,7 +456,7 @@ static void* network_tester_main_thread(void* ptr)
                 }
 
                 /* Check if the echo of a single bytes works. This means that the connection is fully established. */
-                ret = test_echo_message(tester, 1);
+                ret = test_echo_message(tester, tester->config->message_latency_test.size);
                 if (ret < 0)
                         ERROR_OUT("Error testing echo message");
 
@@ -771,7 +771,7 @@ network_tester_config network_tester_default_config(void)
 
         default_config.message_latency_test.iterations = 0;
         default_config.message_latency_test.delay_us = 0;
-        default_config.message_latency_test.size = 100;
+        default_config.message_latency_test.size = 1;
 
         default_config.target_ip = NULL;
         default_config.target_port = 0;
