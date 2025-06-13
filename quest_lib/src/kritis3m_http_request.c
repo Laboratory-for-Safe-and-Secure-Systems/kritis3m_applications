@@ -9,14 +9,14 @@ static void manage_request_error(struct http_get_response* response, cJSON* data
         cJSON* error_msg = cJSON_GetObjectItemCaseSensitive(data, "message");
         if (error_msg == NULL)
         {
-                LOG_ERROR("invalid request resumption!\n");
+                LOG_ERROR("invalid request resumption!");
                 response->error_code = HTTP_ERR;
                 response->bytes_received = 0;
                 response->buffer_frag_start = NULL;
         }
         else
         {
-                LOG_ERROR("error occured: %s\n", error_msg->valuestring);
+                LOG_ERROR("error occured: %s", error_msg->valuestring);
                 response->error_code = HTTP_ERR;
                 response->bytes_received = 0;
                 response->buffer_frag_start = NULL;
@@ -57,8 +57,8 @@ static void derive_key_info(struct http_get_response* response, cJSON* data)
                        key_ID->valuestring,
                        (response->key_info->key_ID_len + 1));
 
-                LOG_INFO("original key: %s -- key_ID: %s\n", key->valuestring, key_ID->valuestring);
-                LOG_INFO("original key size: %d -- key_ID size: %d\n",
+                LOG_INFO("original key: %s -- key_ID: %s", key->valuestring, key_ID->valuestring);
+                LOG_INFO("original key size: %d -- key_ID size: %d",
                          (int) strlen(key->valuestring),
                          (int) strlen(key_ID->valuestring));
         }
@@ -88,12 +88,12 @@ static void http_get_cb(struct http_response* rsp, enum http_final_call final_da
 
         if (final_data == HTTP_DATA_MORE)
         {
-                LOG_INFO("partial data received (%zd bytes).\n", rsp->data_len);
+                LOG_INFO("partial data received (%zd bytes).", rsp->data_len);
         }
         else if (final_data == HTTP_DATA_FINAL)
         {
 
-                LOG_INFO("Successfully received http response.\n");
+                LOG_INFO("Successfully received http response.");
 
                 http_request_status->bytes_received = rsp->body_frag_len;
                 http_request_status->buffer_frag_start = rsp->body_frag_start;
@@ -126,7 +126,7 @@ static void assemble_url(struct http_request* request, char* sae_ID, char* type_
 {
         if ((request == NULL) || (sae_ID == NULL) || (type_url == NULL))
         {
-                LOG_ERROR("invalid parameter configuration in url assembly\n");
+                LOG_ERROR("invalid parameter configuration in url assembly");
                 return;
         }
 
@@ -151,7 +151,7 @@ static void assemble_url(struct http_request* request, char* sae_ID, char* type_
         request->url = (char*) malloc(total_len);
         if (request->url == NULL)
         {
-                LOG_ERROR("memory allocation failed in url assembly\n");
+                LOG_ERROR("memory allocation failed in url assembly");
                 return;
         }
 
@@ -194,7 +194,7 @@ static void populate_request_url(struct http_request* request,
                 break;
 
         default:
-                LOG_ERROR("invalid state of message type\n");
+                LOG_ERROR("invalid state of message type");
                 break;
         }
 }
@@ -207,7 +207,7 @@ struct http_request* allocate_http_request()
         request = malloc(sizeof(struct http_request));
         if (request == NULL)
         {
-                LOG_ERROR("failed to allocate HTTP-GET request.\n");
+                LOG_ERROR("failed to allocate HTTP-GET request.");
                 goto ALLOC_ERR;
         }
 
@@ -237,7 +237,7 @@ void populate_http_request(struct http_request* request,
         char* hostport_str = malloc(6); // Max length for port is 5 digits + null terminator
         if (hostport_str == NULL)
         {
-                LOG_ERROR("failed to allocate memory for hostport string.\n");
+                LOG_ERROR("failed to allocate memory for hostport string.");
                 request->port = NULL;
                 return;
         }

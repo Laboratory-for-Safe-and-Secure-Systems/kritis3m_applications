@@ -14,7 +14,7 @@ static struct qkd_key_info* allocate_key_info()
         key_info = malloc(sizeof(struct qkd_key_info));
         if (key_info == NULL)
         {
-                LOG_ERROR("failed to allocate HTTP-GET response key_info parameter.\n");
+                LOG_ERROR("failed to allocate HTTP-GET response key_info parameter.");
                 goto ALLOC_ERR;
         }
 
@@ -32,7 +32,7 @@ struct http_get_response* allocate_http_response()
         response = malloc(sizeof(struct http_get_response));
         if (response == NULL)
         {
-                LOG_ERROR("failed to allocate HTTP-GET response.\n");
+                LOG_ERROR("failed to allocate HTTP-GET response.");
                 goto ALLOC_ERR;
         }
 

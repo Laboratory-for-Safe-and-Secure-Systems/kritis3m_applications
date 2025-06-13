@@ -36,7 +36,7 @@ static enum kritis3m_status_info derive_connection_parameter(quest_endpoint* end
                   IP_str,
                   sizeof(IP_str));
 
-        LOG_INFO("IP address for %s: %s:%s\n",
+        LOG_INFO("IP address for %s: %s:%s",
                  endpoint->connection_info.hostname,
                  IP_str,
                  endpoint->connection_info.hostport);

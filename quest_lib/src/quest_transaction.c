@@ -26,7 +26,7 @@ static enum kritis3m_status_info establish_host_connection(quest_transaction* qk
 
         if (qkd_transaction->endpoint->connection_info.socket_fd < 0)
         {
-                LOG_ERROR("connection failed, error code: %d\n", errno);
+                LOG_ERROR("connection failed, error code: %d", errno);
                 status = SOCKET_ERR;
                 goto SOCKET_CON_ERR;
         }
@@ -35,7 +35,7 @@ static enum kritis3m_status_info establish_host_connection(quest_transaction* qk
                     (struct sockaddr*) qkd_transaction->endpoint->connection_info.target_addr->ai_addr,
                     qkd_transaction->endpoint->connection_info.target_addr->ai_addrlen) < 0)
         {
-                LOG_ERROR("connection failed, error code: %d\n", errno);
+                LOG_ERROR("connection failed, error code: %d", errno);
                 status = SOCKET_ERR;
                 goto SOCKET_CON_ERR;
         }
@@ -49,14 +49,14 @@ static enum kritis3m_status_info establish_host_connection(quest_transaction* qk
 
                 if (qkd_transaction->security_param.tls_session == NULL)
                 {
-                        LOG_ERROR("failed to establish tls session.\n");
+                        LOG_ERROR("failed to establish tls session.");
                         status = ASL_ERR;
                         goto SOCKET_CON_ERR;
                 }
 
                 if (asl_handshake(qkd_transaction->security_param.tls_session) < 0)
                 {
-                        LOG_ERROR("tls handshake unsuccessful.\n");
+                        LOG_ERROR("tls handshake unsuccessful.");
                         status = ASL_ERR;
                         goto SOCKET_CON_ERR;
                 }
@@ -195,7 +195,7 @@ enum kritis3m_status_info quest_execute_transaction(quest_transaction* qkd_trans
         status = establish_host_connection(qkd_transaction);
         if (status < E_OK)
         {
-                LOG_ERROR("establishing host connection was unsuccessful, error code %d\n", errno);
+                LOG_ERROR("establishing host connection was unsuccessful, error code %d", status);
                 goto QKD_CON_ERR;
         }
 
@@ -219,7 +219,7 @@ enum kritis3m_status_info quest_execute_transaction(quest_transaction* qkd_trans
 
         if (total_bytes_sent < 0)
         {
-                LOG_ERROR("failed to send HTTP-GET request, error code: %d\n", status);
+                LOG_ERROR("failed to send HTTP-GET request, error code: %dn", total_bytes_sent);
                 status = CON_ERR;
         }
         else
