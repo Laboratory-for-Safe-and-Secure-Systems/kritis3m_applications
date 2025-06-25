@@ -500,6 +500,9 @@ static void* network_tester_main_thread(void* ptr)
                         asl_close_session(tester->tls_session);
                         asl_free_session(tester->tls_session);
                         tester->tls_session = NULL;
+
+                        struct timespec delay = {.tv_sec = 0, .tv_nsec = 2 * 1000000};
+                        nanosleep(&delay, NULL);
                 }
 
                 closesocket(tester->tcp_socket);
@@ -528,7 +531,10 @@ static void* network_tester_main_thread(void* ptr)
 
                 if (tester->config->handshake_test.delay_ms > 0)
                 {
-                        usleep(tester->config->handshake_test.delay_ms * 1000);
+                        struct timespec delay;
+                        delay.tv_sec = tester->config->handshake_test.delay_ms / 1000;
+                        delay.tv_nsec = (tester->config->handshake_test.delay_ms % 1000) * 1000000;
+                        nanosleep(&delay, NULL);
                 }
 
                 handshake_count += 1;
@@ -633,7 +639,7 @@ static int read_management_message(int socket, network_tester_management_message
                 /* No message available on the non-blocking socket. This error condition is no
                  * actual error in this application. We indicate that with the +1 return value.
                  */
-                LOG_DEBUG("No message available");
+                // LOG_DEBUG("No message available");
                 return 1;
         }
         else if (ret < 0)
@@ -719,6 +725,7 @@ static void tester_cleanup(network_tester* tester)
         if ((tester->config->use_tls == true) && (tester->tls_session != NULL))
         {
                 asl_free_session(tester->tls_session);
+                tester->tls_session = NULL;
         }
         if ((tester->config->use_tls == true) && (tester->tls_endpoint != NULL))
         {

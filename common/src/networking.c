@@ -332,7 +332,7 @@ static void iface_cb(struct net_if* iface, void* user_data)
 }
 
 /* Callback for ethernet link events */
-static void iface_up_handler(struct net_mgmt_event_callback* cb, uint32_t mgmt_event, struct net_if* iface)
+static void iface_up_handler(struct net_mgmt_event_callback* cb, uint64_t mgmt_event, struct net_if* iface)
 {
         const char* status = "err";
 
