@@ -205,6 +205,8 @@ static int network_init(network_tester* tester)
         {
                 LOG_DEBUG("Setting up TLS client endpoint");
 
+                tester->config->tls_config.server_name = tester->config->target_ip;
+
                 tester->tls_endpoint = asl_setup_client_endpoint(&tester->config->tls_config);
                 if (tester->tls_endpoint == NULL)
                         ERROR_OUT("Error creating TLS endpoint");

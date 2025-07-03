@@ -64,14 +64,12 @@ Z_KERNEL_STACK_DEFINE_IN(backend_stack,
 #endif
 
 /* Internal method declarations */
-static int add_new_proxy(enum tls_proxy_direction direction, proxy_config const* config);
+static int add_new_proxy(enum tls_proxy_direction direction, proxy_config* config);
 static proxy* find_proxy_by_fd(int fd);
 static proxy* find_proxy_by_id(int id);
 static void kill_proxy(proxy* proxy);
 
-static int handle_management_message(proxy_backend* backend,
-                                     int socket,
-                                     proxy_management_message const* msg);
+static int handle_management_message(proxy_backend* backend, int socket, proxy_management_message* msg);
 static void kill_all_proxies(proxy_backend* backend);
 static void asl_log_callback(int32_t level, char const* message);
 static void* proxy_backend_thread(void* ptr);
@@ -142,7 +140,7 @@ int proxy_backend_init(proxy_backend* backend, proxy_backend_config const* confi
 }
 
 /* Create a new proxy and add it to the main event loop */
-static int add_new_proxy(enum tls_proxy_direction direction, proxy_config const* config)
+static int add_new_proxy(enum tls_proxy_direction direction, proxy_config* config)
 {
         struct addrinfo* bind_addr = NULL;
 
@@ -176,28 +174,6 @@ static int add_new_proxy(enum tls_proxy_direction direction, proxy_config const*
         snprintf(log_module_name, 32, "tls_proxy_%d", freeSlot + 1);
         proxy->log_module.name = log_module_name;
         proxy->log_module.level = config->log_level;
-
-        if (direction == REVERSE_PROXY)
-        {
-                LOG_INFO_EX(proxy->log_module,
-                            "Starting new reverse proxy on port %d",
-                            config->listening_port);
-
-                /* Create the TLS endpoint */
-                proxy->tls_endpoint = asl_setup_server_endpoint(&config->tls_config);
-        }
-        else if (direction == FORWARD_PROXY)
-        {
-                LOG_INFO_EX(proxy->log_module,
-                            "Starting new forward proxy to %s:%d",
-                            config->target_ip_address,
-                            config->target_port);
-
-                /* Create the TLS endpoint */
-                proxy->tls_endpoint = asl_setup_client_endpoint(&config->tls_config);
-        }
-        if (proxy->tls_endpoint == NULL)
-                ERROR_OUT_EX(proxy->log_module, "Error creating TLS endpoint");
 
         /* Create the TCP sockets for the incoming connections (IPv4 and IPv6).
          * Do a DNS lookup to make sure we have an IP address. If we already have an IP, this
@@ -242,6 +218,30 @@ static int add_new_proxy(enum tls_proxy_direction direction, proxy_config const*
                                   &proxy->target_addr,
                                   AF_UNSPEC) < 0)
                 ERROR_OUT_EX(proxy->log_module, "Error looking up target IP address");
+
+        if (direction == REVERSE_PROXY)
+        {
+                LOG_INFO_EX(proxy->log_module,
+                            "Starting new reverse proxy on port %d",
+                            config->listening_port);
+
+                /* Create the TLS endpoint */
+                proxy->tls_endpoint = asl_setup_server_endpoint(&config->tls_config);
+        }
+        else if (direction == FORWARD_PROXY)
+        {
+                LOG_INFO_EX(proxy->log_module,
+                            "Starting new forward proxy to %s:%d",
+                            config->target_ip_address,
+                            config->target_port);
+
+                config->tls_config.server_name = config->target_ip_address;
+
+                /* Create the TLS endpoint */
+                proxy->tls_endpoint = asl_setup_client_endpoint(&config->tls_config);
+        }
+        if (proxy->tls_endpoint == NULL)
+                ERROR_OUT_EX(proxy->log_module, "Error creating TLS endpoint");
 
         LOG_DEBUG_EX(proxy->log_module,
                      "Waiting for incoming connections on port %d",
@@ -367,9 +367,7 @@ static void kill_proxy(proxy* proxy)
  * Return 0 in case the message has been processed successfully, -1 otherwise. In case the
  * connection thread has to be stopped and the connection has to be cleaned up, +1 in returned.
  */
-static int handle_management_message(proxy_backend* backend,
-                                     int socket,
-                                     proxy_management_message const* msg)
+static int handle_management_message(proxy_backend* backend, int socket, proxy_management_message* msg)
 {
         int ret = 0;
 
