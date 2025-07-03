@@ -256,12 +256,28 @@ int read_certificates(struct certificates* certs)
         /* Read root certificate */
         if (certs->root_path != NULL)
         {
-                certs->root_buffer_size = 0;
-                ret = read_file(certs->root_path, &certs->root_buffer, &certs->root_buffer_size);
-                if (ret < 0)
+                /* `-1` on the IDENTIFIER_LEN to exclude the ":" at the end, as we don't have a label for root certs */
+                if (strncmp(certs->root_path, PKCS11_LABEL_IDENTIFIER, PKCS11_LABEL_IDENTIFIER_LEN - 1) ==
+                    0)
                 {
-                        LOG_ERROR("unable to read root certificate from file %s", certs->root_path);
-                        goto error;
+                        certs->root_buffer = (uint8_t*) duplicate_string(certs->root_path);
+                        if (certs->root_buffer == NULL)
+                        {
+                                LOG_ERROR("unable to allocate memory for root cert pkcs11 label");
+                                goto error;
+                        }
+                        certs->root_buffer_size = strlen(certs->root_path) + 1;
+                }
+                else
+                {
+                        certs->root_buffer_size = 0;
+                        ret = read_file(certs->root_path, &certs->root_buffer, &certs->root_buffer_size);
+                        if (ret < 0)
+                        {
+                                LOG_ERROR("unable to read root certificate from file %s",
+                                          certs->root_path);
+                                goto error;
+                        }
                 }
         }
 
