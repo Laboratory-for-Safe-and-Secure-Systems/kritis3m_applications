@@ -40,7 +40,9 @@
 #include "http_parser.h"
 
 /* GCC 7+ and Clang support fallthrough attribute */
+#ifndef __fallthrough
 #define __fallthrough __attribute__((fallthrough))
+#endif
 
 #ifndef ULLONG_MAX
 #define ULLONG_MAX ((uint64_t) -1) /* 2^64-1 */
