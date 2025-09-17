@@ -15,8 +15,8 @@ typedef struct timing_metrics_results
         /* All timing values are in microseconds */
 
         size_t num_measurements;
-        uint32_t min;
-        uint32_t max;
+        float min;
+        float max;
         double avg;
         double std_dev;
         double median;

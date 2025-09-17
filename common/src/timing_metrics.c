@@ -26,7 +26,7 @@ struct timing_metrics
 
         uint32_t measurements_count;
         uint32_t max_measurements;
-        uint32_t* measurements;
+        float* measurements;
 
         char const* name;
         log_module* log_module;
@@ -84,7 +84,7 @@ timing_metrics* timing_metrics_create(char const* name, size_t max_measurements,
 
                 self->measurements_count = 0;
                 self->max_measurements = max_measurements;
-                self->measurements = (uint32_t*) malloc(max_measurements * sizeof(uint32_t));
+                self->measurements = (float*) malloc(max_measurements * sizeof(float));
 
                 if (self->measurements == NULL)
                 {
@@ -123,14 +123,14 @@ void timing_metrics_end_measurement(timing_metrics* metrics)
                 LOG_ERROR_EX(*metrics->log_module, "Error taking timestamp - end_time.");
 
         /* Calculate duration */
-        uint32_t duration_us = (end_time.tv_sec - metrics->last_start_time.tv_sec) * 1000000.0 +
-                               (end_time.tv_nsec - metrics->last_start_time.tv_nsec) / 1000.0;
+        float duration_us = (end_time.tv_sec - metrics->last_start_time.tv_sec) * 1000000.0 +
+                            (end_time.tv_nsec - metrics->last_start_time.tv_nsec) / 1000.0;
 
         /* Store measurement */
         if (metrics->measurements_count < metrics->max_measurements)
         {
                 metrics->measurements[metrics->measurements_count++] = duration_us;
-                LOG_DEBUG_EX(*metrics->log_module, "Duration: %lldus", duration_us);
+                LOG_DEBUG_EX(*metrics->log_module, "Duration: %.2f us", (double) duration_us);
         }
 }
 
@@ -151,16 +151,15 @@ void timing_metrics_get_results(timing_metrics* metrics, timing_metrics_results*
         uint64_t average_sum = 0;
 
         /* Copy the array */
-        uint32_t* measurements_copy = (uint32_t*) malloc(metrics->measurements_count *
-                                                         sizeof(uint32_t));
+        float* measurements_copy = (float*) malloc(metrics->measurements_count * sizeof(uint32_t));
         if (measurements_copy == NULL)
                 /* In case we cannot allocate memory for a copy, we just sort the actual data */
                 measurements_copy = metrics->measurements;
 
-        memcpy(measurements_copy, metrics->measurements, metrics->measurements_count * sizeof(uint32_t));
+        memcpy(measurements_copy, metrics->measurements, metrics->measurements_count * sizeof(float));
 
         /* Sort the measurements */
-        qsort(measurements_copy, metrics->measurements_count, sizeof(uint32_t), compare);
+        qsort(measurements_copy, metrics->measurements_count, sizeof(float), compare);
 
         /* Iterate over measurement array to find min and max and also to
          * sum all elements for average calculation. */
@@ -182,7 +181,7 @@ void timing_metrics_get_results(timing_metrics* metrics, timing_metrics_results*
         double sum = 0;
         for (int i = 0; i < metrics->measurements_count; i++)
         {
-                double diff = metrics->measurements[i] - results->avg;
+                double diff = (double) metrics->measurements[i] - results->avg;
                 sum += diff * diff;
         }
         results->std_dev = sqrt(sum / metrics->measurements_count);
@@ -326,8 +325,8 @@ int timing_metrics_write_to_file(timing_metrics* metrics)
         timing_metrics_get_results(metrics, &results);
 
         /* Write the results to the file */
-        printf("# minimum: %d\n", results.min);
-        printf("# maximum: %d\n", results.max);
+        printf("# minimum: %.2f\n", (double) results.min);
+        printf("# maximum: %.2f\n", (double) results.max);
         printf("# average: %.2f\n", results.avg);
         printf("# standard deviation: %.2f\n", results.std_dev);
         printf("# median: %.2f\n", results.median);
@@ -339,7 +338,7 @@ int timing_metrics_write_to_file(timing_metrics* metrics)
         /* print actual values */
         for (uint32_t i = 0; i < metrics->measurements_count; i++)
         {
-                printf("%d\n", metrics->measurements[i]);
+                printf("%.2f\n", (double) metrics->measurements[i]);
         }
 
         /* Print separator */
@@ -381,7 +380,7 @@ int timing_metrics_write_to_file(timing_metrics* metrics)
 
         for (uint32_t i = 0; i < metrics->measurements_count; i++)
         {
-                fprintf(fptr, "%d\n", metrics->measurements[i]);
+                fprintf(fptr, "%.3f\n", metrics->measurements[i]);
         }
 
 cleanup:
