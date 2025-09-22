@@ -4,22 +4,22 @@
 #include <stdint.h>
 
 #if defined(_WIN32)
-        #include <winsock2.h>
+#include <winsock2.h>
 #else
-        #include <poll.h>
-        #include <sys/socket.h>
+#include <poll.h>
+#include <sys/socket.h>
 #endif
 
 #ifdef CONFIG_NET_SOCKETS_POLL_MAX
-        #define NUM_FDS CONFIG_NET_SOCKETS_POLL_MAX
+#define NUM_FDS CONFIG_NET_SOCKETS_POLL_MAX
 #else
-        #define NUM_FDS 30
+#define NUM_FDS 30
 #endif
 
 typedef struct poll_set
 {
         struct pollfd fds[NUM_FDS];
-        int num_fds;
+        uint32_t num_fds;
 } poll_set;
 
 /* Method declarations for interacting with a poll set */
