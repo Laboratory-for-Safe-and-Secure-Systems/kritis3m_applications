@@ -11,6 +11,7 @@
 
 #include <time.h>
 
+#include "file_io.h"
 #include "timing_metrics.h"
 
 #define ERROR_OUT(...)                                                                             \
@@ -28,7 +29,7 @@ struct timing_metrics
         uint32_t max_measurements;
         float* measurements;
 
-        char const* name;
+        char* name;
         log_module* log_module;
 
         char* output_file;
@@ -92,9 +93,15 @@ timing_metrics* timing_metrics_create(char const* name, size_t max_measurements,
                         return NULL;
                 }
 
-                self->name = name;
-                self->log_module = log_module;
+                self->name = duplicate_string(name);
+                if (self->name == NULL)
+                {
+                        free(self->measurements);
+                        free(self);
+                        return NULL;
+                }
 
+                self->log_module = log_module;
                 self->output_file = NULL;
         }
 
@@ -397,6 +404,7 @@ void timing_metrics_destroy(timing_metrics** metrics)
         if (metrics != NULL && *metrics != NULL)
         {
                 free((*metrics)->measurements);
+                free((*metrics)->name);
 
                 if ((*metrics)->output_file != NULL)
                         free((*metrics)->output_file);
