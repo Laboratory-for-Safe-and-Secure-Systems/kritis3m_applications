@@ -367,8 +367,22 @@ int file_exists(const char* filepath)
         else
                 return 0; // File does not exist
 #else
-        LOG_ERROR("File I/O not supported on Zephyr");
-        return -1;
+
+        struct fs_file_t file;
+        int ret;
+
+        // Initialize the file structure
+        fs_file_t_init(&file);
+
+        ret = fs_open(&file, filepath, FS_O_READ);
+        if (ret == 0)
+                ret = 1; // File exists
+        else
+                ret = 0; // File does not exist
+
+        fs_close(&file);
+
+        return ret;
 #endif
 }
 
