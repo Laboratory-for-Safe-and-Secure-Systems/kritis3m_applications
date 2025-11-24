@@ -360,7 +360,21 @@ static void* network_tester_main_thread(void* ptr)
         /* Create the timing metrics for the handshake measurements */
         if (tester->config->handshake_test.iterations > 0)
         {
-                tester->handshake_times = timing_metrics_create("handshake_time",
+                char test_name[128];
+
+                if (tester->config->test_name != NULL)
+                {
+                        snprintf(test_name,
+                                 sizeof(test_name),
+                                 "%s_handshake_time",
+                                 tester->config->test_name);
+                }
+                else
+                {
+                        snprintf(test_name, sizeof(test_name), "handshake_time");
+                }
+
+                tester->handshake_times = timing_metrics_create(test_name,
                                                                 tester->config->handshake_test.iterations,
                                                                 LOG_MODULE_GET());
                 if (tester->handshake_times == NULL)
@@ -370,7 +384,20 @@ static void* network_tester_main_thread(void* ptr)
         /* Create the timing metrics for the message latency measurements. */
         if (tester->config->message_latency_test.iterations > 0)
         {
-                tester->messsage_latency_times = timing_metrics_create("message_latency_time",
+                char test_name[128];
+
+                if (tester->config->test_name != NULL)
+                {
+                        snprintf(test_name,
+                                 sizeof(test_name),
+                                 "%s_message_latency",
+                                 tester->config->test_name);
+                }
+                else
+                {
+                        snprintf(test_name, sizeof(test_name), "message_latency");
+                }
+                tester->messsage_latency_times = timing_metrics_create(test_name,
                                                                        tester->total_iterations,
                                                                        LOG_MODULE_GET());
                 if (tester->messsage_latency_times == NULL)
@@ -774,6 +801,7 @@ network_tester_config network_tester_default_config(void)
         /* Network tester config */
         default_config.log_level = LOG_LVL_WARN;
         default_config.output_path = NULL;
+        default_config.test_name = NULL;
 
         default_config.handshake_test.iterations = 0;
         default_config.handshake_test.delay_ms = 0;

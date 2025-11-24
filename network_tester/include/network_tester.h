@@ -11,6 +11,7 @@ typedef struct network_tester_config
         int32_t log_level;
 
         char* output_path;
+        char* test_name;
 
         struct handshake_test
         {
@@ -32,6 +33,7 @@ typedef struct network_tester_config
 
         bool use_tls;
         asl_endpoint_configuration tls_config;
+
 } network_tester_config;
 
 typedef struct network_tester_status
