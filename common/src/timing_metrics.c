@@ -276,16 +276,11 @@ int timing_metrics_prepare_output_file(timing_metrics* metrics, char const* path
                 strcat(metrics->output_file, ".csv");
 
                 /* Mount / Initializing SD card */
-                int ret = sdcard_control(ENABLE_ACCESS_SDCARD);
+                ret = sdcard_control(ENABLE_ACCESS_SDCARD);
                 if (ret != 0)
-                {
-                        LOG_ERROR_EX(*metrics->log_module,
-                                     "Failed to enable SD card access: %d, Check if SD card "
-                                     "is plugged in",
-                                     ret);
-                        return -1;
-                }
-
+                        ERROR_OUT("Failed to enable SD card access: %d, Check if SD card "
+                                  "is plugged in",
+                                  ret);
                 /* Check if the file already exists */
                 int i = 1;
                 while (file_exists(metrics->output_file))
@@ -316,12 +311,8 @@ int timing_metrics_prepare_output_file(timing_metrics* metrics, char const* path
                         ERROR_OUT("Failed to write header to file %s", metrics->output_file);
         cleanup:
                 /* Shutdown SD card access */
-                ret = sdcard_control(DISABLE_ACCESS_SDCARD);
-                if (ret != 0)
-                {
+                if (sdcard_control(DISABLE_ACCESS_SDCARD) != 0)
                         LOG_ERROR_EX(*metrics->log_module, "Failed to disable SD card access: %d", ret);
-                        return -1;
-                }
 
                 return ret;
         }
@@ -496,6 +487,11 @@ int timing_metrics_write_to_file(timing_metrics* metrics)
                                 ERROR_OUT("Failed to write measurement to file %s",
                                           metrics->output_file);
                 }
+
+                LOG_INFO_EX(*metrics->log_module,
+                            "Successfully wrote %s measurements to %s",
+                            metrics->name,
+                            metrics->output_file);
         cleanup:
                 /* Shutdown SD card access */
                 if (sdcard_control(DISABLE_ACCESS_SDCARD) != 0)
