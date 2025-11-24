@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include "file_io.h"
@@ -12,6 +13,10 @@ LOG_MODULE_CREATE(file_io);
 // asl defines
 #define PKCS11_LABEL_IDENTIFIER "pkcs11:"
 #define PKCS11_LABEL_IDENTIFIER_LEN 7
+
+#ifdef __ZEPHYR__
+
+#endif
 
 int read_file(const char* filePath, uint8_t** buffer, size_t* bytesInBuffer)
 {
@@ -84,8 +89,87 @@ int read_file(const char* filePath, uint8_t** buffer, size_t* bytesInBuffer)
 
         return bytesRead;
 #else
-        LOG_ERROR("File I/O not supported on Zephyr");
-        return -1;
+
+        struct fs_file_t file;
+        struct fs_dirent stat;
+        uint8_t* destination = NULL;
+        ssize_t bytes_read = 0;
+        int ret;
+
+        if (!buffer || !filePath || !bytesInBuffer)
+                return -1;
+
+        /* Initialize the file structure */
+        fs_file_t_init(&file);
+
+        /* Open the file */
+        ret = fs_open(&file, filePath, FS_O_READ);
+        if (ret < 0)
+        {
+                LOG_ERROR("[read_file]: file (%s) cannot be opened (err %d)", filePath, ret);
+                return -1;
+        }
+        LOG_INFO("[read_file]: file %s opened successfully", filePath);
+
+        /* Get the file size */
+        ret = fs_stat(filePath, &stat);
+        if (ret < 0)
+        {
+                LOG_ERROR("[read_file]: fs_stat failed for %s (err %d)", filePath, ret);
+                fs_close(&file);
+                return -1;
+        }
+        off_t fileSize = stat.size;
+        LOG_INFO("[read_file]: file %s has size %ld bytes", filePath, fileSize);
+
+        /* Allocate buffer for file content. We allocate one byte more to store a NULL
+         * byte after the read file content. This makes sure that in case we read an
+         * ASCII string from the file, the string is properly null-terminated. */
+        if ((*buffer == NULL) && (*bytesInBuffer == 0))
+        {
+                *buffer = (uint8_t*) malloc(fileSize + 1);
+                destination = *buffer;
+        }
+        else if ((*buffer != NULL) && (*bytesInBuffer > 0))
+        {
+                *buffer = (uint8_t*) realloc(*buffer, *bytesInBuffer + fileSize + 1);
+                destination = *buffer + *bytesInBuffer;
+        }
+        else
+        {
+                LOG_ERROR("invalid file read setup from %s", filePath);
+                fs_close(&file);
+                return -1;
+        }
+
+        if (*buffer == NULL)
+        {
+                LOG_ERROR("unable to allocate memory for file contents of %s", filePath);
+                fs_close(&file);
+                return -1;
+        }
+
+        /* Read file to buffer */
+        bytes_read = fs_read(&file, *buffer + *bytesInBuffer, fileSize);
+        if (bytes_read < 0)
+        {
+                LOG_ERROR("[read_file]: fs_read failed for %s (err %d)", filePath, bytes_read);
+                fs_close(&file);
+                return -1;
+        }
+        LOG_INFO("[read_file]: read %zd bytes from %s", bytes_read, filePath);
+
+        // Update buffer length
+        *bytesInBuffer += bytes_read;
+
+        // Write the NULL byte to terminate a potential ASCII string
+        (*buffer)[*bytesInBuffer] = '\0';
+
+        // Close the file
+        fs_close(&file);
+        LOG_INFO("[read_file]: file %s closed successfully", filePath);
+
+        return bytes_read;
 #endif
 }
 
@@ -428,7 +512,51 @@ error_occured:
                 fclose(file);
         return -1;
 #else
-        LOG_ERROR("File I/O not supported on Zephyr");
+
+        struct fs_file_t file;
+        int ret;
+
+        if (!file_path || !buffer || (buffer_size == 0))
+        {
+                LOG_ERROR("file_path, buffer or buffer_size is 0 or NULL");
+                goto error_occured;
+        }
+
+        /* Initialize the file structure */
+        fs_file_t_init(&file);
+
+        /* Open the file */
+        fs_mode_t flags = append ? (FS_O_WRITE | FS_O_CREATE | FS_O_APPEND) :
+                                   (FS_O_WRITE | FS_O_CREATE | FS_O_TRUNC);
+        ret = fs_open(&file, file_path, flags);
+        if (ret < 0)
+        {
+                LOG_ERROR("[read_file]: file (%s) cannot be opened (err %d)", file_path, ret);
+                goto error_occured;
+        }
+        LOG_INFO("[read_file]: file %s opened successfully", file_path);
+
+        /* Write buffer to file */
+        size_t bytesWriten = 0;
+        uint8_t const* ptr = buffer;
+        while (bytesWriten < buffer_size)
+        {
+                int written = fs_write(&file, ptr, buffer_size - bytesWriten);
+                if (written < 0)
+                {
+                        LOG_ERROR("Error writing buffer to file: %s\n", file_path);
+                        goto error_occured;
+                }
+                bytesWriten += written;
+                ptr += written;
+        }
+
+        fs_close(&file);
+
+        return 0;
+
+error_occured:
+        fs_close(&file);
         return -1;
 #endif
 }

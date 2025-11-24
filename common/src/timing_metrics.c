@@ -14,6 +14,12 @@
 #include "file_io.h"
 #include "timing_metrics.h"
 
+#if defined(__ZEPHYR__)
+
+#include "sdcard_interface.h"
+
+#endif
+
 #define ERROR_OUT(...)                                                                             \
         {                                                                                          \
                 LOG_ERROR_EX(*metrics->log_module, __VA_ARGS__);                                   \
@@ -228,29 +234,98 @@ void timing_metrics_get_results(timing_metrics* metrics, timing_metrics_results*
  */
 int timing_metrics_prepare_output_file(timing_metrics* metrics, char const* path)
 {
-#if defined(__ZEPHYR__) || defined(_WIN32)
+#if defined(_WIN32)
+        LOG_ERROR_EX(*metrics->log_module,
+                     "timing_metrics_prepare_output_file not implemented on Windows.");
+        return -1; /* Not implemented on Windows */
+
+#elif defined(__ZEPHYR__)
+        int ret = 0;
+
         if (metrics == NULL)
                 return 0; /* No error */
 
         if (path == NULL)
                 return -1;
-        else if (strcmp(path, "stdout") != 0)
+        else if (strcmp(path, "stdout") == 0)
         {
-                LOG_ERROR_EX(*metrics->log_module, "Only stdout is supported on Zephyr.");
-                return -1;
+                metrics->output_file = (char*) malloc(16);
+                if (metrics->output_file == NULL)
+                {
+                        LOG_ERROR_EX(*metrics->log_module, "Failed to allocate memory for file path.");
+                        return -1;
+                }
+                strcpy(metrics->output_file, path);
+                LOG_INFO_EX(*metrics->log_module, "Printing CSV output to stdout.");
+                return 0;
+        }
+        else
+        {
+                if (metrics->output_file != NULL)
+                        free(metrics->output_file);
+
+                /* Generate the full output filename */
+                metrics->output_file = (char*) malloc(1024);
+                if (metrics->output_file == NULL)
+                        ERROR_OUT("Failed to allocate memory for file path.");
+
+                strcpy(metrics->output_file, "/SD:/measurements/");
+                strcat(metrics->output_file, path);
+                strcat(metrics->output_file, "/");
+                strcat(metrics->output_file, metrics->name);
+                strcat(metrics->output_file, ".csv");
+
+                /* Mount / Initializing SD card */
+                int ret = sdcard_control(ENABLE_ACCESS_SDCARD);
+                if (ret != 0)
+                {
+                        LOG_ERROR_EX(*metrics->log_module,
+                                     "Failed to enable SD card access: %d, Check if SD card "
+                                     "is plugged in",
+                                     ret);
+                        return -1;
+                }
+
+                /* Check if the file already exists */
+                int i = 1;
+                while (file_exists(metrics->output_file))
+                {
+                        LOG_DEBUG_EX(*metrics->log_module, "File %s already exists", metrics->output_file);
+
+                        char* filename = strstr(metrics->output_file, metrics->name);
+                        if (filename == NULL)
+                                ERROR_OUT("Error in filename handling.");
+
+                        char* extension = filename + strlen(metrics->name);
+
+                        /* Append a number to the filename */
+                        sprintf(extension, "_%d.csv", i);
+                        i += 1;
+                }
+
+                LOG_INFO_EX(*metrics->log_module, "Output file: %s", metrics->output_file);
+
+                /* Write initial information to the file to test if writing is possible */
+                char header[256];
+                snprintf(header,
+                         sizeof(header),
+                         "# name: %s\n# all measurements are in microseconds\n",
+                         metrics->name);
+                ret = write_file(metrics->output_file, (uint8_t const*) header, strlen(header), false);
+                if (ret < 0)
+                        ERROR_OUT("Failed to write header to file %s", metrics->output_file);
+        cleanup:
+                /* Shutdown SD card access */
+                ret = sdcard_control(DISABLE_ACCESS_SDCARD);
+                if (ret != 0)
+                {
+                        LOG_ERROR_EX(*metrics->log_module, "Failed to disable SD card access: %d", ret);
+                        return -1;
+                }
+
+                return ret;
         }
 
-        metrics->output_file = (char*) malloc(16);
-        if (metrics->output_file == NULL)
-        {
-                LOG_ERROR_EX(*metrics->log_module, "Failed to allocate memory for file path.");
-                return -1;
-        }
-        strcpy(metrics->output_file, path);
-
-        LOG_INFO_EX(*metrics->log_module, "Printing CSV output to %s", metrics->output_file);
-
-        return 0;
 #else
         int ret = 0;
 
@@ -275,7 +350,7 @@ int timing_metrics_prepare_output_file(timing_metrics* metrics, char const* path
 
         /* Check if the file already exists */
         int i = 1;
-        while (access(metrics->output_file, F_OK) == 0)
+        while (file_exists(metrics->output_file))
         {
                 LOG_DEBUG_EX(*metrics->log_module, "File %s already exists", metrics->output_file);
 
@@ -314,44 +389,123 @@ cleanup:
  */
 int timing_metrics_write_to_file(timing_metrics* metrics)
 {
-#if defined(__ZEPHYR__) || defined(_WIN32)
-        if (metrics == NULL || metrics->output_file == NULL ||
-            strcmp(metrics->output_file, "stdout") != 0)
+#if defined(_WIN32)
+        LOG_ERROR_EX(*metrics->log_module,
+                     "timing_metrics_prepare_output_file not implemented on Windows.");
+        return -1; /* Not implemented on Windows */
+
+#elif defined(__ZEPHYR__)
+        int ret = 0;
+
+        if (metrics == NULL || metrics->output_file == NULL)
                 return 0; /* No error */
 
-        /* Print separator */
-        printf("---------- CSV BEGIN ----------\r\n");
-
-        /* Print CSV content to stdout */
-        printf("# name: %s\n", metrics->name);
-        printf("# all measurements are in microseconds\n");
-        printf("# measurements_count: %d\n", metrics->measurements_count);
-
-        /* Get the results of the measurement */
-        timing_metrics_results results = {0};
-        timing_metrics_get_results(metrics, &results);
-
-        /* Write the results to the file */
-        printf("# minimum: %.2f\n", (double) results.min);
-        printf("# maximum: %.2f\n", (double) results.max);
-        printf("# average: %.2f\n", results.avg);
-        printf("# standard deviation: %.2f\n", results.std_dev);
-        printf("# median: %.2f\n", results.median);
-        printf("# 90th percentile: %.0f\n", results.percentile_90);
-        printf("# 99th percentile: %.0f\n", results.percentile_99);
-
-        printf("\nduration\n");
-
-        /* print actual values */
-        for (uint32_t i = 0; i < metrics->measurements_count; i++)
+        if (strcmp(metrics->output_file, "stdout") == 0)
         {
-                printf("%.2f\n", (double) metrics->measurements[i]);
+                /* Print separator */
+                printf("---------- CSV BEGIN ----------\r\n");
+
+                /* Print CSV content to stdout */
+                printf("# name: %s\n", metrics->name);
+                printf("# all measurements are in microseconds\n");
+                printf("# measurements_count: %d\n", metrics->measurements_count);
+
+                /* Get the results of the measurement */
+                timing_metrics_results results = {0};
+                timing_metrics_get_results(metrics, &results);
+
+                /* Write the results to the file */
+                printf("# minimum: %.2f\n", (double) results.min);
+                printf("# maximum: %.2f\n", (double) results.max);
+                printf("# average: %.2f\n", results.avg);
+                printf("# standard deviation: %.2f\n", results.std_dev);
+                printf("# median: %.2f\n", results.median);
+                printf("# 90th percentile: %.0f\n", results.percentile_90);
+                printf("# 99th percentile: %.0f\n", results.percentile_99);
+
+                printf("\nduration\n");
+
+                /* print actual values */
+                for (uint32_t i = 0; i < metrics->measurements_count; i++)
+                {
+                        printf("%.2f\n", (double) metrics->measurements[i]);
+                }
+
+                /* Print separator */
+                printf("---------- CSV END ----------\r\n");
+        }
+        else
+        {
+                /* Mount / Initializing SD card */
+                ret = sdcard_control(ENABLE_ACCESS_SDCARD);
+                if (ret != 0)
+                {
+                        LOG_ERROR_EX(*metrics->log_module,
+                                     "Failed to enable SD card access: %d, Check if SD card "
+                                     "is plugged in",
+                                     ret);
+                        return -1;
+                }
+
+                /* Check if the file still exists */
+                if (!file_exists(metrics->output_file))
+                        ERROR_OUT("File %s doesn't exist", metrics->output_file);
+
+                /* Get the results of the measurement */
+                timing_metrics_results results = {0};
+                timing_metrics_get_results(metrics, &results);
+
+                /* Write the results to the file */
+                char write_buf[512];
+                snprintf(write_buf,
+                         sizeof(write_buf),
+                         "# measurements_count: %d\n"
+                         "# minimum: %.2f\n"
+                         "# maximum: %.2f\n"
+                         "# average: %.2f\n"
+                         "# standard deviation: %.2f\n"
+                         "# median: %.2f\n"
+                         "# 90th percentile: %.0f\n"
+                         "# 99th percentile: %.0f\n"
+                         "\nduration\n",
+                         metrics->measurements_count,
+                         (double) results.min,
+                         (double) results.max,
+                         results.avg,
+                         results.std_dev,
+                         results.median,
+                         results.percentile_90,
+                         results.percentile_99);
+
+                ret = write_file(metrics->output_file, (uint8_t const*) write_buf, strlen(write_buf), true);
+                if (ret < 0)
+                        ERROR_OUT("Failed to write results to file %s", metrics->output_file);
+
+                /* Write actual measurements */
+                for (uint32_t i = 0; i < metrics->measurements_count; i++)
+                {
+                        snprintf(write_buf,
+                                 sizeof(write_buf),
+                                 "%.3f\n",
+                                 (double) metrics->measurements[i]);
+                        ret = write_file(metrics->output_file,
+                                         (uint8_t const*) write_buf,
+                                         strlen(write_buf),
+                                         true);
+                        if (ret < 0)
+                                ERROR_OUT("Failed to write measurement to file %s",
+                                          metrics->output_file);
+                }
+        cleanup:
+                /* Shutdown SD card access */
+                if (sdcard_control(DISABLE_ACCESS_SDCARD) != 0)
+                {
+                        LOG_ERROR_EX(*metrics->log_module, "Failed to disable SD card access: %d", ret);
+                        return -1;
+                }
         }
 
-        /* Print separator */
-        printf("---------- CSV END ----------\r\n");
-
-        return 0;
+        return ret;
 #else
         int ret = 0;
 
@@ -359,7 +513,7 @@ int timing_metrics_write_to_file(timing_metrics* metrics)
                 return 0; /* No error */
 
         /* Check if the file still exists */
-        if (access(metrics->output_file, F_OK) != 0)
+        if (!file_exists(metrics->output_file))
         {
                 ERROR_OUT("File %s doesn't exist", metrics->output_file);
         }
