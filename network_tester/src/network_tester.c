@@ -35,6 +35,13 @@ LOG_MODULE_CREATE(network_tester);
                 goto cleanup;                                                                      \
         }
 
+#define ERROR_OUT_INIT(...)                                                                        \
+        {                                                                                          \
+                LOG_ERROR(__VA_ARGS__);                                                            \
+                ret = -1;                                                                          \
+                goto cleanup_init;                                                                 \
+        }
+
 #if defined(__ZEPHYR__)
 
 #define TESTER_STACK_SIZE (32 * 1024)
@@ -315,23 +322,23 @@ static void* network_tester_main_thread(void* ptr)
         if (ret != 0)
                 ERROR_OUT("Error reading start message");
         if (start_msg.type != MANAGEMENT_MSG_START)
-                ERROR_OUT("Received invalid start message");
+                ERROR_OUT_INIT("Received invalid start message");
 
         tester->config = &start_msg.payload.config;
 
         /* Initialize all network related stuff */
         ret = network_init(tester);
         if (ret < 0)
-                ERROR_OUT("Error initializing network structures");
+                ERROR_OUT_INIT("Error initializing network structures");
 
         /* Allocate the buffers for the message exchange */
         if (tester->config->message_latency_test.size <= 0)
-                ERROR_OUT("Invalid message size: %d", tester->config->message_latency_test.size);
+                ERROR_OUT_INIT("Invalid message size: %d", tester->config->message_latency_test.size);
 
         tester->tx_buffer = (uint8_t*) malloc(tester->config->message_latency_test.size);
         tester->rx_buffer = (uint8_t*) malloc(tester->config->message_latency_test.size);
         if ((tester->tx_buffer == NULL) || (tester->rx_buffer == NULL))
-                ERROR_OUT("Error allocating memory for message buffers");
+                ERROR_OUT_INIT("Error allocating memory for message buffers");
 
         /* Fill the message buffer with a known pattern */
         for (size_t i = 0; i < tester->config->message_latency_test.size; i++)
@@ -355,7 +362,7 @@ static void* network_tester_main_thread(void* ptr)
                                            tester->config->message_latency_test.iterations;
 
         if (tester->total_iterations == 0)
-                ERROR_OUT("No measurements to take");
+                ERROR_OUT_INIT("No measurements to take");
 
         /* Create the timing metrics for the handshake measurements */
         if (tester->config->handshake_test.iterations > 0)
@@ -378,7 +385,7 @@ static void* network_tester_main_thread(void* ptr)
                                                                 tester->config->handshake_test.iterations,
                                                                 LOG_MODULE_GET());
                 if (tester->handshake_times == NULL)
-                        ERROR_OUT("Error creating handshake timing metrics");
+                        ERROR_OUT_INIT("Error creating handshake timing metrics");
         }
 
         /* Create the timing metrics for the message latency measurements. */
@@ -401,7 +408,7 @@ static void* network_tester_main_thread(void* ptr)
                                                                        tester->total_iterations,
                                                                        LOG_MODULE_GET());
                 if (tester->messsage_latency_times == NULL)
-                        ERROR_OUT("Error creating message latency timing metrics");
+                        ERROR_OUT_INIT("Error creating message latency timing metrics");
         }
 
         /* Create the output file (if requested) */
@@ -410,12 +417,12 @@ static void* network_tester_main_thread(void* ptr)
                 ret = timing_metrics_prepare_output_file(tester->handshake_times,
                                                          tester->config->output_path);
                 if (ret < 0)
-                        ERROR_OUT("Error creating output file");
+                        ERROR_OUT_INIT("Error creating output file");
 
                 ret = timing_metrics_prepare_output_file(tester->messsage_latency_times,
                                                          tester->config->output_path);
                 if (ret < 0)
-                        ERROR_OUT("Error creating output file");
+                        ERROR_OUT_INIT("Error creating output file");
         }
 
         /* Send the response to the management interface */
@@ -615,6 +622,20 @@ static void* network_tester_main_thread(void* ptr)
                 ERROR_OUT("Error writing results to file");
 
 cleanup:
+        tester->return_code = -ret;
+
+        /* Cleanup */
+        tester_cleanup(tester);
+        terminate_thread(&tester->thread, LOG_MODULE_GET());
+        return NULL;
+
+cleanup_init:
+        /* Send the response to the management interface */
+        start_msg.type = MANAGEMENT_RESPONSE;
+        start_msg.payload.response_code = ret;
+        ret = send_management_message(tester->management_socket_pair[1], &start_msg);
+        if (ret < 0)
+                LOG_ERROR("Error sending response");
         tester->return_code = -ret;
 
         /* Cleanup */
