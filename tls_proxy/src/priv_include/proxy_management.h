@@ -7,8 +7,7 @@
 
 enum proxy_management_message_type
 {
-        REVERSE_PROXY_START_REQUEST,
-        FORWARD_PROXY_START_REQUEST,
+        PROXY_START_REQUEST,
 
         PROXY_STATUS_REQUEST,
 
@@ -33,12 +32,11 @@ typedef struct proxy_management_message
 
         union proxy_management_message_payload
         {
-                proxy_config reverse_proxy_config; /* REVERSE_PROXY_START_REQUEST */
-                proxy_config forward_proxy_config; /* FORWARD_PROXY_START_REQUEST */
-                proxy_status_request status_req;   /* PROXY_STATUS_REQUEST */
-                int proxy_id;                      /* PROXY_STOP_REQUEST */
-                int dummy_unused;  /* CONNECTION_STOP_REQUEST, BACKEND_STOP_REQUEST */
-                int response_code; /* RESPONSE */
+                proxy_config proxy_config;       /* PROXY_START_REQUEST */
+                proxy_status_request status_req; /* PROXY_STATUS_REQUEST */
+                int proxy_id;                    /* PROXY_STOP_REQUEST */
+                int dummy_unused;                /* CONNECTION_STOP_REQUEST, BACKEND_STOP_REQUEST */
+                int response_code;               /* RESPONSE */
 #ifdef USE_MANAGEMENT
                 int mgmt_id; /* PROXY_STOP_REQUEST */
 #endif

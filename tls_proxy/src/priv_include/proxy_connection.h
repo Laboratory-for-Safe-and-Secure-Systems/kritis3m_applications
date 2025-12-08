@@ -15,7 +15,7 @@
 
 #if defined(__ZEPHYR__)
 #define RECV_BUFFER_SIZE 1024
-#define MAX_CONNECTIONS_PER_PROXY 3
+#define MAX_CONNECTIONS_PER_PROXY 10
 #define HANDLER_THREAD_PRIORITY 10
 #else
 #define RECV_BUFFER_SIZE 16384
@@ -30,11 +30,15 @@ typedef struct proxy_connection
 {
         bool in_use;
         bool detached;
-        enum tls_proxy_direction direction;
-        int tunnel_sock;
-        int asset_sock;
-        struct addrinfo* target_addr;
-        asl_session* tls_session;
+        bool incoming_tls;
+        bool incoming_tls_hs_done;
+        bool outgoing_tls;
+        bool outgoing_tls_hs_done;
+        int incoming_sock;
+        int outgoing_sock;
+        struct addrinfo* outgoing_addr;
+        asl_session* incoming_tls_session;
+        asl_session* outgoing_tls_session;
         log_module* log_module;
         proxy* proxy;
         int slot;
@@ -43,11 +47,11 @@ typedef struct proxy_connection
 
         thread_info thread;
 
-        uint8_t tun2ass_buffer[RECV_BUFFER_SIZE];
-        size_t num_of_bytes_in_tun2ass_buffer;
+        uint8_t in2out_buffer[RECV_BUFFER_SIZE];
+        size_t num_of_bytes_in_in2out_buffer;
 
-        uint8_t ass2tun_buffer[RECV_BUFFER_SIZE];
-        size_t num_of_bytes_in_ass2tun_buffer;
+        uint8_t out2in_buffer[RECV_BUFFER_SIZE];
+        size_t num_of_bytes_in_out2in_buffer;
 } proxy_connection;
 
 void init_proxy_connection_pool(void);

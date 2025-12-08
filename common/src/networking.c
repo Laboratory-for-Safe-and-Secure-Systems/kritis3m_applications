@@ -71,25 +71,33 @@ static int is_numeric(char const* str)
  * dynamically and must be freed by the caller.
  * @param port Pointer to a `uint16_t` where the extracted port number will be stored. If no port is
  * provided, it will be set to 0.
+ * @param protocol Pointer to a string where the extracted protocol (e.g., "tcp", "tls") will be
+ * stored. Memory is allocated dynamically and must be freed by the caller.
  * @return 0 on success, -1 on failure (error messages are logged).
  *
  * @note The function supports IPv4, IPv6, and URI formats, and checks for invalid port numbers or
  * malformed input.
  */
-int parse_ip_address(char* input, char** ip, uint16_t* port)
+int parse_ip_address(char* input, char** ip, uint16_t* port, char** protocol)
 {
         /* Search for the first colon.
          *
          * 1) If non is found, we have either only an IPv4 address, or only an URI, or
-         *    only a port number, e.g. "127.0.0.1", "localhost" or "4433".
+         *    only a port number, e.g. "127.0.0.1", "localhost" or "4433". Also, no protocol
+         *    is given in this case.
          *
          * 2) If we only find a single colon, we have either an IPv4 address or an URI
-         *    with a port number, e.g. "127.0.0.1:4433" or "localhost:4433".
+         *    with a port number, e.g. "127.0.0.1:4433" or "localhost:4433", or an IPv4/URI
+         *    with a protocol but no port, or a protocol and only a port. We can separate all
+         *    cases with the "//" following the colon in case of a protocol.
          *
-         * 3) If we find multiple colons, we have an IPv6 address. In this case, we have
+         * 3) If we find two colons, we either already have an IPv6 address without port, or
+         *    we got an IPv4/URI with protocol and port.
+         *
+         * 3) If we find more than two colons, we have an IPv6 address. In this case, we have
          *    to check whether a port is also provided. If so, the IPv6 address must be
-         *    wrapped in square brackets, e.g. "[::1]:4433".
-         *    Otherwise, only an address is given, e.g. "::1".
+         *    wrapped in square brackets, e.g. "[::1]:4433". Otherwise, only an address is
+         *    given, e.g. "::1". We also have to check for a protocol in this case via the "//".
          *
          * Rough code at the momemt, but it works for now...
          * ToDo: Refactor this code to make it more readable and maintainable.
@@ -135,59 +143,42 @@ int parse_ip_address(char* input, char** ip, uint16_t* port)
                         }
                         *port = 0;
                 }
+
+                *protocol = NULL;
         }
         else
         {
-                char* last_colon = strchr(first_colon + 1, ':');
+                char* second_colon = strchr(first_colon + 1, ':');
 
-                if (last_colon == NULL)
+                if (second_colon == NULL)
                 {
                         /* Second case */
-
                         *first_colon = '\0';
-                        *ip = duplicate_string(input);
-                        if (*ip == NULL)
-                        {
-                                LOG_ERROR("unable to allocate memory for IP address");
-                                return -1;
-                        }
-                        unsigned long new_port = strtoul(first_colon + 1, NULL, 10);
-                        if ((new_port == 0) || (new_port > 65535))
-                        {
-                                LOG_ERROR("invalid port number %lu", new_port);
-                                return -1;
-                        }
-                        *port = (uint16_t) new_port;
-                }
-                else
-                {
-                        /* Third case */
 
-                        /* Move to the last colon*/
-                        char* tmp = last_colon;
-                        while ((tmp = strchr(tmp + 1, ':')) != NULL)
+                        char* protocol_sep = strstr(first_colon + 1, "//");
+                        if (protocol_sep != NULL)
                         {
-                                last_colon = tmp;
-                        }
-
-                        if (*(last_colon - 1) == ']')
-                        {
-                                if (*input != '[')
+                                /* Protocol is given */
+                                *protocol = duplicate_string(input);
+                                if (*protocol == NULL)
                                 {
-                                        LOG_ERROR("invalid IPv6 address: %s", input);
+                                        LOG_ERROR("unable to allocate memory for protocol");
                                         return -1;
                                 }
+                                input = protocol_sep + 2;
+                                *port = 0;
+                        }
+                        else
+                        {
+                                *protocol = NULL;
+                                input = first_colon + 1;
+                        }
 
-                                /* Port is given */
-                                *(last_colon - 1) = '\0';
-
-                                *ip = duplicate_string(input + 1);
-                                if (*ip == NULL)
-                                {
-                                        LOG_ERROR("unable to allocate memory for IP address");
-                                        return -1;
-                                }
-                                unsigned long new_port = strtoul(last_colon + 1, NULL, 10);
+                        if (is_numeric(input))
+                        {
+                                /* We have a port number */
+                                *ip = NULL;
+                                unsigned long new_port = strtoul(input, NULL, 10);
                                 if ((new_port == 0) || (new_port > 65535))
                                 {
                                         LOG_ERROR("invalid port number %lu", new_port);
@@ -197,20 +188,7 @@ int parse_ip_address(char* input, char** ip, uint16_t* port)
                         }
                         else
                         {
-                                /* Check if the user wrongly provided a port without square brackets */
-                                *last_colon = '\0';
-                                struct in6_addr addr;
-                                if (net_addr_pton(AF_INET6, input, &addr) == 1)
-                                {
-                                        *last_colon = ':';
-                                        LOG_ERROR("missing square brackets around IPv6 address "
-                                                  "before port: %s",
-                                                  input);
-                                        return -1;
-                                }
-                                *last_colon = ':';
-
-                                /* No port given */
+                                /* We have an URI / IPv4 address */
                                 *ip = duplicate_string(input);
                                 if (*ip == NULL)
                                 {
@@ -218,6 +196,127 @@ int parse_ip_address(char* input, char** ip, uint16_t* port)
                                         return -1;
                                 }
                                 *port = 0;
+                        }
+                }
+                else
+                {
+                        char* third_colon = strchr(second_colon + 1, ':');
+                        char* protocol_sep = strstr(first_colon + 1, "//");
+
+                        if (third_colon == NULL && protocol_sep != NULL)
+                        {
+                                /* Third case */
+
+                                /* Protocol is given */
+                                *first_colon = '\0';
+                                *protocol = duplicate_string(input);
+                                if (*protocol == NULL)
+                                {
+                                        LOG_ERROR("unable to allocate memory for protocol");
+                                        return -1;
+                                }
+                                input = protocol_sep + 2;
+
+                                /* Now, extract IP and port */
+                                *second_colon = '\0';
+
+                                *ip = duplicate_string(input);
+                                if (*ip == NULL)
+                                {
+                                        LOG_ERROR("unable to allocate memory for IP address");
+                                        return -1;
+                                }
+
+                                unsigned long new_port = strtoul(second_colon + 1, NULL, 10);
+                                if ((new_port == 0) || (new_port > 65535))
+                                {
+                                        LOG_ERROR("invalid port number %lu", new_port);
+                                        return -1;
+                                }
+                                *port = (uint16_t) new_port;
+                        }
+                        else
+                        {
+                                /* Fourth case */
+
+                                /* Move to the last colon*/
+                                char* last_colon = second_colon;
+                                char* tmp = last_colon;
+                                while ((tmp = strchr(tmp + 1, ':')) != NULL)
+                                {
+                                        last_colon = tmp;
+                                }
+
+                                /* Check for protocol */
+                                if (protocol_sep != NULL)
+                                {
+                                        /* Protocol is given */
+                                        *first_colon = '\0';
+                                        *protocol = duplicate_string(input);
+                                        if (*protocol == NULL)
+                                        {
+                                                LOG_ERROR("unable to allocate memory for protocol");
+                                                return -1;
+                                        }
+                                        input = protocol_sep + 2;
+                                }
+                                else
+                                {
+                                        *protocol = NULL;
+                                }
+
+                                if (*(last_colon - 1) == ']')
+                                {
+                                        if (*input != '[')
+                                        {
+                                                LOG_ERROR("invalid IPv6 address: %s", input);
+                                                return -1;
+                                        }
+
+                                        /* Port is given */
+                                        *(last_colon - 1) = '\0';
+
+                                        *ip = duplicate_string(input + 1);
+                                        if (*ip == NULL)
+                                        {
+                                                LOG_ERROR(
+                                                        "unable to allocate memory for IP address");
+                                                return -1;
+                                        }
+                                        unsigned long new_port = strtoul(last_colon + 1, NULL, 10);
+                                        if ((new_port == 0) || (new_port > 65535))
+                                        {
+                                                LOG_ERROR("invalid port number %lu", new_port);
+                                                return -1;
+                                        }
+                                        *port = (uint16_t) new_port;
+                                }
+                                else
+                                {
+                                        /* Check if the user wrongly provided a port without square brackets */
+                                        *last_colon = '\0';
+                                        struct in6_addr addr;
+                                        if (net_addr_pton(AF_INET6, input, &addr) == 1)
+                                        {
+                                                *last_colon = ':';
+                                                LOG_ERROR("missing square brackets around IPv6 "
+                                                          "address "
+                                                          "before port: %s",
+                                                          input);
+                                                return -1;
+                                        }
+                                        *last_colon = ':';
+
+                                        /* No port given */
+                                        *ip = duplicate_string(input);
+                                        if (*ip == NULL)
+                                        {
+                                                LOG_ERROR(
+                                                        "unable to allocate memory for IP address");
+                                                return -1;
+                                        }
+                                        *port = 0;
+                                }
                         }
                 }
         }

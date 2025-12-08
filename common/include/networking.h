@@ -94,12 +94,14 @@ int configure_peer_socket(int peer_sock);
  * dynamically and must be freed by the caller.
  * @param port Pointer to a `uint16_t` where the extracted port number will be stored. If no port is
  * provided, it will be set to 0.
+ * @param protocol Pointer to a string where the extracted protocol (e.g., "tcp", "tls") will be
+ * stored. Memory is allocated dynamically and must be freed by the caller.
  * @return 0 on success, -1 on failure (error messages are logged).
  *
  * @note The function supports IPv4, IPv6, and URI formats, and checks for invalid port numbers or
  * malformed input.
  */
-int parse_ip_address(char* input, char** ip, uint16_t* port);
+int parse_ip_address(char* input, char** ip, uint16_t* port, char** protocol);
 
 int parse_ip_cidr(const char* ip_cidr, char* ip_addr, size_t ip_len, char* cidr, size_t cidr_len);
 

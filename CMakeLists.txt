@@ -4,7 +4,7 @@ option(ENABLE_TCP_CLIENT_STDIN_BRIDGE "Enable TCP client stdin bridge" ON)
 option(ENABLE_TLS_PROXY "Enable TLS proxy" ON)
 option(ENABLE_NETWORK_TESTER "Enable network tester" ON)
 option(ENABLE_HTTP_LIBS "Enable HTTP(S) libraries" ON) # required for Scale Service and QUEST lib
-option(ENABLE_MANAGEMENT "Enable Scale management" ON)
+option(ENABLE_MANAGEMENT "Enable Scale management" OFF)
 option(ENABLE_QUEST_LIB "Enable QUEST lib" ON)
 
 option(ENABLE_STACK_USAGE_REPORTING "Enable stack usage reporting" OFF)

@@ -38,11 +38,13 @@ typedef struct proxy
 {
         int application_id; // holds the application idenetifier
         bool in_use;
-        enum tls_proxy_direction direction;
+        bool incoming_tls;
+        bool outgoing_tls;
         int incoming_sock[2];      // IPv4 and IPv6
         uint16_t incoming_port[2]; // IPv4 and IPv6
-        struct addrinfo* target_addr;
-        asl_endpoint* tls_endpoint;
+        struct addrinfo* outgoing_addr;
+        asl_endpoint* incoming_tls_endpoint;
+        asl_endpoint* outgoing_tls_endpoint;
         log_module log_module;
         int num_connections;
         proxy_connection* connections[MAX_CONNECTIONS_PER_PROXY];

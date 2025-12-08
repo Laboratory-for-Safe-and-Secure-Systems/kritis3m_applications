@@ -39,7 +39,7 @@
 static proxy_connection proxy_connection_pool[MAX_CONNECTIONS_PER_PROXY]
         __attribute__((section(CONFIG_RAM_SECTION_STACKS_2)));
 
-#define CONNECTION_HANDLER_STACK_SIZE (8 * 1024)
+#define CONNECTION_HANDLER_STACK_SIZE (4 * 1024)
 Z_KERNEL_STACK_ARRAY_DEFINE_IN(connection_handler_stack_pool,
                                MAX_CONNECTIONS_PER_PROXY,
                                CONNECTION_HANDLER_STACK_SIZE,
@@ -55,8 +55,8 @@ static proxy_connection proxy_connection_pool[MAX_CONNECTIONS_PER_PROXY];
 static int handle_management_message(proxy_connection* connection,
                                      int socket,
                                      proxy_management_message const* msg);
-static bool handle_tunnel_to_asset(proxy_connection* connection, short event, poll_set* poll_set);
-static bool handle_asset_to_tunnel(proxy_connection* connection, short event, poll_set* poll_set);
+static bool handle_in2out(proxy_connection* connection, short event, poll_set* poll_set);
+static bool handle_out2in(proxy_connection* connection, short event, poll_set* poll_set);
 static void* connection_handler_thread(void* ptr);
 
 void init_proxy_connection_pool(void)
@@ -65,18 +65,22 @@ void init_proxy_connection_pool(void)
         {
                 proxy_connection_pool[i].in_use = false;
                 proxy_connection_pool[i].detached = false;
-                proxy_connection_pool[i].direction = REVERSE_PROXY;
-                proxy_connection_pool[i].tunnel_sock = -1;
-                proxy_connection_pool[i].asset_sock = -1;
-                proxy_connection_pool[i].target_addr = NULL;
-                proxy_connection_pool[i].tls_session = NULL;
+                proxy_connection_pool[i].incoming_tls = false;
+                proxy_connection_pool[i].incoming_tls_hs_done = false;
+                proxy_connection_pool[i].outgoing_tls = false;
+                proxy_connection_pool[i].outgoing_tls_hs_done = false;
+                proxy_connection_pool[i].incoming_sock = -1;
+                proxy_connection_pool[i].outgoing_sock = -1;
+                proxy_connection_pool[i].outgoing_addr = NULL;
+                proxy_connection_pool[i].incoming_tls_session = NULL;
+                proxy_connection_pool[i].outgoing_tls_session = NULL;
                 proxy_connection_pool[i].log_module = NULL;
                 proxy_connection_pool[i].proxy = NULL;
                 proxy_connection_pool[i].slot = -1;
                 proxy_connection_pool[i].management_socket_pair[0] = -1;
                 proxy_connection_pool[i].management_socket_pair[1] = -1;
-                proxy_connection_pool[i].num_of_bytes_in_tun2ass_buffer = 0;
-                proxy_connection_pool[i].num_of_bytes_in_ass2tun_buffer = 0;
+                proxy_connection_pool[i].num_of_bytes_in_in2out_buffer = 0;
+                proxy_connection_pool[i].num_of_bytes_in_out2in_buffer = 0;
         }
 }
 
@@ -121,9 +125,10 @@ proxy_connection* add_new_connection_to_proxy(proxy* proxy,
         /* Store new client data */
         connection->in_use = true;
         connection->detached = false;
-        connection->direction = proxy->direction;
+        connection->incoming_tls = proxy->incoming_tls;
+        connection->outgoing_tls = proxy->outgoing_tls;
         connection->slot = freeSlotConnectionPool;
-        connection->target_addr = proxy->target_addr;
+        connection->outgoing_addr = proxy->outgoing_addr;
         connection->log_module = &proxy->log_module;
         connection->proxy = proxy;
 
@@ -132,29 +137,21 @@ proxy_connection* add_new_connection_to_proxy(proxy* proxy,
                 ERROR_OUT_EX(proxy->log_module, "Error configuring peer socket");
 
         /* Create the client socket to the other peer */
-        int target_sock = create_client_socket(connection->target_addr->ai_family);
+        int target_sock = create_client_socket(connection->outgoing_addr->ai_family);
         if (target_sock == -1)
                 ERROR_OUT_EX(proxy->log_module, "Error creating target socket, errno: %d", errno);
 
-        if (connection->direction == FORWARD_PROXY)
-        {
-                connection->asset_sock = client_socket;
-                connection->tunnel_sock = target_sock;
-        }
-        else if (connection->direction == REVERSE_PROXY)
-        {
-                connection->asset_sock = target_sock;
-                connection->tunnel_sock = client_socket;
-        }
+        connection->incoming_sock = client_socket;
+        connection->outgoing_sock = target_sock;
 
         /* Set sockets non-blocking */
-        setblocking(connection->tunnel_sock, false);
-        setblocking(connection->asset_sock, false);
+        setblocking(connection->incoming_sock, false);
+        setblocking(connection->outgoing_sock, false);
 
         /* Connect to the peer */
         ret = connect(target_sock,
-                      (struct sockaddr*) connection->target_addr->ai_addr,
-                      connection->target_addr->ai_addrlen);
+                      (struct sockaddr*) connection->outgoing_addr->ai_addr,
+                      connection->outgoing_addr->ai_addrlen);
 
         if ((ret != 0) &&
 #if defined(_WIN32)
@@ -164,10 +161,21 @@ proxy_connection* add_new_connection_to_proxy(proxy* proxy,
 #endif
                 ERROR_OUT_EX(proxy->log_module, "Unable to connect to target peer, errno: %d", errno);
 
-        /* Create a new TLS session on the destined interface depending on the direction */
-        connection->tls_session = asl_create_session(proxy->tls_endpoint, connection->tunnel_sock);
-        if (connection->tls_session == NULL)
-                ERROR_OUT_EX(proxy->log_module, "Error creating TLS session");
+        /* Create a new TLS session on the destined interfaces */
+        if (connection->incoming_tls)
+        {
+                connection->incoming_tls_session = asl_create_session(proxy->incoming_tls_endpoint,
+                                                                      connection->incoming_sock);
+                if (connection->incoming_tls_session == NULL)
+                        ERROR_OUT_EX(proxy->log_module, "Error creating incoming TLS session");
+        }
+        if (connection->outgoing_tls)
+        {
+                connection->outgoing_tls_session = asl_create_session(proxy->outgoing_tls_endpoint,
+                                                                      connection->outgoing_sock);
+                if (connection->outgoing_tls_session == NULL)
+                        ERROR_OUT_EX(proxy->log_module, "Error creating outgoing TLS session");
+        }
 
         /* Store the new connection within the proxy */
         proxy->connections[freeSlotProxyConnectionsArray] = connection;
@@ -204,8 +212,8 @@ proxy_connection* find_proxy_connection_by_fd(int fd)
 {
         for (int i = 0; i < MAX_CONNECTIONS_PER_PROXY; i++)
         {
-                if ((proxy_connection_pool[i].tunnel_sock == fd) ||
-                    (proxy_connection_pool[i].asset_sock == fd))
+                if ((proxy_connection_pool[i].incoming_sock == fd) ||
+                    (proxy_connection_pool[i].outgoing_sock == fd))
                 {
                         return &proxy_connection_pool[i];
                 }
@@ -217,97 +225,36 @@ proxy_connection* find_proxy_connection_by_fd(int fd)
 int proxy_connection_try_next_target(proxy_connection* connection)
 {
         int ret = 0;
-        if (connection->target_addr->ai_next == NULL)
+        if (connection->outgoing_addr->ai_next == NULL)
         {
-                LOG_DEBUG_EX(*connection->log_module, "No more target addresses to try");
+                LOG_DEBUG_EX(*connection->log_module, "No more outgoing addresses to try");
                 return -1;
         }
 
-        connection->target_addr = connection->target_addr->ai_next;
+        connection->outgoing_addr = connection->outgoing_addr->ai_next;
 
-        /* Close the current connection depending on the role */
-        if (connection->direction == REVERSE_PROXY && connection->asset_sock >= 0)
+        /* Close the current connection */
+        if (connection->outgoing_sock >= 0)
         {
                 /* Close current socket */
-                closesocket(connection->asset_sock);
+                closesocket(connection->outgoing_sock);
 
                 /* Create the new socket for the asset connection */
-                connection->asset_sock = socket(connection->target_addr->ai_family,
-                                                SOCK_STREAM,
-                                                IPPROTO_TCP);
-                if (connection->asset_sock == -1)
+                connection->outgoing_sock = create_client_socket(connection->outgoing_addr->ai_family);
+                connection->outgoing_sock = socket(connection->outgoing_addr->ai_family,
+                                                   SOCK_STREAM,
+                                                   IPPROTO_TCP);
+                if (connection->outgoing_sock == -1)
                         ERROR_OUT_EX(*connection->log_module,
-                                     "Error creating asset socket, errno: %d",
+                                     "Error creating outgoing socket, errno: %d",
                                      errno);
 
-                setblocking(connection->asset_sock, false);
+                setblocking(connection->outgoing_sock, false);
 
-                /* Set TCP_NODELAY option to disable Nagle algorithm */
-                if (setsockopt(connection->asset_sock,
-                               IPPROTO_TCP,
-                               TCP_NODELAY,
-                               (char*) &(int) {1},
-                               sizeof(int)) < 0)
-                        ERROR_OUT_EX(*connection->log_module,
-                                     "setsockopt(TCP_NODELAY) asset_sock failed: error %d",
-                                     errno);
-
-#if !defined(__ZEPHYR__) && !defined(_WIN32)
-                /* Set retry count to send a total of 3 SYN packets => Timeout ~7s */
-                if (setsockopt(connection->asset_sock,
-                               IPPROTO_TCP,
-                               TCP_SYNCNT,
-                               (char*) &(int) {2},
-                               sizeof(int)) < 0)
-                        ERROR_OUT_EX(*connection->log_module,
-                                     "setsockopt(TCP_SYNCNT) asset_sock failed: error %d",
-                                     errno);
-#endif
                 /* Connect to the peer */
-                ret = connect(connection->asset_sock,
-                              (struct sockaddr*) connection->target_addr->ai_addr,
-                              connection->target_addr->ai_addrlen);
-        }
-        else if (connection->direction == FORWARD_PROXY && connection->tunnel_sock >= 0)
-        {
-                closesocket(connection->tunnel_sock);
-
-                /* Create the new socket for the tunnel */
-                connection->tunnel_sock = socket(connection->target_addr->ai_family,
-                                                 SOCK_STREAM,
-                                                 IPPROTO_TCP);
-                if (connection->tunnel_sock == -1)
-                        ERROR_OUT_EX(*connection->log_module,
-                                     "Error creating tunnel socket, errno: %d",
-                                     errno);
-
-                setblocking(connection->tunnel_sock, false);
-
-                /* Set TCP_NODELAY option to disable Nagle algorithm */
-                if (setsockopt(connection->tunnel_sock,
-                               IPPROTO_TCP,
-                               TCP_NODELAY,
-                               (char*) &(int) {1},
-                               sizeof(int)) < 0)
-                        ERROR_OUT_EX(*connection->log_module,
-                                     "setsockopt(TCP_NODELAY) tunnel_sock failed: error %d",
-                                     errno);
-
-#if !defined(__ZEPHYR__) && !defined(_WIN32)
-                /* Set retry count to send a total of 3 SYN packets => Timeout ~7s */
-                if (setsockopt(connection->tunnel_sock,
-                               IPPROTO_TCP,
-                               TCP_SYNCNT,
-                               (char*) &(int) {2},
-                               sizeof(int)) < 0)
-                        ERROR_OUT_EX(*connection->log_module,
-                                     "setsockopt(TCP_SYNCNT) tunnel_sock failed: error %d",
-                                     errno);
-#endif
-                /* Connect to the peer */
-                ret = connect(connection->tunnel_sock,
-                              (struct sockaddr*) connection->target_addr->ai_addr,
-                              connection->target_addr->ai_addrlen);
+                ret = connect(connection->outgoing_sock,
+                              (struct sockaddr*) connection->outgoing_addr->ai_addr,
+                              connection->outgoing_addr->ai_addrlen);
         }
 
         if ((ret != 0) &&
@@ -317,7 +264,7 @@ int proxy_connection_try_next_target(proxy_connection* connection)
             (errno != EINPROGRESS))
 #endif
                 ERROR_OUT_EX(*connection->log_module,
-                             "Unable to connect to target peer, errno: %d",
+                             "Unable to connect to outgoing peer, errno: %d",
                              errno);
 
         return 0;
@@ -412,22 +359,27 @@ int proxy_connection_stop_handling(proxy_connection* connection)
 void proxy_connection_cleanup(proxy_connection* connection)
 {
         /* Kill the network connections */
-        if (connection->tunnel_sock >= 0)
+        if (connection->outgoing_sock >= 0)
         {
-                closesocket(connection->tunnel_sock);
-                connection->tunnel_sock = -1;
+                closesocket(connection->outgoing_sock);
+                connection->outgoing_sock = -1;
         }
-        if (connection->asset_sock >= 0)
+        if (connection->incoming_sock >= 0)
         {
-                closesocket(connection->asset_sock);
-                connection->asset_sock = -1;
+                closesocket(connection->incoming_sock);
+                connection->incoming_sock = -1;
         }
 
-        /* Cleanup the TLS session */
-        if (connection->tls_session != NULL)
+        /* Cleanup the TLS sessions */
+        if (connection->outgoing_tls_session != NULL)
         {
-                asl_free_session(connection->tls_session);
-                connection->tls_session = NULL;
+                asl_free_session(connection->outgoing_tls_session);
+                connection->outgoing_tls_session = NULL;
+        }
+        if (connection->incoming_tls_session != NULL)
+        {
+                asl_free_session(connection->incoming_tls_session);
+                connection->incoming_tls_session = NULL;
         }
 
         /* Update connection count */
@@ -448,11 +400,16 @@ void proxy_connection_cleanup(proxy_connection* connection)
                 connection->management_socket_pair[1] = -1;
         }
 
-        connection->num_of_bytes_in_tun2ass_buffer = 0;
-        connection->num_of_bytes_in_ass2tun_buffer = 0;
-        connection->target_addr = NULL;
+        connection->num_of_bytes_in_in2out_buffer = 0;
+        connection->num_of_bytes_in_out2in_buffer = 0;
+        connection->outgoing_addr = NULL;
         connection->slot = -1;
         connection->proxy = NULL;
+        connection->incoming_tls = false;
+        connection->incoming_tls_hs_done = false;
+        connection->outgoing_tls = false;
+        connection->outgoing_tls_hs_done = false;
+        connection->log_module = NULL;
 
         connection->in_use = false;
 }
@@ -494,7 +451,7 @@ static int handle_management_message(proxy_connection* connection,
         return ret;
 }
 
-static bool handle_tunnel_to_asset(proxy_connection* connection, short event, poll_set* poll_set)
+static bool handle_in2out(proxy_connection* connection, short event, poll_set* poll_set)
 {
         int ret = 0;
         bool shutdown = false;
@@ -504,22 +461,36 @@ static bool handle_tunnel_to_asset(proxy_connection* connection, short event, po
                 ret = 1;
                 while (ret > 0)
                 {
-                        /* Data received from the tunnel */
-                        ret = asl_receive(connection->tls_session,
-                                          connection->tun2ass_buffer,
-                                          sizeof(connection->tun2ass_buffer));
-
-                        if (ret > 0)
+                        if (connection->incoming_tls)
                         {
-                                connection->num_of_bytes_in_tun2ass_buffer = ret;
+                                /* Read received TLS data  */
+                                ret = asl_receive(connection->incoming_tls_session,
+                                                  connection->in2out_buffer,
+                                                  sizeof(connection->in2out_buffer));
 
-                                /* Send received data to the asset */
-                                ret = send(connection->asset_sock,
-                                           connection->tun2ass_buffer,
-                                           connection->num_of_bytes_in_tun2ass_buffer,
+                                if (ret == ASL_WANT_READ)
+                                {
+                                        /* We have to wait for more data from the
+                                         * peer to read data (not a full record has
+                                         * been received).
+                                         */
+                                        ret = 0;
+                                }
+                        }
+                        else
+                        {
+                                /* Read received TCP data  */
+                                ret = recv(connection->incoming_sock,
+                                           connection->in2out_buffer,
+                                           sizeof(connection->in2out_buffer),
                                            0);
 
-                                if (ret == -1)
+                                if (ret == 0)
+                                {
+                                        /* Connection closed */
+                                        ret = -1;
+                                }
+                                else if (ret == -1)
                                 {
 #if defined(_WIN32)
                                         if (WSAGetLastError() == WSAEWOULDBLOCK)
@@ -527,40 +498,80 @@ static bool handle_tunnel_to_asset(proxy_connection* connection, short event, po
                                         if ((errno == EAGAIN) || (errno == EWOULDBLOCK))
 #endif
                                         {
-                                                /* We have to wait for the asset socket to be writable.
-                                                 * Until we can send the data, we also mustn't receive
-                                                 * more data on the tunnel socket. */
-                                                poll_set_add_events(poll_set,
-                                                                    connection->asset_sock,
-                                                                    POLLOUT);
-                                                poll_set_remove_events(poll_set,
-                                                                       connection->tunnel_sock,
-                                                                       POLLIN);
                                                 ret = 0;
+                                        }
+                                }
+                        }
+
+                        if (ret > 0)
+                        {
+                                connection->num_of_bytes_in_in2out_buffer = ret;
+
+                                /* Send received data to the other peer */
+                                if (connection->outgoing_tls)
+                                {
+                                        ret = asl_send(connection->outgoing_tls_session,
+                                                       connection->in2out_buffer,
+                                                       connection->num_of_bytes_in_in2out_buffer);
+
+                                        if (ret == ASL_SUCCESS)
+                                                ret = connection->num_of_bytes_in_in2out_buffer;
+                                }
+                                else
+                                {
+                                        ret = send(connection->outgoing_sock,
+                                                   connection->in2out_buffer,
+                                                   connection->num_of_bytes_in_in2out_buffer,
+                                                   0);
+
+                                        if (ret == -1)
+                                        {
+#if defined(_WIN32)
+                                                if (WSAGetLastError() == WSAEWOULDBLOCK)
+#else
+                                                if ((errno == EAGAIN) || (errno == EWOULDBLOCK) ||
+                                                    (errno == ENOBUFS))
+#endif
+                                                {
+                                                        /* Map this to the ASL error here */
+                                                        ret = ASL_WANT_WRITE;
+                                                }
+                                        }
+                                }
+
+                                if (ret == ASL_WANT_WRITE)
+                                {
+                                        /* We have to wait for the outgoing socket to be writable. Until we can send
+                                         * the data, we also mustn't receive more data on the incoming socket. */
+                                        poll_set_add_events(poll_set, connection->outgoing_sock, POLLOUT);
+                                        poll_set_remove_events(poll_set,
+                                                               connection->incoming_sock,
+                                                               POLLIN);
+                                        ret = 0;
+                                }
+                                else if (ret < 0)
+                                {
+                                        if ((errno == ECONNRESET) || (errno == EPIPE))
+                                        {
+                                                LOG_INFO_EX(*connection->log_module,
+                                                            "Outgoing connection closed");
                                         }
                                         else
                                         {
-                                                if ((errno == ECONNRESET) || (errno == EPIPE))
-                                                {
-                                                        LOG_INFO_EX(*connection->log_module,
-                                                                    "Asset connection closed");
-                                                }
-                                                else
-                                                {
-                                                        LOG_ERROR_EX(*connection->log_module,
-                                                                     "Error sending data to asset: "
-                                                                     "%d (%s)",
-                                                                     errno,
-                                                                     strerror(errno));
-                                                }
-                                                shutdown = true;
-                                                break;
+                                                LOG_ERROR_EX(*connection->log_module,
+                                                             "Error sending data "
+                                                             "to outgoing peer: "
+                                                             "%d (%s)",
+                                                             errno,
+                                                             strerror(errno));
                                         }
+                                        shutdown = true;
+                                        break;
                                 }
-                                else if ((size_t) ret == connection->num_of_bytes_in_tun2ass_buffer)
+                                else if ((size_t) ret == connection->num_of_bytes_in_in2out_buffer)
                                 {
-                                        if (connection->num_of_bytes_in_tun2ass_buffer <
-                                            sizeof(connection->tun2ass_buffer))
+                                        if (connection->num_of_bytes_in_in2out_buffer ==
+                                            sizeof(connection->in2out_buffer))
                                         {
                                                 /* We read the maximum amount of data from the
                                                  * tunnel connection. This could be an indication
@@ -569,62 +580,97 @@ static bool handle_tunnel_to_asset(proxy_connection* connection, short event, po
                                                 ret = 0;
                                         }
 
-                                        connection->num_of_bytes_in_tun2ass_buffer = 0;
+                                        connection->num_of_bytes_in_in2out_buffer = 0;
                                 }
                                 else
                                 {
-                                        connection->num_of_bytes_in_tun2ass_buffer -= ret;
-                                        memmove(connection->tun2ass_buffer,
-                                                connection->tun2ass_buffer + ret,
-                                                connection->num_of_bytes_in_tun2ass_buffer);
-                                        poll_set_update_events(poll_set, connection->asset_sock, POLLOUT);
-                                        // Do we need have to remove POLLIN
-                                        // from tunnel_sock here?
-                                        // LOG_WARN_EX(*connection->log_module, "Not all data sent to asset");
+                                        connection->num_of_bytes_in_in2out_buffer -= ret;
+                                        memmove(connection->in2out_buffer,
+                                                connection->in2out_buffer + ret,
+                                                connection->num_of_bytes_in_in2out_buffer);
+                                        poll_set_update_events(poll_set,
+                                                               connection->outgoing_sock,
+                                                               POLLOUT);
+
                                         ret = 0;
                                 }
                         }
-                        else if (ret == ASL_WANT_READ)
-                        {
-                                /* We have to wait for more data from the
-                                 * peer to read data (not a full record has
-                                 * been received).
-                                 */
-                                ret = 0;
-                        }
                         else if (ret < 0)
                         {
-                                /* Connection closed */
                                 ret = -1;
                         }
                 }
         }
         if (event & POLLOUT)
         {
-                /* We can send data on the tunnel connection now. Send
+                /* We can send data on the incoming connection now. Send
                  * remaining data from the asset. */
-                ret = asl_send(connection->tls_session,
-                               connection->ass2tun_buffer,
-                               connection->num_of_bytes_in_ass2tun_buffer);
-
-                if (ret == ASL_SUCCESS)
+                if (connection->incoming_tls)
                 {
-                        /* Wait again for incoming data on the asset socket and remove
-                         * the writable indication from the tunnel socket. */
-                        poll_set_remove_events(poll_set, connection->tunnel_sock, POLLOUT);
-                        poll_set_add_events(poll_set, connection->asset_sock, POLLIN);
-                        connection->num_of_bytes_in_ass2tun_buffer = 0;
+                        ret = asl_send(connection->incoming_tls_session,
+                                       connection->out2in_buffer,
+                                       connection->num_of_bytes_in_out2in_buffer);
+                        if (ret == ASL_SUCCESS)
+                                ret = connection->num_of_bytes_in_out2in_buffer;
                 }
-                else if (ret == ASL_WANT_WRITE)
+                else
+                {
+                        ret = send(connection->incoming_sock,
+                                   connection->out2in_buffer,
+                                   connection->num_of_bytes_in_out2in_buffer,
+                                   0);
+                        if (ret == -1)
+                        {
+#if defined(_WIN32)
+                                if (WSAGetLastError() == WSAEWOULDBLOCK)
+#else
+                                if ((errno == EAGAIN) || (errno == EWOULDBLOCK) || (errno == ENOBUFS))
+#endif
+                                        ret = ASL_WANT_WRITE;
+                        }
+                }
+
+                if (ret == ASL_WANT_WRITE)
                 {
                         /* We still have to wait until we can send data, just wait. Hence,
                          * we have to clear the error condition */
                         ret = 0;
                 }
+                else if (ret < 0)
+                {
+                        if ((errno == ECONNRESET) || (errno == EPIPE))
+                        {
+                                LOG_INFO_EX(*connection->log_module, "Incoming connection closed");
+                        }
+                        else
+                        {
+                                LOG_ERROR_EX(*connection->log_module,
+                                             "Error sending data to incoming peer: %d (%s)",
+                                             errno,
+                                             strerror(errno));
+                        }
+                        shutdown = true;
+                }
+                else if ((size_t) ret == connection->num_of_bytes_in_out2in_buffer)
+                {
+                        /* Wait again for incoming data on the asset socket and remove
+                         * the writable indication from the tunnel socket. */
+                        poll_set_remove_events(poll_set, connection->incoming_sock, POLLOUT);
+                        poll_set_add_events(poll_set, connection->outgoing_sock, POLLIN);
+                        connection->num_of_bytes_in_out2in_buffer = 0;
+                }
+                else
+                {
+                        connection->num_of_bytes_in_out2in_buffer -= ret;
+                        memmove(connection->out2in_buffer,
+                                connection->out2in_buffer + ret,
+                                connection->num_of_bytes_in_out2in_buffer);
+                        // LOG_WARN_EX(*connection->log_module, "Not all data sent to asset");
+                }
         }
         if (event & POLLERR)
         {
-                LOG_INFO_EX(*connection->log_module, "Tunnel connection closed");
+                LOG_INFO_EX(*connection->log_module, "Incoming connection closed");
                 shutdown = true;
         }
 
@@ -636,106 +682,225 @@ static bool handle_tunnel_to_asset(proxy_connection* connection, short event, po
         return shutdown;
 }
 
-static bool handle_asset_to_tunnel(proxy_connection* connection, short event, poll_set* poll_set)
+static bool handle_out2in(proxy_connection* connection, short event, poll_set* poll_set)
 {
         int ret = 0;
         bool shutdown = false;
 
         if (event & POLLIN)
         {
-                /* Data received from the asset connection */
-                ret = recv(connection->asset_sock,
-                           connection->ass2tun_buffer,
-                           sizeof(connection->ass2tun_buffer),
-                           0);
-
-                if (ret > 0)
+                ret = 1;
+                while (ret > 0)
                 {
-                        connection->num_of_bytes_in_ass2tun_buffer = ret;
-
-                        /* Send received data to the other socket */
-                        ret = asl_send(connection->tls_session,
-                                       connection->ass2tun_buffer,
-                                       connection->num_of_bytes_in_ass2tun_buffer);
-
-                        if (ret == ASL_WANT_WRITE)
+                        if (connection->outgoing_tls)
                         {
-                                /* We have to wait for the tunnel socket to be writable. Until we can send
-                                 * the data, we also mustn't receive more data on the asset socket. */
-                                poll_set_add_events(poll_set, connection->tunnel_sock, POLLOUT);
-                                poll_set_remove_events(poll_set, connection->asset_sock, POLLIN);
-                                ret = 0;
+                                /* Read received TLS data  */
+                                ret = asl_receive(connection->outgoing_tls_session,
+                                                  connection->out2in_buffer,
+                                                  sizeof(connection->out2in_buffer));
+
+                                if (ret == ASL_WANT_READ)
+                                {
+                                        /* We have to wait for more data from the
+                                         * peer to read data (not a full record has
+                                         * been received).
+                                         */
+                                        ret = 0;
+                                }
                         }
                         else
                         {
-                                connection->num_of_bytes_in_ass2tun_buffer = 0;
+                                /* Read received TCP data  */
+                                ret = recv(connection->outgoing_sock,
+                                           connection->out2in_buffer,
+                                           sizeof(connection->out2in_buffer),
+                                           0);
+
+                                if (ret == 0)
+                                {
+                                        /* Connection closed */
+                                        ret = -1;
+                                }
+                                else if (ret == -1)
+                                {
+#if defined(_WIN32)
+                                        if (WSAGetLastError() == WSAEWOULDBLOCK)
+#else
+                                        if ((errno == EAGAIN) || (errno == EWOULDBLOCK))
+#endif
+                                        {
+                                                ret = 0;
+                                        }
+                                }
                         }
-                }
-                else if (ret == 0)
-                {
-                        /* Connection closed */
-                        ret = -1;
-                }
-                else
-                {
-                        ret = -1;
+
+                        if (ret > 0)
+                        {
+                                connection->num_of_bytes_in_out2in_buffer = ret;
+
+                                /* Send received data to the other peer */
+                                if (connection->incoming_tls)
+                                {
+                                        ret = asl_send(connection->incoming_tls_session,
+                                                       connection->out2in_buffer,
+                                                       connection->num_of_bytes_in_out2in_buffer);
+
+                                        if (ret == ASL_SUCCESS)
+                                                ret = connection->num_of_bytes_in_out2in_buffer;
+                                }
+                                else
+                                {
+                                        ret = send(connection->incoming_sock,
+                                                   connection->out2in_buffer,
+                                                   connection->num_of_bytes_in_out2in_buffer,
+                                                   0);
+
+                                        if (ret == -1)
+                                        {
+#if defined(_WIN32)
+                                                if (WSAGetLastError() == WSAEWOULDBLOCK)
+#else
+                                                if ((errno == EAGAIN) || (errno == EWOULDBLOCK) ||
+                                                    (errno == ENOBUFS))
+#endif
+                                                {
+                                                        /* Map this to the ASL error here */
+                                                        ret = ASL_WANT_WRITE;
+                                                }
+                                        }
+                                }
+
+                                if (ret == ASL_WANT_WRITE)
+                                {
+                                        /* We have to wait for the incoming socket to be writable. Until we can send
+                                         * the data, we also mustn't receive more data on the outgoing socket. */
+                                        poll_set_add_events(poll_set, connection->incoming_sock, POLLOUT);
+                                        poll_set_remove_events(poll_set,
+                                                               connection->outgoing_sock,
+                                                               POLLIN);
+                                        ret = 0;
+                                }
+                                else if (ret < 0)
+                                {
+                                        if ((errno == ECONNRESET) || (errno == EPIPE))
+                                        {
+                                                LOG_INFO_EX(*connection->log_module,
+                                                            "Incoming connection closed");
+                                        }
+                                        else
+                                        {
+                                                LOG_ERROR_EX(*connection->log_module,
+                                                             "Error sending data "
+                                                             "to incoming peer: "
+                                                             "%d (%s)",
+                                                             errno,
+                                                             strerror(errno));
+                                        }
+                                        shutdown = true;
+                                        break;
+                                }
+                                else if ((size_t) ret == connection->num_of_bytes_in_out2in_buffer)
+                                {
+                                        if (connection->num_of_bytes_in_out2in_buffer ==
+                                            sizeof(connection->out2in_buffer))
+                                        {
+                                                /* We read the maximum amount of data from the
+                                                 * outgoing connection. This could be an indication
+                                                 * that there is more data to be read. Hence, we
+                                                 * trigger another read here. */
+                                                ret = 0;
+                                        }
+
+                                        connection->num_of_bytes_in_out2in_buffer = 0;
+                                }
+                                else
+                                {
+                                        connection->num_of_bytes_in_out2in_buffer -= ret;
+                                        memmove(connection->out2in_buffer,
+                                                connection->out2in_buffer + ret,
+                                                connection->num_of_bytes_in_out2in_buffer);
+                                        poll_set_update_events(poll_set,
+                                                               connection->incoming_sock,
+                                                               POLLOUT);
+
+                                        ret = 0;
+                                }
+                        }
+                        else if (ret < 0)
+                        {
+                                ret = -1;
+                        }
                 }
         }
         if (event & POLLOUT)
         {
-                /* We can send data on the asset connection now. Send
-                 * remaining tunnel data. */
-                ret = send(connection->asset_sock,
-                           connection->tun2ass_buffer,
-                           connection->num_of_bytes_in_tun2ass_buffer,
-                           0);
-
-                if (ret == -1)
+                /* We can send data on the outgoing connection now. Send
+                 * remaining data from the asset. */
+                if (connection->outgoing_tls)
                 {
-#if defined(_WIN32)
-                        if (WSAGetLastError() == WSAEWOULDBLOCK)
-#else
-                        if ((errno == EAGAIN) || (errno == EWOULDBLOCK))
-#endif
-                        {
-                                ret = 0;
-                        }
-                        else
-                        {
-                                if ((errno == ECONNRESET) || (errno == EPIPE))
-                                {
-                                        LOG_INFO_EX(*connection->log_module, "Asset connection closed");
-                                }
-                                else
-                                {
-                                        LOG_ERROR_EX(*connection->log_module,
-                                                     "Error sending data to asset: %d (%s)",
-                                                     errno,
-                                                     strerror(errno));
-                                }
-                                shutdown = true;
-                        }
-                }
-                else if ((size_t) ret == connection->num_of_bytes_in_tun2ass_buffer)
-                {
-                        /* Wait again for incoming data on the tunnel socket and remove
-                         * the writable indication from the asset socket. */
-                        poll_set_remove_events(poll_set, connection->asset_sock, POLLOUT);
-                        poll_set_add_events(poll_set, connection->tunnel_sock, POLLIN);
-                        connection->num_of_bytes_in_tun2ass_buffer = 0;
+                        ret = asl_send(connection->outgoing_tls_session,
+                                       connection->in2out_buffer,
+                                       connection->num_of_bytes_in_in2out_buffer);
+                        if (ret == ASL_SUCCESS)
+                                ret = connection->num_of_bytes_in_in2out_buffer;
                 }
                 else
                 {
-                        connection->num_of_bytes_in_tun2ass_buffer -= ret;
-                        memmove(connection->tun2ass_buffer,
-                                connection->tun2ass_buffer + ret,
-                                connection->num_of_bytes_in_tun2ass_buffer);
-                        // LOG_WARN_EX(*connection->log_module, "Not all data sent to asset");
+                        ret = send(connection->outgoing_sock,
+                                   connection->in2out_buffer,
+                                   connection->num_of_bytes_in_in2out_buffer,
+                                   0);
+                        if (ret == -1)
+                        {
+#if defined(_WIN32)
+                                if (WSAGetLastError() == WSAEWOULDBLOCK)
+#else
+                                if ((errno == EAGAIN) || (errno == EWOULDBLOCK) || (errno == ENOBUFS))
+#endif
+                                        ret = ASL_WANT_WRITE;
+                        }
+                }
+
+                if (ret == ASL_WANT_WRITE)
+                {
+                        /* We still have to wait until we can send data, just wait. Hence,
+                         * we have to clear the error condition */
+                        ret = 0;
+                }
+                else if (ret < 0)
+                {
+                        if ((errno == ECONNRESET) || (errno == EPIPE))
+                        {
+                                LOG_INFO_EX(*connection->log_module, "Outgoing connection closed");
+                        }
+                        else
+                        {
+                                LOG_ERROR_EX(*connection->log_module,
+                                             "Error sending data to outgoing peer: %d (%s)",
+                                             errno,
+                                             strerror(errno));
+                        }
+                        shutdown = true;
+                }
+                else if ((size_t) ret == connection->num_of_bytes_in_in2out_buffer)
+                {
+                        /* Wait again for outgoing data on the asset socket and remove
+                         * the writable indication from the tunnel socket. */
+                        poll_set_remove_events(poll_set, connection->outgoing_sock, POLLOUT);
+                        poll_set_add_events(poll_set, connection->incoming_sock, POLLIN);
+                        connection->num_of_bytes_in_in2out_buffer = 0;
+                }
+                else
+                {
+                        connection->num_of_bytes_in_in2out_buffer -= ret;
+                        memmove(connection->out2in_buffer,
+                                connection->out2in_buffer + ret,
+                                connection->num_of_bytes_in_in2out_buffer);
                 }
         }
         if (event & POLLERR)
         {
-                LOG_INFO_EX(*connection->log_module, "Asset connection closed");
+                LOG_INFO_EX(*connection->log_module, "Outgoing connection closed");
                 shutdown = true;
         }
 
@@ -760,8 +925,8 @@ static void* connection_handler_thread(void* ptr)
 
         poll_set_init(&poll_set);
 
-        poll_set_add_fd(&poll_set, connection->tunnel_sock, POLLIN);
-        poll_set_add_fd(&poll_set, connection->asset_sock, POLLOUT | POLLIN);
+        poll_set_add_fd(&poll_set, connection->incoming_sock, POLLIN);
+        poll_set_add_fd(&poll_set, connection->outgoing_sock, POLLIN);
 
         /* Set the management socket to non-blocking and add it to the poll_set */
         setblocking(connection->management_socket_pair[1], false);
@@ -811,13 +976,13 @@ static void* connection_handler_thread(void* ptr)
                                         }
                                 }
                         }
-                        else if (fd == connection->tunnel_sock)
+                        else if (fd == connection->outgoing_sock)
                         {
-                                shutdown = handle_tunnel_to_asset(connection, event, &poll_set);
+                                shutdown = handle_out2in(connection, event, &poll_set);
                         }
-                        else if (fd == connection->asset_sock)
+                        else if (fd == connection->incoming_sock)
                         {
-                                shutdown = handle_asset_to_tunnel(connection, event, &poll_set);
+                                shutdown = handle_in2out(connection, event, &poll_set);
                         }
                 }
         }
@@ -827,7 +992,10 @@ static void* connection_handler_thread(void* ptr)
                     connection->slot + 1,
                     MAX_CONNECTIONS_PER_PROXY);
 
-        asl_close_session(connection->tls_session);
+        if (connection->incoming_tls && connection->incoming_tls_session != NULL)
+                asl_close_session(connection->incoming_tls_session);
+        if (connection->outgoing_tls && connection->outgoing_tls_session != NULL)
+                asl_close_session(connection->outgoing_tls_session);
 
         proxy_connection_cleanup(connection);
         terminate_thread(&connection->thread, connection->log_module);

@@ -56,7 +56,7 @@ static proxy proxy_pool[MAX_PROXYS];
 
 #if defined(__ZEPHYR__)
 
-#define BACKEND_STACK_SIZE (32 * 1024)
+#define BACKEND_STACK_SIZE (16 * 1024)
 Z_KERNEL_STACK_DEFINE_IN(backend_stack,
                          BACKEND_STACK_SIZE,
                          __attribute__((section(CONFIG_RAM_SECTION_STACKS_2))));
@@ -64,7 +64,7 @@ Z_KERNEL_STACK_DEFINE_IN(backend_stack,
 #endif
 
 /* Internal method declarations */
-static int add_new_proxy(enum tls_proxy_direction direction, proxy_config* config);
+static int add_new_proxy(proxy_config* config);
 static proxy* find_proxy_by_fd(int fd);
 static proxy* find_proxy_by_id(int id);
 static void kill_proxy(proxy* proxy);
@@ -80,13 +80,15 @@ void init_proxy_pool(void)
         {
                 proxy_pool[i].application_id = -1;
                 proxy_pool[i].in_use = false;
-                proxy_pool[i].direction = REVERSE_PROXY;
+                proxy_pool[i].incoming_tls = false;
+                proxy_pool[i].outgoing_tls = false;
                 proxy_pool[i].incoming_sock[IPv4] = -1;
                 proxy_pool[i].incoming_sock[IPv6] = -1;
                 proxy_pool[i].incoming_port[IPv4] = 0;
                 proxy_pool[i].incoming_port[IPv6] = 0;
-                proxy_pool[i].target_addr = NULL;
-                proxy_pool[i].tls_endpoint = NULL;
+                proxy_pool[i].outgoing_addr = NULL;
+                proxy_pool[i].incoming_tls_endpoint = NULL;
+                proxy_pool[i].outgoing_tls_endpoint = NULL;
                 proxy_pool[i].log_module.name = NULL;
                 proxy_pool[i].log_module.level = LOG_LVL_WARN;
                 proxy_pool[i].num_connections = 0;
@@ -140,7 +142,7 @@ int proxy_backend_init(proxy_backend* backend, proxy_backend_config const* confi
 }
 
 /* Create a new proxy and add it to the main event loop */
-static int add_new_proxy(enum tls_proxy_direction direction, proxy_config* config)
+static int add_new_proxy(proxy_config* config)
 {
         struct addrinfo* bind_addr = NULL;
 
@@ -164,7 +166,8 @@ static int add_new_proxy(enum tls_proxy_direction direction, proxy_config* confi
         proxy* proxy = &proxy_pool[freeSlot];
 
         proxy->in_use = true;
-        proxy->direction = direction;
+        proxy->incoming_tls = config->incoming_tls;
+        proxy->outgoing_tls = config->outgoing_tls;
         proxy->application_id = config->application_id;
 
         /* Setup the log module for the proxy */
@@ -178,7 +181,7 @@ static int add_new_proxy(enum tls_proxy_direction direction, proxy_config* confi
         /* Create the TCP sockets for the incoming connections (IPv4 and IPv6).
          * Do a DNS lookup to make sure we have an IP address. If we already have an IP, this
          * results in a noop. */
-        if (address_lookup_server(config->own_ip_address, config->listening_port, &bind_addr, AF_UNSPEC) <
+        if (address_lookup_server(config->incoming_ip_address, config->incoming_port, &bind_addr, AF_UNSPEC) <
             0)
                 ERROR_OUT_EX(proxy->log_module, "Error looking up bind IP address");
 
@@ -213,39 +216,32 @@ static int add_new_proxy(enum tls_proxy_direction direction, proxy_config* confi
 
         /* Do a DNS lookup to make sure we have an IP address. If we already have an IP, this
          * results in a noop. */
-        if (address_lookup_client(config->target_ip_address,
-                                  config->target_port,
-                                  &proxy->target_addr,
+        if (address_lookup_client(config->outgoing_ip_address,
+                                  config->outgoing_port,
+                                  &proxy->outgoing_addr,
                                   AF_UNSPEC) < 0)
-                ERROR_OUT_EX(proxy->log_module, "Error looking up target IP address");
+                ERROR_OUT_EX(proxy->log_module, "Error looking up outgoing IP address");
 
-        if (direction == REVERSE_PROXY)
+        if (config->incoming_tls)
         {
-                LOG_INFO_EX(proxy->log_module,
-                            "Starting new reverse proxy on port %d",
-                            config->listening_port);
+                /* Create the incoming TLS endpoint */
+                proxy->incoming_tls_endpoint = asl_setup_server_endpoint(&config->incoming_tls_config);
+                if (proxy->incoming_tls_endpoint == NULL)
+                        ERROR_OUT_EX(proxy->log_module, "Error creating incoming TLS endpoint");
+        }
+        if (config->outgoing_tls)
+        {
+                config->outgoing_tls_config.server_name = config->outgoing_ip_address;
 
                 /* Create the TLS endpoint */
-                proxy->tls_endpoint = asl_setup_server_endpoint(&config->tls_config);
+                proxy->outgoing_tls_endpoint = asl_setup_client_endpoint(&config->outgoing_tls_config);
+                if (proxy->outgoing_tls_endpoint == NULL)
+                        ERROR_OUT_EX(proxy->log_module, "Error creating outgoing TLS endpoint");
         }
-        else if (direction == FORWARD_PROXY)
-        {
-                LOG_INFO_EX(proxy->log_module,
-                            "Starting new forward proxy to %s:%d",
-                            config->target_ip_address,
-                            config->target_port);
-
-                config->tls_config.server_name = config->target_ip_address;
-
-                /* Create the TLS endpoint */
-                proxy->tls_endpoint = asl_setup_client_endpoint(&config->tls_config);
-        }
-        if (proxy->tls_endpoint == NULL)
-                ERROR_OUT_EX(proxy->log_module, "Error creating TLS endpoint");
 
         LOG_DEBUG_EX(proxy->log_module,
                      "Waiting for incoming connections on port %d",
-                     config->listening_port);
+                     config->incoming_port);
 
         if (bind_addr != NULL)
                 freeaddrinfo(bind_addr);
@@ -336,11 +332,16 @@ static void kill_proxy(proxy* proxy)
 
         LOG_DEBUG_EX(proxy->log_module, "Killed all connections");
 
-        /* Clear TLS context */
-        if (proxy->tls_endpoint != NULL)
+        /* Clear TLS contexts */
+        if (proxy->incoming_tls_endpoint != NULL)
         {
-                asl_free_endpoint(proxy->tls_endpoint);
-                proxy->tls_endpoint = NULL;
+                asl_free_endpoint(proxy->incoming_tls_endpoint);
+                proxy->incoming_tls_endpoint = NULL;
+        }
+        if (proxy->outgoing_tls_endpoint != NULL)
+        {
+                asl_free_endpoint(proxy->outgoing_tls_endpoint);
+                proxy->outgoing_tls_endpoint = NULL;
         }
 
         /* Free log module name */
@@ -350,11 +351,11 @@ static void kill_proxy(proxy* proxy)
                 proxy->log_module.name = NULL;
         }
 
-        /* Clear the target address */
-        if (proxy->target_addr != NULL)
+        /* Clear the outgoing address */
+        if (proxy->outgoing_addr != NULL)
         {
-                freeaddrinfo(proxy->target_addr);
-                proxy->target_addr = NULL;
+                freeaddrinfo(proxy->outgoing_addr);
+                proxy->outgoing_addr = NULL;
         }
 
         proxy->incoming_port[IPv4] = 0;
@@ -373,10 +374,10 @@ static int handle_management_message(proxy_backend* backend, int socket, proxy_m
 
         switch (msg->type)
         {
-        case REVERSE_PROXY_START_REQUEST:
+        case PROXY_START_REQUEST:
                 {
-                        /* Add a new reverse proxy */
-                        int proxy_id = add_new_proxy(REVERSE_PROXY, &msg->payload.reverse_proxy_config);
+                        /* Add a new proxy */
+                        int proxy_id = add_new_proxy(&msg->payload.proxy_config);
                         if (proxy_id > 0)
                         {
                                 /* Add proxy to the poll_set */
@@ -419,50 +420,6 @@ static int handle_management_message(proxy_backend* backend, int socket, proxy_m
                         ret = send_management_message(socket, &response);
                         break;
                 }
-        case FORWARD_PROXY_START_REQUEST:
-                {
-                        /* Add a new forward proxy */
-                        int proxy_id = add_new_proxy(FORWARD_PROXY, &msg->payload.forward_proxy_config);
-                        if (proxy_id > 0)
-                        {
-                                /* Add proxy to the poll_set */
-                                proxy* new_proxy = find_proxy_by_id(proxy_id);
-                                if (new_proxy && new_proxy->incoming_sock[IPv4] >= 0)
-                                {
-                                        ret = poll_set_add_fd(&backend->poll_set,
-                                                              new_proxy->incoming_sock[IPv4],
-                                                              POLLIN);
-                                        if (ret != 0)
-                                        {
-                                                LOG_ERROR("Error adding new proxy to "
-                                                          "poll_set");
-                                                kill_proxy(new_proxy);
-                                                proxy_id = -1;
-                                        }
-                                }
-                                if (ret == 0 && new_proxy && new_proxy->incoming_sock[IPv6] >= 0)
-                                {
-                                        ret = poll_set_add_fd(&backend->poll_set,
-                                                              new_proxy->incoming_sock[IPv6],
-                                                              POLLIN);
-                                        if (ret != 0)
-                                        {
-                                                LOG_ERROR("Error adding new proxy to "
-                                                          "poll_set");
-                                                kill_proxy(new_proxy);
-                                                proxy_id = -1;
-                                        }
-                                }
-                        }
-
-                        /* Send response */
-                        proxy_management_message response = {
-                                .type = RESPONSE,
-                                .payload.response_code = proxy_id,
-                        };
-                        ret = send_management_message(socket, &response);
-                        break;
-                }
         case PROXY_STATUS_REQUEST:
                 {
                         /* Find the proxy */
@@ -473,15 +430,18 @@ static int handle_management_message(proxy_backend* backend, int socket, proxy_m
                         {
                                 proxy_status* status = msg->payload.status_req.status_obj_ptr;
                                 status->is_running = true;
+                                status->incoming_tls = proxy->incoming_tls;
+                                status->outgoing_tls = proxy->outgoing_tls;
                                 status->incoming_port_v4 = proxy->incoming_port[IPv4];
                                 status->incoming_port_v6 = proxy->incoming_port[IPv6];
-                                status->direction = proxy->direction;
                                 status->num_connections = proxy->num_connections;
                         }
                         else
                         {
                                 proxy_status* status = msg->payload.status_req.status_obj_ptr;
                                 status->is_running = false;
+                                status->incoming_tls = false;
+                                status->outgoing_tls = false;
                                 status->incoming_port_v4 = 0;
                                 status->incoming_port_v6 = 0;
                                 status->num_connections = 0;
@@ -734,96 +694,231 @@ void* proxy_backend_thread(void* ptr)
                                         }
 
                                         /* As we perform the TLS handshake from within the main
-                                         * thread, we have to add the socket to the poll_set. In
-                                         * case of a reverse proxy, the TCP connection is already
-                                         * established, hence we can wait for incoming data. In case
-                                         * of a forward proxy, we first have to wait for successful
-                                         * connection establishment.
+                                         * thread, we have to add the sockets to the poll_set. When
+                                         * the incoming connection requires TLS, we wait for data to
+                                         * be available on the incoming socket. When the outgoing
+                                         * connection requires TLS, we wait for the socket to be
+                                         * writable (as we have to send data for the TLS handshake).
                                          */
-                                        if (proxy_connection->direction == REVERSE_PROXY)
+                                        if (proxy_connection->incoming_tls)
                                         {
                                                 ret = poll_set_add_fd(&backend->poll_set,
-                                                                      proxy_connection->tunnel_sock,
+                                                                      proxy_connection->incoming_sock,
                                                                       POLLIN);
+                                                if (ret != 0)
+                                                {
+                                                        LOG_ERROR("Error adding incoming socket to "
+                                                                  "poll_set");
+                                                        proxy_connection_cleanup(proxy_connection);
+                                                        continue;
+                                                }
                                         }
-                                        else if (proxy_connection->direction == FORWARD_PROXY)
+                                        else
                                         {
-                                                ret = poll_set_add_fd(&backend->poll_set,
-                                                                      proxy_connection->tunnel_sock,
-                                                                      POLLOUT);
+                                                /* Nothing to do in this case, consider TLS handshake done */
+                                                proxy_connection->incoming_tls_hs_done = true;
                                         }
+
+                                        ret = poll_set_add_fd(&backend->poll_set,
+                                                              proxy_connection->outgoing_sock,
+                                                              POLLERR | POLLHUP | POLLOUT);
                                         if (ret != 0)
                                         {
-                                                LOG_ERROR("Error adding tunnel connection to "
+                                                LOG_ERROR("Error adding outgoing socket to "
                                                           "poll_set");
                                                 proxy_connection_cleanup(proxy_connection);
                                                 continue;
                                         }
+
+                                        // if (proxy_connection->outgoing_tls)
+                                        // {
+                                        //         poll_set_update_events(&backend->poll_set,
+                                        //                                proxy_connection->outgoing_sock,
+                                        //                                POLLOUT | POLLERR | POLLHUP);
+                                        // }
                                         break;
                                 }
                         }
                         /* Check all proxy connections (that are in the TLS handshake) */
                         else if ((proxy_connection = find_proxy_connection_by_fd(fd)) != NULL)
                         {
-                                if ((event & POLLERR) || (event & POLLHUP))
+                                if (((event & POLLERR) || (event & POLLHUP)) &&
+                                    fd == proxy_connection->outgoing_sock)
                                 {
+                                        poll_set_remove_fd(&backend->poll_set, fd);
+
                                         /* If we have an additional target, try that first */
                                         if (proxy_connection_try_next_target(proxy_connection) < 0)
                                         {
                                                 LOG_INFO("Client connection closed");
-                                                poll_set_remove_fd(&backend->poll_set, fd);
                                                 proxy_connection_cleanup(proxy_connection);
                                                 continue;
                                         }
+
+                                        poll_set_add_fd(&backend->poll_set,
+                                                        proxy_connection->outgoing_sock,
+                                                        POLLERR | POLLHUP | POLLOUT);
 
                                         continue;
                                 }
                                 if ((event & POLLIN) || (event & POLLOUT))
                                 {
-                                        /* Continue with the handshake */
-                                        ret = asl_handshake(proxy_connection->tls_session);
-
-                                        if (ret == ASL_SUCCESS)
+                                        if (fd == proxy_connection->incoming_sock)
                                         {
-                                                /* Handshake done, remove respective socket from the poll_set */
-                                                poll_set_remove_fd(&backend->poll_set, fd);
+                                                /* Continue with the handshake */
+                                                ret = asl_handshake(
+                                                        proxy_connection->incoming_tls_session);
 
-                                                /* Get handshake metrics (only for reverse proxys, as the metrics are not correct
-                                                 * on the TLS client endpoint). */
-                                                if (proxy_connection->direction == REVERSE_PROXY)
+                                                if (ret == ASL_SUCCESS)
                                                 {
+                                                        /* Handshake done, remove socket from the poll_set */
+                                                        poll_set_remove_fd(&backend->poll_set,
+                                                                           proxy_connection->incoming_sock);
+
+                                                        proxy_connection->incoming_tls_hs_done = true;
+
+                                                        /* Get handshake metrics (only for reverse
+                                                         * proxys, as the metrics are not correct on
+                                                         * the TLS client endpoint). */
                                                         asl_handshake_metrics metrics;
                                                         metrics = asl_get_handshake_metrics(
-                                                                proxy_connection->tls_session);
-                                                        LOG_INFO("Handshake done (took %.3f ms)",
+                                                                proxy_connection->incoming_tls_session);
+                                                        LOG_INFO("Incoming TLS handshake done "
+                                                                 "(took "
+                                                                 "%.3f ms)",
                                                                  metrics.duration_us / 1000.0);
+
+                                                        /* Start thread for connection handling */
+                                                        if (proxy_connection->outgoing_tls_hs_done)
+                                                        {
+                                                                ret = proxy_connection_detach_handling(
+                                                                        proxy_connection);
+                                                                if (ret != 0)
+                                                                {
+                                                                        LOG_ERROR("Error starting "
+                                                                                  "client "
+                                                                                  "handler "
+                                                                                  "thread: %d (%s)",
+                                                                                  ret,
+                                                                                  strerror(ret));
+                                                                        proxy_connection_cleanup(
+                                                                                proxy_connection);
+                                                                }
+                                                        }
+                                                }
+                                                else if (ret == ASL_WANT_READ)
+                                                {
+                                                        /* We have to wait for more data from the peer */
+                                                        poll_set_update_events(&backend->poll_set,
+                                                                               proxy_connection->incoming_sock,
+                                                                               POLLIN);
+                                                }
+                                                else if (ret == ASL_WANT_WRITE)
+                                                {
+                                                        /* We have to wait for the socket to be writable */
+                                                        poll_set_update_events(&backend->poll_set,
+                                                                               proxy_connection->incoming_sock,
+                                                                               POLLOUT);
+                                                }
+                                                else
+                                                {
+                                                        LOG_ERROR("Error performing incoming TLS "
+                                                                  "handshake: "
+                                                                  "%s",
+                                                                  asl_error_message(ret));
+                                                        poll_set_remove_fd(&backend->poll_set,
+                                                                           proxy_connection->incoming_sock);
+                                                        poll_set_remove_fd(&backend->poll_set,
+                                                                           proxy_connection->outgoing_sock);
+                                                        proxy_connection_cleanup(proxy_connection);
+                                                        continue;
+                                                }
+                                        }
+                                        else if (fd == proxy_connection->outgoing_sock)
+                                        {
+                                                if (proxy_connection->outgoing_tls == true)
+                                                {
+                                                        /* Continue with the handshake */
+                                                        ret = asl_handshake(
+                                                                proxy_connection->outgoing_tls_session);
+                                                }
+                                                else
+                                                {
+                                                        /* No TLS, consider handshake successful */
+                                                        ret = ASL_SUCCESS;
                                                 }
 
-                                                /* Start thread for connection handling */
-                                                ret = proxy_connection_detach_handling(proxy_connection);
-                                                if (ret != 0)
+                                                if (ret == ASL_SUCCESS)
                                                 {
-                                                        LOG_ERROR("Error starting client handler "
-                                                                  "thread: %d (%s)",
-                                                                  ret,
-                                                                  strerror(ret));
-                                                        proxy_connection_cleanup(proxy_connection);
+                                                        /* Handshake done, remove socket from the poll_set */
+                                                        poll_set_remove_fd(&backend->poll_set,
+                                                                           proxy_connection->outgoing_sock);
+
+                                                        proxy_connection->outgoing_tls_hs_done = true;
+
+                                                        /* Get handshake metrics (only for reverse
+                                                         * proxys, as the metrics are not correct on
+                                                         * the TLS client endpoint). */
+                                                        if (proxy_connection->outgoing_tls)
+                                                        {
+                                                                asl_handshake_metrics metrics;
+                                                                metrics = asl_get_handshake_metrics(
+                                                                        proxy_connection->outgoing_tls_session);
+                                                                LOG_INFO("Outgoing TLS handshake "
+                                                                         "done "
+                                                                         "(took "
+                                                                         "%.3f ms)",
+                                                                         metrics.duration_us / 1000.0);
+                                                        }
+                                                        /* Start thread for connection handling */
+                                                        if (proxy_connection->incoming_tls_hs_done)
+                                                        {
+                                                                ret = proxy_connection_detach_handling(
+                                                                        proxy_connection);
+                                                                if (ret != 0)
+                                                                {
+                                                                        LOG_ERROR("Error starting "
+                                                                                  "client "
+                                                                                  "handler "
+                                                                                  "thread: %d (%s)",
+                                                                                  ret,
+                                                                                  strerror(ret));
+                                                                        proxy_connection_cleanup(
+                                                                                proxy_connection);
+                                                                }
+                                                        }
                                                 }
-                                        }
-                                        else if (ret == ASL_WANT_READ)
-                                        {
-                                                /* We have to wait for more data from the peer */
-                                                poll_set_update_events(&backend->poll_set, fd, POLLIN);
-                                        }
-                                        else if (ret == ASL_WANT_WRITE)
-                                        {
-                                                /* We have to wait for the socket to be writable */
-                                                poll_set_update_events(&backend->poll_set, fd, POLLOUT);
+                                                else if (ret == ASL_WANT_READ)
+                                                {
+                                                        /* We have to wait for more data from the peer */
+                                                        poll_set_update_events(&backend->poll_set,
+                                                                               proxy_connection->outgoing_sock,
+                                                                               POLLIN);
+                                                }
+                                                else if (ret == ASL_WANT_WRITE)
+                                                {
+                                                        /* We have to wait for the socket to be writable */
+                                                        poll_set_update_events(&backend->poll_set,
+                                                                               proxy_connection->outgoing_sock,
+                                                                               POLLOUT);
+                                                }
+                                                else
+                                                {
+                                                        LOG_ERROR("Error performing outgoing TLS "
+                                                                  "handshake: "
+                                                                  "%s",
+                                                                  asl_error_message(ret));
+                                                        poll_set_remove_fd(&backend->poll_set,
+                                                                           proxy_connection->outgoing_sock);
+                                                        poll_set_remove_fd(&backend->poll_set,
+                                                                           proxy_connection->incoming_sock);
+                                                        proxy_connection_cleanup(proxy_connection);
+                                                        continue;
+                                                }
                                         }
                                         else
                                         {
-                                                LOG_ERROR("Error performing TLS handshake: %s",
-                                                          asl_error_message(ret));
+                                                LOG_ERROR("Received event for unknown fd %d", fd);
                                                 poll_set_remove_fd(&backend->poll_set, fd);
                                                 proxy_connection_cleanup(proxy_connection);
                                                 continue;
@@ -833,6 +928,8 @@ void* proxy_backend_thread(void* ptr)
                         else
                         {
                                 LOG_ERROR("Received event for unknown fd %d", fd);
+                                poll_set_remove_fd(&backend->poll_set, fd);
+                                continue;
                         }
                 }
         }
