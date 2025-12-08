@@ -167,27 +167,44 @@ int parse_ip_address(char* input, char** ip, uint16_t* port, char** protocol)
                                 }
                                 input = protocol_sep + 2;
                                 *port = 0;
+
+                                if (is_numeric(input))
+                                {
+                                        /* We have a port number */
+                                        *ip = NULL;
+                                        unsigned long new_port = strtoul(input, NULL, 10);
+                                        if ((new_port == 0) || (new_port > 65535))
+                                        {
+                                                LOG_ERROR("invalid port number %lu", new_port);
+                                                return -1;
+                                        }
+                                        *port = (uint16_t) new_port;
+                                }
+                                else
+                                {
+                                        /* We have an URI / IPv4 address */
+                                        *ip = duplicate_string(input);
+                                        if (*ip == NULL)
+                                        {
+                                                LOG_ERROR(
+                                                        "unable to allocate memory for IP address");
+                                                return -1;
+                                        }
+                                        *port = 0;
+                                }
                         }
                         else
                         {
                                 *protocol = NULL;
-                                input = first_colon + 1;
-                        }
 
-                        if (is_numeric(input))
-                        {
-                                /* We have a port number */
-                                *ip = NULL;
-                                unsigned long new_port = strtoul(input, NULL, 10);
+                                unsigned long new_port = strtoul(first_colon + 1, NULL, 10);
                                 if ((new_port == 0) || (new_port > 65535))
                                 {
                                         LOG_ERROR("invalid port number %lu", new_port);
                                         return -1;
                                 }
                                 *port = (uint16_t) new_port;
-                        }
-                        else
-                        {
+
                                 /* We have an URI / IPv4 address */
                                 *ip = duplicate_string(input);
                                 if (*ip == NULL)
@@ -195,7 +212,6 @@ int parse_ip_address(char* input, char** ip, uint16_t* port, char** protocol)
                                         LOG_ERROR("unable to allocate memory for IP address");
                                         return -1;
                                 }
-                                *port = 0;
                         }
                 }
                 else
