@@ -577,6 +577,8 @@ static void* network_tester_main_thread(void* ptr)
         }
         while (handshake_count < tester->config->handshake_test.iterations);
 
+cleanup:
+
         /* Print results */
         LOG_INFO("Test results:\r\n");
         timing_metrics_results results;
@@ -614,14 +616,13 @@ static void* network_tester_main_thread(void* ptr)
         /* Store results in file (when no output is requested, the fails gracefully) */
         ret = timing_metrics_write_to_file(tester->handshake_times);
         if (ret < 0)
-                ERROR_OUT("Error writing results to file");
+                LOG_ERROR("Error writing handshake_time results to file");
 
         /* Store results in file (when no output is requested, the fails gracefully) */
         ret = timing_metrics_write_to_file(tester->messsage_latency_times);
         if (ret < 0)
-                ERROR_OUT("Error writing results to file");
+                LOG_ERROR("Error writing message_latency results to file");
 
-cleanup:
         tester->return_code = -ret;
 
         /* Cleanup */
