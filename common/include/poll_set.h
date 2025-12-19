@@ -13,7 +13,7 @@
 #ifdef CONFIG_NET_SOCKETS_POLL_MAX
 #define NUM_FDS CONFIG_NET_SOCKETS_POLL_MAX
 #else
-#define NUM_FDS 30
+#define NUM_FDS 100
 #endif
 
 typedef struct poll_set
