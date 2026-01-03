@@ -3,7 +3,7 @@ option(ENABLE_ECHO_SERVER "Enable echo server" ON)
 option(ENABLE_TCP_CLIENT_STDIN_BRIDGE "Enable TCP client stdin bridge" ON)
 option(ENABLE_TLS_PROXY "Enable TLS proxy" ON)
 option(ENABLE_NETWORK_TESTER "Enable network tester" ON)
-option(ENABLE_HTTP_LIBS "Enable HTTP(S) libraries" ON) # required for Scale Service and QUEST lib
+option(ENABLE_HTTP_LIBS "Enable HTTP(S) libraries" OFF) # required for Scale Service and QUEST lib
 option(ENABLE_MANAGEMENT "Enable Scale management" OFF)
 option(ENABLE_QUEST_LIB "Enable QUEST lib" ON)
 
@@ -36,6 +36,10 @@ endif()
 # Network tester application
 if (ENABLE_NETWORK_TESTER)
         add_subdirectory(network_tester)
+endif()
+
+if (ENABLE_MANAGEMENT OR ENABLE_QUEST_LIB)
+        set(ENABLE_HTTP_LIBS ON)
 endif()
 
 # HTTP(S) Library
