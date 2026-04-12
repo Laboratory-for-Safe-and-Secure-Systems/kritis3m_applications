@@ -14,7 +14,7 @@
 #include "file_io.h"
 #include "timing_metrics.h"
 
-#if defined(__ZEPHYR__)
+#if defined(__ZEPHYR__) && defined(CONFIG_DISK_ACCESS)
 
 #include "sdcard_interface.h"
 
@@ -240,8 +240,6 @@ int timing_metrics_prepare_output_file(timing_metrics* metrics, char const* path
         return -1; /* Not implemented on Windows */
 
 #elif defined(__ZEPHYR__)
-        int ret = 0;
-
         if (metrics == NULL)
                 return 0; /* No error */
 
@@ -261,6 +259,9 @@ int timing_metrics_prepare_output_file(timing_metrics* metrics, char const* path
         }
         else
         {
+#ifdef CONFIG_DISK_ACCESS
+                int ret = 0;
+
                 if (metrics->output_file != NULL)
                         free(metrics->output_file);
 
@@ -315,6 +316,10 @@ int timing_metrics_prepare_output_file(timing_metrics* metrics, char const* path
                         LOG_ERROR_EX(*metrics->log_module, "Failed to disable SD card access: %d", ret);
 
                 return ret;
+#else
+                LOG_ERROR_EX(*metrics->log_module, "timing_metrics_prepare_output_file not implemented on non-Zephyr platforms.");
+                return -1; /* Not implemented on non-Zephyr platforms */
+#endif /* CONFIG_DISK_ACCESS */
         }
 
 #else
@@ -427,6 +432,7 @@ int timing_metrics_write_to_file(timing_metrics* metrics)
         }
         else
         {
+#ifdef CONFIG_DISK_ACCESS
                 /* Mount / Initializing SD card */
                 ret = sdcard_control(ENABLE_ACCESS_SDCARD);
                 if (ret != 0)
@@ -499,6 +505,10 @@ int timing_metrics_write_to_file(timing_metrics* metrics)
                         LOG_ERROR_EX(*metrics->log_module, "Failed to disable SD card access: %d", ret);
                         return -1;
                 }
+#else
+                LOG_ERROR_EX(*metrics->log_module, "SD card access not available.");
+                return -1;
+#endif /* CONFIG_DISK_ACCESS */
         }
 
         return ret;
